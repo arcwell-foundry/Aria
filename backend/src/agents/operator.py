@@ -233,7 +233,7 @@ class OperatorAgent(SkillAwareAgent):
                 # Determine friendly names for the required tools
                 tool_names = self._get_tool_names_for_category(required_category)
                 advisory = (
-                    f"Skipped {operation_type} — {tool_names} not connected. "
+                    f"Skipped {operation_type} - {tool_names} not connected. "
                     f"Connect it in Settings > Integrations."
                 )
                 logger.warning(

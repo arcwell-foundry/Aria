@@ -211,7 +211,7 @@ class HunterAgent(SkillAwareAgent):
         # OODA ACT: Log skill consideration before native execution
         await self._log_skill_consideration()
 
-        logger.warning("[HUNTER] execute() called — starting lead discovery")
+        logger.warning("[HUNTER] execute() called - starting lead discovery")
 
         # Extract team intelligence for LLM enrichment (optional, fail-open)
         self._team_intelligence: str = task.get("team_intelligence", "")
@@ -681,7 +681,7 @@ class HunterAgent(SkillAwareAgent):
         enriched = company.copy()
 
         # Default enrichment values used when external sources don't
-        # provide specific fields — ensures downstream consumers always
+        # provide specific fields - ensures downstream consumers always
         # find the keys they expect.
         default_technologies = ["Salesforce", "HubSpot", "Marketo"]
         default_linkedin = f"https://www.linkedin.com/company/{cache_key.replace('.', '')}"
@@ -728,7 +728,7 @@ class HunterAgent(SkillAwareAgent):
         except Exception as exc:
             logger.warning(f"LLM enrichment also failed for '{company_name}': {exc}")
 
-        # Strategy 3: Fallback — add minimal enrichment fields
+        # Strategy 3: Fallback - add minimal enrichment fields
         enriched["technologies"] = default_technologies
         enriched["linkedin_url"] = default_linkedin
         enriched["funding_stage"] = default_funding

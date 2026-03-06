@@ -1,5 +1,5 @@
 /**
- * BriefingTranscriptView — Organized sectioned view for text-only briefings.
+ * BriefingTranscriptView - Organized sectioned view for text-only briefings.
  *
  * Parses the briefing rich_content and groups cards into collapsible sections:
  * Summary, Priority Actions, Today's Meetings, Email Summary,
@@ -66,20 +66,82 @@ function groupContent(richContent: RichContent[]): GroupedContent {
             result.leads = data.leads;
           }
 
-          // Extract overdue tasks as alert-style items
+          // Extract overdue tasks, sort by most overdue first, group by contact
           const tasks = data.tasks ?? { overdue: [], due_today: [] };
-          for (const t of tasks.overdue ?? []) {
+          const overdueItems = (tasks.overdue ?? []).map((t: Record<string, unknown>) => {
+            let daysOverdue = 0;
+            if (t.due_at) {
+              const due = new Date(t.due_at as string);
+              daysOverdue = Math.max(0, Math.floor((Date.now() - due.getTime()) / 86400000));
+            }
+            return { ...t, _daysOverdue: daysOverdue };
+          });
+          // Sort by most overdue first
+          overdueItems.sort((a: { _daysOverdue: number }, b: { _daysOverdue: number }) => b._daysOverdue - a._daysOverdue);
+
+          // Group tasks by contact name (e.g. "Track: Rob Douglas" -> "Rob Douglas")
+          const contactGroups = new Map<string, typeof overdueItems>();
+          const ungrouped: typeof overdueItems = [];
+          for (const t of overdueItems) {
+            const taskName = (t.task as string) ?? '';
+            const trackMatch = taskName.match(/^Track:\s*(.+)/i);
+            const contactName = trackMatch ? trackMatch[1].trim() : null;
+            if (contactName) {
+              const existing = contactGroups.get(contactName) ?? [];
+              existing.push(t);
+              contactGroups.set(contactName, existing);
+            } else {
+              ungrouped.push(t);
+            }
+          }
+
+          // Render grouped contacts as single cards
+          for (const [contactName, groupTasks] of contactGroups) {
+            if (groupTasks.length >= 2) {
+              const maxOverdue = Math.max(...groupTasks.map((gt: { _daysOverdue: number }) => gt._daysOverdue));
+              const taskNames = groupTasks.map((gt: Record<string, unknown>) => (gt.task as string)?.replace(/^Track:\s*/i, '') ?? 'Unknown task');
+              result.priorityActions.push({
+                type: 'alert_card',
+                data: {
+                  id: `grouped-${contactName}`,
+                  company_name: '',
+                  headline: contactName,
+                  summary: `${groupTasks.length} follow-ups overdue (${maxOverdue} days)\n${taskNames.map((n: string) => `- ${n}`).join('\n')}`,
+                  severity: 'high',
+                },
+              });
+            } else {
+              // Single task for this contact, render normally
+              const t = groupTasks[0];
+              const overdueSuffix = t._daysOverdue > 0 ? ` (${t._daysOverdue} days overdue)` : '';
+              result.priorityActions.push({
+                type: 'alert_card',
+                data: {
+                  id: t.id as string,
+                  company_name: '',
+                  headline: `Overdue: ${(t.task as string) ?? 'Unknown task'}`,
+                  summary: `Priority: ${(t.priority as string) ?? 'high'}${overdueSuffix}`,
+                  severity: 'high',
+                },
+              });
+            }
+          }
+
+          // Render ungrouped overdue tasks individually (sorted by most overdue)
+          for (const t of ungrouped) {
+            const overdueSuffix = t._daysOverdue > 0 ? ` (${t._daysOverdue} days overdue)` : '';
             result.priorityActions.push({
               type: 'alert_card',
               data: {
-                id: t.id,
+                id: t.id as string,
                 company_name: '',
-                headline: `Overdue: ${t.task ?? 'Unknown task'}`,
-                summary: `Priority: ${t.priority ?? 'high'}. Due: ${t.due_at ?? ''}`,
+                headline: `Overdue: ${(t.task as string) ?? 'Unknown task'}`,
+                summary: `Priority: ${(t.priority as string) ?? 'high'}${overdueSuffix}`,
                 severity: 'high',
               },
             });
           }
+
           for (const t of tasks.due_today ?? []) {
             result.priorityActions.push({
               type: 'alert_card',
@@ -93,9 +155,18 @@ function groupContent(richContent: RichContent[]): GroupedContent {
             });
           }
 
-          // Extract meetings from briefing data
+          // Extract meetings from briefing data - filter to today only
           const calendar = data.calendar ?? { meeting_count: 0, key_meetings: [] };
+          const todayStr = new Date().toISOString().slice(0, 10);
           for (const m of calendar.key_meetings ?? []) {
+            // Skip meetings that aren't today
+            const meetingTime = m.time ?? '';
+            if (meetingTime && !meetingTime.startsWith(todayStr)) {
+              // Check if the time looks like a full date string (contains a date portion)
+              // If it's just a time like "10:00 AM", assume it's today and include it
+              const looksLikeDate = /^\d{4}-\d{2}-\d{2}/.test(meetingTime);
+              if (looksLikeDate) continue;
+            }
             // Only add if not already present as a standalone meeting_card
             const alreadyPresent = result.meetings.some(
               (mc) => {
@@ -165,7 +236,7 @@ export function BriefingTranscriptView({ summary, richContent }: BriefingTranscr
 
   return (
     <div className="space-y-0">
-      {/* Summary — always visible, not collapsible */}
+      {/* Summary - always visible, not collapsible */}
       {summary && (
         <div className="pb-3 mb-1 border-b border-[var(--border)]/40">
           <p className="text-sm leading-relaxed text-[var(--text-primary)] font-light">{summary}</p>
@@ -248,12 +319,7 @@ export function BriefingTranscriptView({ summary, richContent }: BriefingTranscr
         )}
       </BriefingSection>
 
-      {/* Other uncategorized cards (if any) */}
-      {grouped.other.length > 0 && (
-        <div className="pt-2">
-          <RichContentRenderer items={grouped.other} />
-        </div>
-      )}
+      {/* Other items intentionally not rendered - all briefing content is consumed by sections above */}
     </div>
   );
 }
@@ -392,7 +458,7 @@ function EmailSummaryContent({ data }: { data: NonNullable<BriefingCardData['ema
 }
 
 // ---------------------------------------------------------------------------
-// Leads section content — mirrors BriefingCard leads section
+// Leads section content - mirrors BriefingCard leads section
 // ---------------------------------------------------------------------------
 
 function LeadsSectionContent({ data }: { data: NonNullable<BriefingCardData['leads']> }) {

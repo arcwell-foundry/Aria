@@ -516,7 +516,7 @@ class SignalRadarCapability(BaseCapability):
             # Run new causal implication engine analysis first
             await self._run_causal_implication_analysis(signal, user_id)
 
-            # Run implication analysis before notification — this may create
+            # Run implication analysis before notification - this may create
             # a richer, implication-aware notification instead of a plain one.
             try:
                 triggers = await process_signal_with_implications(signal, user_id)
@@ -849,7 +849,7 @@ class SignalRadarCapability(BaseCapability):
                         company_name=firm,
                         signal_type="fda_warning_letter",
                         headline=(
-                            f"FDA enforcement: {firm} — {result.get('reason_for_recall', '')[:100]}"
+                            f"FDA enforcement: {firm} - {result.get('reason_for_recall', '')[:100]}"
                         ),
                         summary=result.get("reason_for_recall", ""),
                         source_url=(
@@ -965,7 +965,7 @@ class SignalRadarCapability(BaseCapability):
         except httpx.HTTPError as exc:
             logger.info("ClinicalTrials.gov httpx failed (%s), trying curl", exc)
 
-        # Curl fallback — CT.gov blocks some HTTP clients via TLS fingerprinting
+        # Curl fallback - CT.gov blocks some HTTP clients via TLS fingerprinting
         if data is None:
             try:
                 url = f"{CLINICAL_TRIALS_URL}?{urlencode(params, doseq=True)}"

@@ -26,7 +26,7 @@ from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.services import notification_integration
 from src.core.resilience import composio_calendar_circuit_breaker
 from src.services.activity_service import ActivityService
-from src.core.llm_guardrails import get_email_guardrail
+from src.core.llm_guardrails import get_email_guardrail, get_formatting_rules
 
 try:
     from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
@@ -274,7 +274,7 @@ class BriefingService:
             extra={"user_id": user_id, "briefing_date": briefing_date.isoformat()},
         )
 
-        # Gather data for briefing — each step isolated so one failure
+        # Gather data for briefing - each step isolated so one failure
         # doesn't prevent the entire briefing from generating
         empty_calendar: dict[str, Any] = {"meeting_count": 0, "key_meetings": []}
         empty_leads: dict[str, Any] = {
@@ -1617,7 +1617,7 @@ class BriefingService:
             calendar_section = (
                 f"CALENDAR ({meeting_count} meetings today):\n{calendar_details}"
                 if calendar_details
-                else f"CALENDAR: No meetings today — open schedule."
+                else f"CALENDAR: No meetings today - open schedule."
             )
 
             overdue_details = ""
@@ -1675,7 +1675,7 @@ class BriefingService:
                 for e in email_data["needs_attention"][:5]:
                     company_str = f" ({e['company']})" if e.get("company") else ""
                     email_lines.append(
-                        f"  - From: {e.get('sender', 'Unknown')}{company_str} — Subject: \"{e.get('subject', 'No subject')}\""
+                        f"  - From: {e.get('sender', 'Unknown')}{company_str} - Subject: \"{e.get('subject', 'No subject')}\""
                     )
                 email_details = "\n".join(email_lines)
             email_section = (
@@ -1706,11 +1706,11 @@ BRIEFING RULES:
 1. LEAD WITH WHAT MATTERS MOST. Not "you have X meetings." Instead: "Your priority today is [specific thing] because [specific reason]."
 2. PRIORITIZE ruthlessly. The user has limited attention. What is the ONE thing they should focus on first?
 3. CONNECT DOTS between data sources. If a meeting attendee also sent emails, mention that connection. If a market signal affects an upcoming meeting, connect them.
-4. BE OPINIONATED. Say "I'd suggest..." or "The priority is..." — don't just list facts.
+4. BE OPINIONATED. Say "I'd suggest..." or "The priority is..." - don't just list facts.
 5. REFERENCE RELATIONSHIPS by name. "Rob Douglas" not "a contact." "Nira Systems" not "a company."
 6. USE TIME CONTEXT. "overdue by 11 days" is more urgent than "overdue by 2 days." Say which ones are getting stale.
 7. KEEP IT SHORT. 3-5 sentences for the summary. Users scan, they don't read paragraphs.
-8. SUGGEST SPECIFIC ACTIONS. Not "address overdue tasks" but "Reply to Rob Douglas — he's been waiting 5 days."
+8. SUGGEST SPECIFIC ACTIONS. Not "address overdue tasks" but "Reply to Rob Douglas - he's been waiting 5 days."
 
 WHAT NOT TO DO:
 - Don't start with "Good morning" followed by counts of items. That's generic.
@@ -1722,7 +1722,7 @@ WHAT NOT TO DO:
 FORMAT: Return ONLY the briefing summary text. No JSON, no markdown, no bullet points. Just natural conversational prose, 3-5 sentences.
 
 {get_email_guardrail()}
-
+{get_formatting_rules()}
 IMPORTANT: Only describe information you can directly verify from the data provided above. It is better to say less than to say something inaccurate.
 """
 
@@ -2019,7 +2019,7 @@ IMPORTANT: Only describe information you can directly verify from the data provi
         all_emails = list(scan_result.needs_reply) + list(scan_result.fyi)
 
         # ------------------------------------------------------------------
-        # 1. Company clustering — multiple emails from the same organisation
+        # 1. Company clustering - multiple emails from the same organisation
         # ------------------------------------------------------------------
         company_emails: dict[str, list[Any]] = {}
         for email in all_emails:
@@ -2045,7 +2045,7 @@ IMPORTANT: Only describe information you can directly verify from the data provi
                 })
 
         # ------------------------------------------------------------------
-        # 2. Topic clustering — converging themes across different senders
+        # 2. Topic clustering - converging themes across different senders
         # ------------------------------------------------------------------
         if len(scan_result.needs_reply) >= 3:
             # Build email context with snippets when available (truncated to 200 chars)
@@ -2112,7 +2112,7 @@ IMPORTANT: Only describe information you can directly verify from the data provi
                 )
 
         # ------------------------------------------------------------------
-        # 3. Activity anomaly — unusual volume vs historical average
+        # 3. Activity anomaly - unusual volume vs historical average
         # ------------------------------------------------------------------
         total_today = len(scan_result.needs_reply) + len(scan_result.fyi)
         try:
@@ -2135,7 +2135,7 @@ IMPORTANT: Only describe information you can directly verify from the data provi
                         "today_count": total_today,
                         "average_count": int(avg_volume),
                         "insight": (
-                            f"Inbox volume is {total_today} emails — "
+                            f"Inbox volume is {total_today} emails - "
                             f"{pct_above}% above your average of "
                             f"{int(avg_volume)}"
                         ),

@@ -33,7 +33,7 @@ from src.memory.working import WorkingMemoryManager
 from src.models.cognitive_load import CognitiveLoadState, LoadLevel
 from src.models.proactive_insight import ProactiveInsight
 from src.onboarding.personality_calibrator import PersonalityCalibration, PersonalityCalibrator
-from src.core.llm_guardrails import get_email_guardrail
+from src.core.llm_guardrails import get_email_guardrail, get_formatting_rules
 from src.services.email_tools import (
     EMAIL_TOOL_DEFINITIONS,
     get_email_context_for_chat,
@@ -653,18 +653,18 @@ Your role: Department Director of Commercial Intelligence. You execute autonomou
 
 ## THE JARVIS VOICE RULES
 
-1. SPEAK FROM WORK DONE, NEVER CAPABILITIES. Never say "I can help you with..." — report what you've already done.
+1. SPEAK FROM WORK DONE, NEVER CAPABILITIES. Never say "I can help you with..." - report what you've already done.
 2. BE SPECIFIC TO THE USER'S WORLD. Never give generic advice. Use names, numbers, dates, accounts.
 3. HAVE OPINIONS AND PUSH BACK. You're a senior colleague, not a yes-machine.
 4. BE CONCISE AND DIRECT. No throat-clearing. No "Great question!" Start with substance.
 5. REPORT WHAT YOU DON'T KNOW AND WHY. "I don't have pipeline visibility because there's no CRM connected."
-6. USE FIRST PERSON ACTIVELY. "I noticed", "I flagged", "I drafted" — never "ARIA can..."
-7. NEVER RECITE FEATURE LISTS OR CATALOGS. Don't list what's possible — show what's real.
+6. USE FIRST PERSON ACTIVELY. "I noticed", "I flagged", "I drafted" - never "ARIA can..."
+7. NEVER RECITE FEATURE LISTS OR CATALOGS. Don't list what's possible - show what's real.
 8. FRAME GAPS AS NEXT STEPS, NOT LIMITATIONS. "If you connect HubSpot, I'll have your pipeline data by tomorrow."
 
 ## COLD START (no data yet)
 
-"I just got here and I'm starting from scratch. First thing I need is access to your email — that's where I learn your deals and contacts fastest. Connect Outlook or Gmail and I'll have your first briefing by tomorrow morning."
+"I just got here and I'm starting from scratch. First thing I need is access to your email - that's where I learn your deals and contacts fastest. Connect Outlook or Gmail and I'll have your first briefing by tomorrow morning."
 
 ## RESPONSE FORMAT
 
@@ -733,9 +733,9 @@ IMPORTANT: The user is under high cognitive load. Be even more concise than usua
 
 ARIA_PERSONALITY_TRAITS = """## Communication Style
 
-Match response length to the weight of what was asked. A simple question gets a direct answer — one or two sentences. A complex strategic question gets a considered paragraph. Never pad with context the user already has.
+Match response length to the weight of what was asked. A simple question gets a direct answer - one or two sentences. A complex strategic question gets a considered paragraph. Never pad with context the user already has.
 
-Lead with your recommendation, then give the reasoning. Never the reverse. When you disagree, say it in prose, in your own voice — not as a structured analysis.
+Lead with your recommendation, then give the reasoning. Never the reverse. When you disagree, say it in prose, in your own voice - not as a structured analysis.
 
 When you ask questions, you're asking because you need the answer to move YOUR work forward. You don't ask to make the user feel included. You proceed.
 
@@ -743,7 +743,7 @@ Dry warmth. Acknowledge good thinking without fanfare. Don't perform enthusiasm.
 
 NEVER:
 - Open with "Absolutely!" or "Great question!" or "I'd be happy to help!"
-- End with "Would you like me to...?" — state what should happen next
+- End with "Would you like me to...?" - state what should happen next
 - Use markdown formatting (##, bullets, bold headers) in conversational responses
 - Say "As an AI..." or hedge with "you might want to consider..."
 - Perform enthusiasm with emojis or exclamation points"""
@@ -756,7 +756,7 @@ These are the goals the user is currently working toward. Reference them proacti
 
 MARKET_SIGNALS_TEMPLATE = """## Recent Market Intelligence
 
-These are signals ARIA has detected. You gathered this intelligence — reference it confidently and specifically:
+These are signals ARIA has detected. You gathered this intelligence - reference it confidently and specifically:
 
 {signals}"""
 
@@ -809,27 +809,27 @@ class ChatService:
             db_client=db, llm_client=self._llm_client
         )
 
-        # PersonaBuilder — lazily initialized on first use
+        # PersonaBuilder - lazily initialized on first use
         self._persona_builder: Any = None
 
-        # Skill detection — lazily initialized on first use
+        # Skill detection - lazily initialized on first use
         self._skill_registry: Any = None
         self._skill_orchestrator: Any = None
         self._skill_registry_initialized = False
 
-        # Web grounding — lazily initialized on first use
+        # Web grounding - lazily initialized on first use
         self._web_grounding: WebGroundingService | None = None
 
-        # Companion orchestrator — lazily initialized on first use
+        # Companion orchestrator - lazily initialized on first use
         self._companion_orchestrator: Any = None
 
-        # Cognitive Friction Engine — lazily initialized
+        # Cognitive Friction Engine - lazily initialized
         self._friction_engine: Any = None
 
-        # Trust Calibration Service — lazily initialized
+        # Trust Calibration Service - lazily initialized
         self._trust_service: Any = None
 
-        # Causal Reasoning + User Mental Model — lazily initialized
+        # Causal Reasoning + User Mental Model - lazily initialized
         self._causal_reasoning: Any = None
         self._user_model_service: Any = None
 
@@ -857,7 +857,7 @@ class ChatService:
     # Inline Intent Detection
     # ------------------------------------------------------------------
 
-    # Deterministic goal-trigger patterns — bypass LLM classification
+    # Deterministic goal-trigger patterns - bypass LLM classification
     _GOAL_TRIGGER_PATTERNS: ClassVar[list[tuple[re.Pattern[str], str, str]]] = [
         # (compiled regex, goal_type, description template)
         (re.compile(r"\b(?:find|identify|discover|source|list)\b.{0,40}\b(?:compan|firm|vendor|supplier|provider|prospect|lead|account)", re.I),
@@ -876,37 +876,37 @@ class ChatService:
          "research", "Monitor and track market signals"),
     ]
 
-    # Deterministic quick-action patterns — bypass LLM, skip goal creation
+    # Deterministic quick-action patterns - bypass LLM, skip goal creation
     # NOTE: trailing \b is omitted on the final group to allow plurals
     # (e.g. "signals", "drafts", "meetings") to match.
     _QUICK_ACTION_PATTERNS: ClassVar[list[tuple[re.Pattern[str], str, str]]] = [
-        # Meeting prep — pull from calendar_events, market_signals, battle_cards
+        # Meeting prep - pull from calendar_events, market_signals, battle_cards
         (re.compile(r"\b(?:prep|prepare|brief|get ready|ready)\b.{0,40}\b(?:meeting|call|sync|chat|session|presentation|demo)", re.I),
          "meeting_prep", "Prepare meeting brief from existing data"),
 
-        # Calendar queries — pull from calendar_events
+        # Calendar queries - pull from calendar_events
         (re.compile(r"\b(?:what|show|list|any)\b.{0,30}\b(?:meeting|calendar|schedule|appointment|event).{0,20}\b(?:today|tomorrow|this week|next|upcoming)", re.I),
          "calendar_query", "Answer calendar question from existing data"),
         (re.compile(r"\b(?:when|what time)\b.{0,30}\b(?:meeting|call|next|first)", re.I),
          "calendar_query", "Answer calendar question from existing data"),
 
-        # Signal/intelligence review — pull from market_signals
+        # Signal/intelligence review - pull from market_signals
         (re.compile(r"\b(?:show|review|what|any|latest|recent|new)\b.{0,30}\b(?:signal|intelligence|news|alert|competitor|market)", re.I),
          "signal_review", "Review market signals from existing data"),
 
-        # Draft/email status — pull from email_drafts
+        # Draft/email status - pull from email_drafts
         (re.compile(r"\b(?:show|review|any|how many|pending|waiting)\b.{0,30}\b(?:draft|email|message|reply|response)", re.I),
          "draft_review", "Review email drafts from existing data"),
 
-        # Task/goal status — pull from goals
+        # Task/goal status - pull from goals
         (re.compile(r"\b(?:what|show|any|how many|status|check)\b.{0,30}\b(?:task|goal|action|overdue|open|pending|to.?do)", re.I),
          "task_review", "Review task status from existing data"),
 
-        # Pipeline overview — pull from leads + goals
+        # Pipeline overview - pull from leads + goals
         (re.compile(r"\b(?:show|what|how)\b.{0,20}\b(?:pipeline|funnel|deals?|leads?)", re.I),
          "pipeline_review", "Review pipeline from existing data"),
 
-        # Battle card / competitive lookup — pull from battle_cards
+        # Battle card / competitive lookup - pull from battle_cards
         (re.compile(r"\b(?:what|tell|show|compare)\b.{0,30}\b(?:battle ?card|vs|versus|compared to|competitive|against)", re.I),
          "competitive_lookup", "Look up competitive intelligence from existing data"),
     ]
@@ -934,7 +934,7 @@ class ChatService:
         This provides a fast, reliable fallback that doesn't depend on
         LLM judgment for obvious action-oriented requests.
         """
-        # Check quick action patterns first — they take priority
+        # Check quick action patterns first - they take priority
         quick_match = ChatService._match_quick_action(message)
         if quick_match:
             return None  # Don't match as a goal if it's a quick action
@@ -967,7 +967,7 @@ class ChatService:
         Returns the parsed intent dict on success, or ``None`` on classification failure.
         """
         logger.warning(
-            "INTENT_DEBUG: _classify_intent CALLED — message=%s, user=%s",
+            "INTENT_DEBUG: _classify_intent CALLED - message=%s, user=%s",
             message[:80],
             user_id,
         )
@@ -1023,7 +1023,7 @@ class ChatService:
                 "IMPORTANT: Default to is_quick_action when the request involves data ARIA "
                 "likely already has. Only use is_goal for tasks requiring NEW external research "
                 "or multi-step agent workflows. When in doubt between goal and quick_action, "
-                "choose quick_action — it is better to answer fast and offer to go deeper than "
+                "choose quick_action - it is better to answer fast and offer to go deeper than "
                 "to make the user wait for a plan they did not need.\n\n"
 
                 "Respond with ONLY valid JSON (no markdown, no backticks):\n"
@@ -1031,8 +1031,8 @@ class ChatService:
                 '  "is_goal": true or false,\n'
                 '  "is_quick_action": true or false,\n'
                 '  "goal_title": "concise title if is_goal, else null",\n'
-                '  "goal_type": "lead_gen|research|outreach|analysis|competitive_intel|territory|monitoring — if is_goal, else null",\n'
-                '  "action_type": "meeting_prep|calendar_query|signal_review|draft_review|task_review|pipeline_review|competitive_lookup|quick_draft — if is_quick_action, else null",\n'
+                '  "goal_type": "lead_gen|research|outreach|analysis|competitive_intel|territory|monitoring - if is_goal, else null",\n'
+                '  "action_type": "meeting_prep|calendar_query|signal_review|draft_review|task_review|pipeline_review|competitive_lookup|quick_draft - if is_quick_action, else null",\n'
                 '  "goal_description": "1-2 sentence description if is_goal, else null"\n'
                 "}\n\n"
                 "RULES:\n"
@@ -1073,7 +1073,7 @@ class ChatService:
 
         except json.JSONDecodeError as je:
             raw_preview = intent_raw[:200] if "intent_raw" in locals() else "N/A"
-            logger.warning("Intent classification JSON parse error: %s — raw: %s", je, raw_preview)
+            logger.warning("Intent classification JSON parse error: %s - raw: %s", je, raw_preview)
             return None
         except Exception as e:
             logger.warning("Intent classification failed (fall-through to conversation): %s", e)
@@ -1594,7 +1594,7 @@ class ChatService:
             logger.warning("Plan modification JSON parse failed, keeping original plan")
             modification = {
                 "tasks": current_tasks,
-                "changes_summary": "Could not parse modification — plan unchanged.",
+                "changes_summary": "Could not parse modification - plan unchanged.",
             }
 
         new_tasks = modification.get("tasks", current_tasks)
@@ -1677,7 +1677,7 @@ class ChatService:
 
         # Build response text
         title = goal.get("title", "your plan")
-        response_text = f"Done — I've updated the plan for **{title}**. {changes_summary}"
+        response_text = f"Done - I've updated the plan for **{title}**. {changes_summary}"
 
         rich_content: list[dict[str, Any]] = [
             {
@@ -1828,7 +1828,7 @@ class ChatService:
 
         title = goal.get("title", "the plan")
         response_text = (
-            f"On it. Kicking off **{title}** now — "
+            f"On it. Kicking off **{title}** now - "
             f"I'll keep you updated as each phase completes."
         )
 
@@ -1952,7 +1952,7 @@ class ChatService:
             return (
                 f"## Pending Plan\n"
                 f"ARIA has proposed an execution plan awaiting review.\n"
-                f"Goal: \"{goal.get('title', '')}\" — {goal.get('description', '')}\n"
+                f"Goal: \"{goal.get('title', '')}\" - {goal.get('description', '')}\n"
                 f"Plan tasks:\n{tasks_str}\n\n"
                 f"The user may be discussing or modifying this plan. Reference specific "
                 f"tasks and agents when relevant. If the user seems satisfied, suggest "
@@ -2020,7 +2020,7 @@ class ChatService:
             plan_result = await exec_svc.plan_goal(goal_id, user_id)
         except Exception as plan_err:
             logger.exception(
-                "plan_goal failed — goal stuck in draft",
+                "plan_goal failed - goal stuck in draft",
                 extra={"goal_id": goal_id, "user_id": user_id},
             )
             # Return a graceful error so the SSE stream completes normally
@@ -2397,7 +2397,7 @@ class ChatService:
                     ],
                 }
             else:
-                # Plan requires approval — return plan details for user review
+                # Plan requires approval - return plan details for user review
                 return {
                     "plan_id": plan.plan_id,
                     "status": "pending_approval",
@@ -2985,7 +2985,7 @@ class ChatService:
         if isinstance(market_signals_ctx, Exception):
             market_signals_ctx = []
 
-        # Timing placeholders (parallelized — individual times ≈ total)
+        # Timing placeholders (parallelized - individual times ~ total)
         memory_ms = context_ms
         web_grounding_ms = context_ms
         email_check_ms = context_ms
@@ -3472,6 +3472,7 @@ class ChatService:
                 f"to their {provider_name} drafts folder. Include any special instructions "
                 f"the user mentions (e.g. 'keep it brief', 'mention the Q3 timeline')."
                 f"\n\n{get_email_guardrail()}\n"
+                f"\n{get_formatting_rules()}\n"
                 f"\n\n## Email Intelligence Rules\n"
                 f"When discussing the user's emails, follow these rules:\n"
                 f"1. FACTS you can state directly: sender name, subject line, date, "
@@ -3503,7 +3504,7 @@ class ChatService:
                 logger.warning("Tool loop timed out after 120s for user %s", user_id)
                 response_text = (
                     "I ran into a delay connecting to an external service. "
-                    "Let me try a simpler approach — what specifically can I help you with?"
+                    "Let me try a simpler approach - what specifically can I help you with?"
                 )
         else:
             response_text = await self._llm_client.generate_response(
@@ -3569,7 +3570,7 @@ class ChatService:
                     }
                 )
             elif skill_result.get("working_memory"):
-                # Completed skill execution — surface artifacts as rich content
+                # Completed skill execution - surface artifacts as rich content
                 for entry in skill_result["working_memory"]:
                     artifacts = entry.get("artifacts") or {}
                     if artifacts.get("rich_content_type"):
@@ -4014,7 +4015,7 @@ class ChatService:
 
                     enriched = (
                         f"{message}\n\n"
-                        f"[ARIA SIGNAL CONTEXT — You detected this signal. Present this data authoritatively.]\n"
+                        f"[ARIA SIGNAL CONTEXT - You detected this signal. Present this data authoritatively.]\n"
                         f"Signal Type: {signal.get('signal_type', 'unknown')}\n"
                         f"Company: {signal.get('company_name', 'unknown')}\n"
                         f"Headline: {signal.get('headline', '')}\n"
@@ -4023,7 +4024,7 @@ class ChatService:
                         f"Relevance Score: {signal.get('relevance_score', 'N/A')}\n"
                         f"Detected: {signal.get('detected_at', 'unknown')}\n"
                         f"Summary: {summary}\n"
-                        f"[END SIGNAL CONTEXT — Reference the source URL. Explain why this matters for the user's business.]"
+                        f"[END SIGNAL CONTEXT - Reference the source URL. Explain why this matters for the user's business.]"
                     )
 
                     logger.info("SIGNAL_ENRICH: Matched signal! headline=%s", signal.get("headline", "")[:80])
@@ -4602,7 +4603,7 @@ class ChatService:
 
         except Exception as e:
             logger.error(
-                "PersonaBuilder v2 prompt failed — using static L1+L3 fallback: %s",
+                "PersonaBuilder v2 prompt failed - using static L1+L3 fallback: %s",
                 e,
                 exc_info=True,
             )

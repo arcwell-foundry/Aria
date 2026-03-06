@@ -383,7 +383,7 @@ class SkillAwareAgent(BaseAgent):
                         ),
                     )
 
-            # No orchestrator available — fall back to native
+            # No orchestrator available - fall back to native
             return await self.execute(task)
 
         except Exception as e:
@@ -425,7 +425,7 @@ class SkillAwareAgent(BaseAgent):
             )
             return await self.execute(task)
 
-        # Step 2: Simple path — single skill, bypass full orchestration
+        # Step 2: Simple path - single skill, bypass full orchestration
         if analysis.is_simple and len(analysis.recommended_skills) == 1:
             skill_path = analysis.recommended_skills[0]
             await self._log_skill_decision(task, analysis, f"simple_skill:{skill_path}")
@@ -435,7 +435,7 @@ class SkillAwareAgent(BaseAgent):
             )
             return await self._execute_simple_skill(task, skill_path)
 
-        # Step 3: Complex path — multi-skill orchestration
+        # Step 3: Complex path - multi-skill orchestration
         await self._log_skill_decision(task, analysis, "orchestrator")
 
         if self.skill_orchestrator is None or self.skill_index is None:

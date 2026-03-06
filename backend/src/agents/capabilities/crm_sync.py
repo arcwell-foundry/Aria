@@ -311,7 +311,7 @@ class CRMDeepSyncCapability(BaseCapability):
 
                 lead = lead_resp.data[0] if lead_resp and lead_resp.data else None
                 if not lead:
-                    # No local lead — skip (will be created via DeepSyncService)
+                    # No local lead - skip (will be created via DeepSyncService)
                     continue
                 lead_id = str(lead["id"])
                 updates: dict[str, Any] = {}
@@ -348,7 +348,7 @@ class CRMDeepSyncCapability(BaseCapability):
                             resolved_value=resolved_crm_value,
                         )
                     else:
-                        # ARIA wins — queue push for this field later
+                        # ARIA wins - queue push for this field later
                         conflicts_resolved += 1
                         await audit.log_conflict(
                             user_id=user_id,

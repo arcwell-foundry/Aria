@@ -1,4 +1,4 @@
-"""Companion Orchestrator — US-810.
+"""Companion Orchestrator - US-810.
 
 Unifies all companion subsystems (personality, theory of mind, emotional
 intelligence, metacognition, narrative identity, digital twin, strategic
@@ -8,7 +8,7 @@ enriches chat response generation.
 Design decisions:
 - All subsystems are optional and lazy-initialized via _ensure_initialized().
 - build_full_context() runs 9 gatherer coroutines in parallel with a 2s timeout.
-- Any subsystem failure is logged and added to failed_subsystems — never propagated.
+- Any subsystem failure is logged and added to failed_subsystems - never propagated.
 - CompanionContext.to_system_prompt_sections() renders non-empty sections only.
 """
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# CompanionContext — the unified context dataclass
+# CompanionContext - the unified context dataclass
 # ---------------------------------------------------------------------------
 
 
@@ -370,7 +370,7 @@ class CompanionOrchestrator:
         return ctx
 
     # ------------------------------------------------------------------
-    # Individual gatherers — each wraps one subsystem
+    # Individual gatherers - each wraps one subsystem
     # ------------------------------------------------------------------
 
     async def _gather_calibration(self, user_id: str, ctx: CompanionContext) -> None:
@@ -450,7 +450,7 @@ class CompanionOrchestrator:
         for topic, assessment in (assessments or {}).items():
             conf = assessment.confidence if hasattr(assessment, "confidence") else 0.0
             if conf < 0.5:
-                acks.append(f"Low confidence on '{topic}' ({conf:.0%}) — consider researching")
+                acks.append(f"Low confidence on '{topic}' ({conf:.0%}) - consider researching")
         ctx.uncertainty_acknowledgments = acks
 
     async def _gather_narrative(self, user_id: str, message: str, ctx: CompanionContext) -> None:
@@ -567,7 +567,7 @@ class CompanionOrchestrator:
                 triggers.append(
                     {
                         "type": "research_needed",
-                        "description": f"Low confidence on '{topic}' — research recommended",
+                        "description": f"Low confidence on '{topic}' - research recommended",
                         "priority": "low",
                     }
                 )
@@ -587,7 +587,7 @@ class CompanionOrchestrator:
 
         Only produces commands driven by companion subsystem state (strategic
         concerns, mental state, anniversaries).  Does NOT scan response text
-        for keywords — keyword-based navigation was removed to prevent
+        for keywords - keyword-based navigation was removed to prevent
         spurious auto-navigation when ARIA merely mentions a feature.
 
         Args:

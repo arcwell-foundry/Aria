@@ -531,7 +531,7 @@ class LinkedInIntelligenceCapability(BaseCapability):
         prompt = (
             "You are a LinkedIn content strategist for a life sciences sales professional.\n"
             "Generate exactly 3 post variations as a JSON array.\n\n"
-            f"Trigger: {trigger_type_str} — {trigger_source}\n"
+            f"Trigger: {trigger_type_str} - {trigger_source}\n"
             f"Content/Context: {content}\n"
             f"{therapeutic_context}"
             f"{voice_profile}\n"
@@ -567,7 +567,7 @@ class LinkedInIntelligenceCapability(BaseCapability):
                 messages=[{"role": "user", "content": prompt}],
                 system_prompt=(
                     "You are a LinkedIn content strategist for life sciences professionals. "
-                    "Output ONLY valid JSON — no markdown fences, no commentary."
+                    "Output ONLY valid JSON - no markdown fences, no commentary."
                 ),
                 temperature=0.7,
                 max_tokens=2000,

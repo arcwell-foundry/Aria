@@ -177,9 +177,9 @@ Return a JSON object:
 - "closed_question_count": int
 - "longest_monologue_seconds": float|null
 - "objection_handling_score": float|null (0-100)
-- "recommendations": [str] — specific, actionable coaching tips
-- "strengths": [str] — what the rep did well
-- "improvement_areas": [str] — areas to work on
+- "recommendations": [str] - specific, actionable coaching tips
+- "strengths": [str] - what the rep did well
+- "improvement_areas": [str] - areas to work on
 
 MEETING ANALYSIS:
 {analysis}"""

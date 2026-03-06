@@ -100,7 +100,7 @@ VERIFICATION_POLICIES: dict[str, VerificationPolicy] = {
 # Fallback system prompt when PersonaBuilder is unavailable
 # TODO: Replace with PersonaBuilder. See Jarvis Voice Rules in persona.py.
 _FALLBACK_SYSTEM_PROMPT = """\
-You are ARIA's Verifier — a skeptical, rigorous quality reviewer for life sciences \
+You are ARIA's Verifier - a skeptical, rigorous quality reviewer for life sciences \
 commercial outputs. Your job is to find problems, not to be encouraging.
 
 Rules:
@@ -108,7 +108,7 @@ Rules:
 - Every citation must reference a real, verifiable source.
 - Data older than 30 days must be flagged as stale.
 - Unsupported medical claims must be caught and reported.
-- When in doubt, flag it — false negatives are worse than false positives.
+- When in doubt, flag it - false negatives are worse than false positives.
 
 You must return a JSON object with exactly these fields:
 {
@@ -168,8 +168,8 @@ class VerifierAgent(BaseAgent):
         """Execute verification via the standard agent interface.
 
         Expects task dict with:
-            - agent_output: dict — the output to verify
-            - policy_name: str — key in VERIFICATION_POLICIES (default "RESEARCH_BRIEF")
+            - agent_output: dict - the output to verify
+            - policy_name: str - key in VERIFICATION_POLICIES (default "RESEARCH_BRIEF")
         """
         agent_output = task["agent_output"]
         policy_name = task.get("policy_name", "RESEARCH_BRIEF")
@@ -242,7 +242,7 @@ class VerifierAgent(BaseAgent):
         task_desc = (
             f"Critically verify agent output using policy '{policy.name}'. "
             f"Checks to perform: {checks_str}. "
-            f"You are a skeptical reviewer — assume nothing is correct until proven. "
+            f"You are a skeptical reviewer - assume nothing is correct until proven. "
             f"Flag any unsupported claims, hallucinated data, compliance risks, "
             f"or logical inconsistencies."
         )

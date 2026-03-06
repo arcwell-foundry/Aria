@@ -21,7 +21,7 @@ from typing import Any
 
 
 EMAIL_CONTEXT_RULES = """
-CRITICAL EMAIL DATA RULES — FOLLOW THESE EXACTLY:
+CRITICAL EMAIL DATA RULES - FOLLOW THESE EXACTLY:
 - You may have email METADATA (sender name, email address, subject line, count, classification).
 - You may or may NOT have email body content. Check each email entry below.
 - If an email entry says "Email Body: NOT AVAILABLE" or has no body content, you MUST NOT:
@@ -33,6 +33,18 @@ CRITICAL EMAIL DATA RULES — FOLLOW THESE EXACTLY:
 - For metadata-only emails, state ONLY factual information: sender name, company, email count, subject lines.
 - NEVER make up what an email says. If you don't have the body, say so or stay silent about the content.
 """
+
+
+FORMATTING_RULES = """
+FORMATTING RULES:
+- Never use em dashes (the long — character) or en dashes. Use regular dashes (-), commas, or periods instead.
+- Keep sentences concise and direct.
+"""
+
+
+def get_formatting_rules() -> str:
+    """Return formatting rules string for injection into LLM prompts."""
+    return FORMATTING_RULES
 
 
 def get_email_guardrail() -> str:

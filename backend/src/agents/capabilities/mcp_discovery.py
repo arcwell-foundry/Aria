@@ -1,4 +1,4 @@
-"""MCP Discovery capability — searches registries for MCP servers.
+"""MCP Discovery capability - searches registries for MCP servers.
 
 Used by the Scout agent's ``search_mcp_registries`` tool to find
 external MCP servers that can fill a capability gap.

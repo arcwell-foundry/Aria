@@ -54,6 +54,11 @@ litellm.set_verbose = False  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
+
+def _strip_dashes(text: str) -> str:
+    """Replace em/en dashes with regular dashes."""
+    return text.replace("\u2014", " - ").replace("\u2013", "-")
+
 # Default model - can be overridden per request
 DEFAULT_MODEL = "claude-sonnet-4-20250514"
 DEFAULT_MAX_TOKENS = 4096
@@ -160,7 +165,7 @@ def _translate_messages_for_litellm(
         role = msg.get("role", "user")
         content = msg.get("content")
 
-        # Simple string content — pass through
+        # Simple string content - pass through
         if isinstance(content, str):
             translated.append({"role": role, "content": content})
             continue
@@ -197,7 +202,7 @@ def _translate_messages_for_litellm(
                         "content": str(result_content),
                     })
                 else:
-                    # Unknown block type — treat as text
+                    # Unknown block type - treat as text
                     text_parts.append(str(block.get("text", block)))
 
             # Emit assistant message with tool_calls if present
@@ -330,7 +335,7 @@ class LLMClient:
         """
         self._api_key = settings.ANTHROPIC_API_KEY.get_secret_value()
         self._model = model
-        # Anthropic SDK client — used for extended thinking
+        # Anthropic SDK client - used for extended thinking
         self._client = anthropic.AsyncAnthropic(api_key=self._api_key)
         # LiteLLM model string for standard calls
         self._litellm_model = f"anthropic/{model}"
@@ -512,10 +517,10 @@ class LLMClient:
             except Exception:
                 logger.exception("Failed to record LLM usage for user %s", user_id)
 
-        return str(text_content)
+        return _strip_dashes(str(text_content))
 
     # ------------------------------------------------------------------
-    # generate_response — signature unchanged, now routes through LiteLLM
+    # generate_response - signature unchanged, now routes through LiteLLM
     # ------------------------------------------------------------------
 
     async def generate_response(
@@ -635,10 +640,10 @@ class LLMClient:
             except Exception:
                 logger.exception("Failed to record LLM usage for user %s", user_id)
 
-        return text_content
+        return _strip_dashes(text_content)
 
     # ------------------------------------------------------------------
-    # generate_response_with_tools — now routes through LiteLLM
+    # generate_response_with_tools - now routes through LiteLLM
     # ------------------------------------------------------------------
 
     async def generate_response_with_tools(
@@ -736,7 +741,7 @@ class LLMClient:
         message = choice.message
 
         # Extract text content
-        text = str(message.content or "")
+        text = _strip_dashes(str(message.content or ""))
 
         # Convert tool calls back to Anthropic format
         tool_calls = _openai_tool_calls_to_anthropic(message.tool_calls)
@@ -782,7 +787,7 @@ class LLMClient:
         )
 
     # ------------------------------------------------------------------
-    # generate_response_with_thinking — stays on Anthropic SDK
+    # generate_response_with_thinking - stays on Anthropic SDK
     # ------------------------------------------------------------------
 
     async def generate_response_with_thinking(
@@ -848,7 +853,7 @@ class LLMClient:
         # Ensure max_tokens is at least budget_tokens + 1024 for a reasonable text response.
         effective_max_tokens = max(max_tokens, budget_tokens + 1024)
 
-        # Build kwargs — no temperature when thinking is enabled
+        # Build kwargs - no temperature when thinking is enabled
         kwargs: dict[str, Any] = {
             "model": self._model,
             "max_tokens": effective_max_tokens,
@@ -935,13 +940,13 @@ class LLMClient:
                 logger.exception("Failed to record thinking usage for user %s", user_id)
 
         return LLMResponse(
-            text="\n".join(text_parts),
+            text=_strip_dashes("\n".join(text_parts)),
             thinking="\n".join(thinking_parts),
             usage=usage,
         )
 
     # ------------------------------------------------------------------
-    # stream_response — now routes through LiteLLM
+    # stream_response - now routes through LiteLLM
     # ------------------------------------------------------------------
 
     async def stream_response(
@@ -1025,6 +1030,7 @@ class LLMClient:
                 if chunk.choices and chunk.choices[0].delta:
                     delta_content = chunk.choices[0].delta.content
                     if delta_content:
+                        delta_content = _strip_dashes(delta_content)
                         yield delta_content
 
             latency_ms = int((time.time() - start) * 1000)

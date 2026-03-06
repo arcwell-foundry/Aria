@@ -1,7 +1,7 @@
 """Web Intelligence capability for ScoutAgent and AnalystAgent.
 
 Provides deep web scraping, competitor monitoring, SEC filing search,
-patent tracking, and press release discovery — all from public sources
+patent tracking, and press release discovery - all from public sources
 with no OAuth required. Extracted data flows into corporate_facts (for
 the knowledge graph) and market_signals (for alerting).
 
@@ -238,7 +238,7 @@ class WebIntelligenceCapability(BaseCapability):
     """Web intelligence: scraping, competitor monitoring, SEC/patent/PR search.
 
     Uses httpx for static pages and Playwright (headless) for JS-rendered
-    content. All data sources are public — no OAuth scopes required.
+    content. All data sources are public - no OAuth scopes required.
 
     Designed for ScoutAgent (signal detection, competitive intel) and
     AnalystAgent (deep research, filing analysis).
@@ -455,7 +455,7 @@ class WebIntelligenceCapability(BaseCapability):
                 )
 
                 if old_hash and old_hash != content_hash:
-                    # Page changed — extract summary of what changed
+                    # Page changed - extract summary of what changed
                     summary = self._summarise_page_change(path, content)
                     change = Change(
                         domain=domain,
@@ -482,7 +482,7 @@ class WebIntelligenceCapability(BaseCapability):
                     )
 
                 elif old_hash is None:
-                    # First snapshot — store baseline
+                    # First snapshot - store baseline
                     self._store_market_signal(
                         client=client,
                         user_id=user_id,

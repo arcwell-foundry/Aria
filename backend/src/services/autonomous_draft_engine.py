@@ -821,12 +821,12 @@ Do not include any text outside the JSON object."""
             except json.JSONDecodeError:
                 pass
 
-        # Step 4: If text still contains JSON artifacts, it's corrupted — don't save
+        # Step 4: If text still contains JSON artifacts, it's corrupted - don't save
         if text.startswith("{") and '"body"' in text:
             logger.error("JSON_PARSE_FAILURE: Could not extract body from JSON response")
             return {"subject": "", "body": "", "parsed": False, "error": "unparseable_json"}
 
-        # Step 5: Plain text response — use as-is
+        # Step 5: Plain text response - use as-is
         return {"subject": "", "body": text, "parsed": True}
 
     # ------------------------------------------------------------------
@@ -933,7 +933,7 @@ Do not include any text outside the JSON object."""
                                 meeting_time = meeting_time_str
 
                             if meeting_time > current_utc_time:
-                                # Meeting is in the FUTURE — draft should NOT say "already had"
+                                # Meeting is in the FUTURE - draft should NOT say "already had"
                                 if re.search(
                                     r'(already|just)\s+(had|finished|completed)',
                                     draft_body,
@@ -1130,7 +1130,7 @@ Do not include any text outside the JSON object."""
         # Calendar hallucination guardrail: inject if scheduling intent detected but no calendar data
         if self._detect_scheduling_intent(email) and not self._has_calendar_context(context):
             logger.info(
-                "CALENDAR_GUARDRAIL: Scheduling intent detected for thread %s but no calendar data — injecting guardrail instruction",
+                "CALENDAR_GUARDRAIL: Scheduling intent detected for thread %s but no calendar data - injecting guardrail instruction",
                 email.thread_id,
             )
             system_prompt += self._CALENDAR_GUARDRAIL_INSTRUCTION
@@ -1192,7 +1192,7 @@ Do not include any text outside the JSON object."""
 From: {email.sender_name} <{email.sender_email}>
 Subject: {email.subject}
 Urgency: {email.urgency}
-Body: {email.snippet if email.snippet else 'NOT AVAILABLE (metadata only — do not fabricate content)'}""")
+Body: {email.snippet if email.snippet else 'NOT AVAILABLE (metadata only - do not fabricate content)'}""")
 
         # Thread context
         if context.thread_context and context.thread_context.messages:
@@ -1247,7 +1247,7 @@ Uses emoji: {"Yes" if context.recipient_style.uses_emoji else "No"}""")
             sections.append(f"""=== TONE GUIDANCE ===
 {tone_guidance}""")
 
-        # Calendar context — full free/busy for scheduling emails
+        # Calendar context - full free/busy for scheduling emails
         if context.calendar_context and context.calendar_context.connected:
             cal = context.calendar_context
             all_meetings = cal.upcoming_meetings + cal.recent_meetings

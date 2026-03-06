@@ -1,13 +1,13 @@
-"""Compliance capability for ARIA — PHI/PII detection and Sunshine Act checking.
+"""Compliance capability for ARIA - PHI/PII detection and Sunshine Act checking.
 
 Provides code-based (regex) compliance scanning that runs independently of
 the LLM. Used as a pre-scan step by ComplianceGuardianSkill and can also
 be called directly by agents for real-time redaction.
 
 Key functions:
-- ``auto_redact(text)`` — Replace detected PHI/PII with [REDACTED] tokens
-- ``check_sunshine_act(interaction)`` — Flag Sunshine Act reporting requirements
-- ``ComplianceScanner.scan_text(text)`` — Full regex pre-scan with findings
+- ``auto_redact(text)`` - Replace detected PHI/PII with [REDACTED] tokens
+- ``check_sunshine_act(interaction)`` - Flag Sunshine Act reporting requirements
+- ``ComplianceScanner.scan_text(text)`` - Full regex pre-scan with findings
 
 Integration Checklist:
 - [x] Works with data_classification.py patterns (extends them for life sciences)
@@ -134,9 +134,9 @@ class ScanResult:
 # Pattern definitions
 # ---------------------------------------------------------------------------
 
-# PHI/PII regex patterns — compiled for performance
+# PHI/PII regex patterns - compiled for performance
 _PATTERNS: list[tuple[str, re.Pattern[str], ComplianceCategory, float, ComplianceAction]] = [
-    # Direct identifiers — highest confidence
+    # Direct identifiers - highest confidence
     (
         "SSN with dashes",
         re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
@@ -148,7 +148,7 @@ _PATTERNS: list[tuple[str, re.Pattern[str], ComplianceCategory, float, Complianc
         "SSN without dashes",
         re.compile(r"\b\d{9}\b"),
         ComplianceCategory.PII_SSN,
-        0.70,  # Lower confidence — could be other 9-digit numbers
+        0.70,  # Lower confidence - could be other 9-digit numbers
         ComplianceAction.REVIEW,
     ),
     (
@@ -194,7 +194,7 @@ _PATTERNS: list[tuple[str, re.Pattern[str], ComplianceCategory, float, Complianc
     ),
 ]
 
-# Drug name patterns — used for co-occurrence detection with names
+# Drug name patterns - used for co-occurrence detection with names
 # Common life sciences drug name patterns (brand names tend to be capitalized
 # single words ending in common suffixes)
 _DRUG_SUFFIXES = (
@@ -217,7 +217,7 @@ _MEDICAL_TERMS = re.compile(
     re.IGNORECASE,
 )
 
-# Simple name pattern — capitalized words that could be names
+# Simple name pattern - capitalized words that could be names
 _NAME_PATTERN = re.compile(r"\b[A-Z][a-z]{1,15}\s+[A-Z][a-z]{1,15}\b")
 
 # Sunshine Act trigger patterns
@@ -286,7 +286,7 @@ _SUNSHINE_PATTERNS: list[tuple[str, re.Pattern[str], ComplianceCategory, float]]
     ),
 ]
 
-# HCP role indicators — used to determine if Sunshine Act applies
+# HCP role indicators - used to determine if Sunshine Act applies
 _HCP_PATTERN = re.compile(
     r"\b(?:physician|doctor|Dr\.\s|MD\b|DO\b|PharmD|NP\b|PA\b|"
     r"nurse\s+practitioner|surgeon|oncologist|cardiologist|"
@@ -309,7 +309,7 @@ _HCP_PATTERN = re.compile(
 class ComplianceScanner:
     """Regex-based compliance scanner for PHI/PII and Sunshine Act triggers.
 
-    This scanner runs pattern matching only — no LLM calls. It is designed
+    This scanner runs pattern matching only - no LLM calls. It is designed
     to be fast and deterministic for use as a pre-scan before LLM analysis
     or as a standalone gate for real-time content filtering.
     """
@@ -346,7 +346,7 @@ class ComplianceScanner:
         # Run Sunshine Act patterns
         matches.extend(self._detect_sunshine_triggers(text))
 
-        # Deduplicate overlapping matches — keep highest confidence
+        # Deduplicate overlapping matches - keep highest confidence
         matches = self._deduplicate(matches)
 
         return ScanResult(matches=matches)
@@ -402,7 +402,7 @@ class ComplianceScanner:
         return matches
 
     def _detect_sunshine_triggers(self, text: str) -> list[PatternMatch]:
-        """Detect Sunshine Act triggers — only if HCP context is present.
+        """Detect Sunshine Act triggers - only if HCP context is present.
 
         Sunshine Act only applies to transfers of value involving HCPs.
         Pattern matches for meals/travel/etc. are only flagged if HCP

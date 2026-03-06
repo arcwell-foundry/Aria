@@ -621,7 +621,7 @@ class EmailIntelligenceCapability(BaseCapability):
         lead_record = lead_resp.data[0] if lead_resp and lead_resp.data else None
 
         if not lead_record:
-            # No lead history — return default (next business day 10am UTC)
+            # No lead history - return default (next business day 10am UTC)
             return self._next_business_day_default(now)
 
         lead_id = str(lead_record["id"])
@@ -640,7 +640,7 @@ class EmailIntelligenceCapability(BaseCapability):
         if len(events) < 2:
             return self._next_business_day_default(now)
 
-        # Analyze response hours — when do replies arrive?
+        # Analyze response hours - when do replies arrive?
         reply_hours: list[int] = []
         for event in events:
             if event.get("event_type") == EventType.EMAIL_RECEIVED.value:

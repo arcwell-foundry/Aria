@@ -2,7 +2,7 @@
 
 A capability is a discrete, composable unit of functionality that an agent
 can use to accomplish tasks. Capabilities are the bridge between the agent
-system and the services/data layer — they encapsulate access to Supabase,
+system and the services/data layer - they encapsulate access to Supabase,
 the memory system, and the knowledge graph behind a task-oriented interface.
 
 Each capability declares:

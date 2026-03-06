@@ -403,7 +403,7 @@ class ScribeAgent(SkillAwareAgent):
             advisories = []
             if not exa_available and recipient:
                 advisories.append(
-                    "Recipient research skipped — Exa web search not connected. "
+                    "Recipient research skipped - Exa web search not connected. "
                     "Connect Exa in Settings > Integrations for personalized recipient insights."
                 )
 
@@ -524,7 +524,7 @@ class ScribeAgent(SkillAwareAgent):
         if memory_context:
             recipient_info_parts.append(
                 f"\nARIA's memory about this person:\n{memory_context}\n"
-                "Include relevant context naturally — mention shared history the user might forget."
+                "Include relevant context naturally - mention shared history the user might forget."
             )
 
         recipient_info = "\n".join(recipient_info_parts)
@@ -855,7 +855,7 @@ class ScribeAgent(SkillAwareAgent):
 
         if confidence < 0.5:
             explanation_parts.append(
-                f"Confidence is relatively low ({confidence:.0%}) — you may want to review carefully."
+                f"Confidence is relatively low ({confidence:.0%}) - you may want to review carefully."
             )
 
         explanation = " ".join(explanation_parts)

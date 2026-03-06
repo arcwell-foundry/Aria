@@ -2,7 +2,7 @@
 
 Uses the Exa search API (https://exa.ai) for people search, company
 intelligence, and publication discovery. Exa provides semantic search
-over the web with structured content extraction — ideal for finding
+over the web with structured content extraction - ideal for finding
 LinkedIn profiles, bios, press mentions, and scientific publications.
 
 Rate limited to 100 req/min via a sliding-window token bucket.
@@ -84,7 +84,7 @@ async def _wait_for_rate_limit() -> None:
                 _request_timestamps.pop(0)
 
             if len(_request_timestamps) < _MAX_REQUESTS_PER_MINUTE:
-                # Slot available — claim it and return
+                # Slot available - claim it and return
                 _request_timestamps.append(time.monotonic())
                 return
 
@@ -526,7 +526,7 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
         try:
             exa_circuit_breaker.check()
         except Exception:
-            logger.warning("Exa circuit breaker open — skipping instant search")
+            logger.warning("Exa circuit breaker open - skipping instant search")
             return []
 
         try:
@@ -606,7 +606,7 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
         try:
             exa_circuit_breaker.check()
         except Exception:
-            logger.warning("Exa circuit breaker open — skipping fast search")
+            logger.warning("Exa circuit breaker open - skipping fast search")
             return []
 
         try:
@@ -691,7 +691,7 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
         try:
             exa_circuit_breaker.check()
         except Exception:
-            logger.warning("Exa circuit breaker open — skipping deep search")
+            logger.warning("Exa circuit breaker open - skipping deep search")
             return []
 
         try:
@@ -1152,7 +1152,7 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
         try:
             exa_circuit_breaker.check()
         except Exception:
-            logger.warning("Exa circuit breaker open — skipping search for '%s'", query[:100])
+            logger.warning("Exa circuit breaker open - skipping search for '%s'", query[:100])
             return []
 
         try:

@@ -1,5 +1,5 @@
 /**
- * TranscriptEntry — Single message in the Dialogue Mode transcript.
+ * TranscriptEntry - Single message in the Dialogue Mode transcript.
  *
  * Always left-aligned. Speaker label + timestamp always visible.
  * ARIA messages: "ARIA" in electric blue, content in lighter weight.

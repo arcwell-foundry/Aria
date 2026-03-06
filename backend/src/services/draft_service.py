@@ -424,7 +424,7 @@ class DraftService:
                 calibration = await self._personality_calibrator.get_calibration(user_id)
 
             # Build context - for REPLY drafts, load full email context from draft_context table.
-            # NEVER use the existing draft body as context — always go back to the
+            # NEVER use the existing draft body as context - always go back to the
             # original email and thread to prevent hallucination compounding.
             purpose = EmailDraftPurpose(draft["purpose"])
             combined_context = ""
@@ -885,7 +885,7 @@ class DraftService:
         return (fallback_subject, response)
 
     def _clean_llm_body(self, response: str, fallback_subject: str) -> str:
-        """Clean LLM response for regeneration — extract plain email body.
+        """Clean LLM response for regeneration - extract plain email body.
 
         When regenerating with EMAIL_REGENERATION_PROMPT, the LLM should return
         plain text. But if it returns JSON or code-fenced output anyway, extract

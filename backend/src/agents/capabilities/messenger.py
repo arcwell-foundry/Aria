@@ -5,7 +5,7 @@ pushing urgent alerts, handling slash commands (/aria prep, /aria status,
 /aria brief), and sharing competitive battle cards as rich attachments.
 
 Uses direct Slack Bot API via OAuth. Maintains a WebSocket connection for
-real-time slash command reception. Channel-scoped permissions — the bot
+real-time slash command reception. Channel-scoped permissions - the bot
 only accesses channels it has been explicitly invited to.
 
 Slack team_id and channel mappings are stored in
@@ -456,9 +456,9 @@ class TeamMessengerCapability(BaseCapability):
         """Handle an inbound /aria slash command from Slack.
 
         Supported sub-commands:
-        - ``/aria prep [meeting]`` — Trigger meeting prep for a named meeting.
-        - ``/aria status [lead]`` — Return current lead status summary.
-        - ``/aria brief`` — Generate and post a quick briefing.
+        - ``/aria prep [meeting]`` - Trigger meeting prep for a named meeting.
+        - ``/aria status [lead]`` - Return current lead status summary.
+        - ``/aria brief`` - Generate and post a quick briefing.
 
         Responses are sent back via the event's ``response_url`` for
         asynchronous reply (within Slack's 3-second deadline).
@@ -972,7 +972,7 @@ class TeamMessengerCapability(BaseCapability):
         event: SlackEvent,
         meeting_query: str,
     ) -> None:
-        """Handle ``/aria prep [meeting]`` — trigger meeting preparation.
+        """Handle ``/aria prep [meeting]`` - trigger meeting preparation.
 
         Searches upcoming calendar events matching the query and triggers
         brief generation for the best match.
@@ -1033,7 +1033,7 @@ class TeamMessengerCapability(BaseCapability):
         event: SlackEvent,
         lead_query: str,
     ) -> None:
-        """Handle ``/aria status [lead]`` — return lead status summary.
+        """Handle ``/aria status [lead]`` - return lead status summary.
 
         Searches lead_memories for a matching contact/company and returns
         a compact status summary.
@@ -1096,7 +1096,7 @@ class TeamMessengerCapability(BaseCapability):
         aria_user_id: str,
         event: SlackEvent,
     ) -> None:
-        """Handle ``/aria brief`` — generate a quick daily briefing.
+        """Handle ``/aria brief`` - generate a quick daily briefing.
 
         Compiles a lightweight briefing from recent activity, upcoming
         meetings, and lead updates, then posts it to the requesting channel.

@@ -1,4 +1,4 @@
-"""MCP Evaluator capability — assesses security and reliability of MCP servers.
+"""MCP Evaluator capability - assesses security and reliability of MCP servers.
 
 Used by the Analyst agent's ``evaluate_mcp_server`` tool to produce a
 ``SecurityAssessment`` before recommending installation to the user.
@@ -71,7 +71,7 @@ class MCPEvaluatorCapability:
         if server_info.is_open_source and server_info.repo_url:
             positive_factors.append(f"Open source: {server_info.repo_url}")
         else:
-            risk_factors.append("Closed source — code cannot be audited")
+            risk_factors.append("Closed source - code cannot be audited")
 
         # 3. Permission analysis
         permissions = server_info.permissions
