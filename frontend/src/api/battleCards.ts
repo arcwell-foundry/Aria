@@ -4,6 +4,7 @@ import { apiClient } from "./client";
 export interface BattleCardPricing {
   model?: string;
   range?: string;
+  strategy?: string;
 }
 
 export interface BattleCardDifferentiation {
@@ -41,11 +42,27 @@ export interface BattleCardCriticalGap {
   is_advantage: boolean;
 }
 
+export interface BattleCardMomentumDetail {
+  signals_current_30d: number;
+  signals_previous_30d: number;
+}
+
 export interface BattleCardAnalysis {
   metrics?: BattleCardMetrics;
   strategies?: BattleCardStrategy[];
   feature_gaps?: BattleCardFeatureGap[];
   critical_gaps?: BattleCardCriticalGap[];
+  threat_level?: 'high' | 'medium' | 'low';
+  threat_score?: number;
+  momentum?: 'increasing' | 'declining' | 'stable';
+  momentum_detail?: BattleCardMomentumDetail;
+  last_signal_at?: string;
+  signal_count_30d?: number;
+  signal_count_total?: number;
+  high_impact_signals?: number;
+  avg_relevance?: number;
+  computed_at?: string;
+  computation_method?: string;
 }
 
 export interface BattleCard {

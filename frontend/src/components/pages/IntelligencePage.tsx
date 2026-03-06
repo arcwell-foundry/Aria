@@ -16,13 +16,13 @@
  */
 
 import { useParams } from 'react-router-dom';
+import { useMemo } from 'react';
 import { Newspaper, TrendingUp } from 'lucide-react';
 import { useBattleCards } from '@/hooks/useBattleCards';
 import { BattleCardPreview, BattleCardPreviewSkeleton, MarketSignalsFeed } from '@/components/intelligence';
 import { EmptyState } from '@/components/common/EmptyState';
 import { useUnreadSignalCount } from '@/hooks/useIntelPanelData';
 import { BattleCardDetail } from '@/components/pages/BattleCardDetail';
-import type { BattleCard } from '@/api/battleCards';
 
 // Skeleton grid for loading state
 function IntelligenceSkeleton() {
@@ -59,14 +59,17 @@ function IntelligenceOverview() {
   const { data: battleCards, isLoading, error } = useBattleCards();
   const { data: unreadCount } = useUnreadSignalCount();
 
-  // Extract analysis data - pass null when no real data exists
-  const getCardData = (card: BattleCard) => ({
-    marketCapGap: card.analysis?.metrics?.market_cap_gap ?? null,
-    winRate: card.analysis?.metrics?.win_rate ?? null,
-    lastSignalAt: card.analysis?.metrics?.last_signal_at ?? null,
-  });
+  // Sort battle cards by threat_score descending (highest threat first)
+  const sortedCards = useMemo(() => {
+    if (!battleCards) return [];
+    return [...battleCards].sort((a, b) => {
+      const scoreA = a.analysis?.threat_score ?? 0;
+      const scoreB = b.analysis?.threat_score ?? 0;
+      return scoreB - scoreA;
+    });
+  }, [battleCards]);
 
-  const hasBattleCards = battleCards && battleCards.length > 0;
+  const hasBattleCards = sortedCards.length > 0;
 
   return (
     <div className="flex-1 overflow-y-auto p-8">
@@ -128,19 +131,13 @@ function IntelligenceOverview() {
                 icon={<TrendingUp className="w-8 h-8" />}
               />
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {battleCards.map((card) => {
-                  const cardData = getCardData(card);
-                  return (
-                    <BattleCardPreview
-                      key={card.id}
-                      card={card}
-                      marketCapGap={cardData.marketCapGap}
-                      winRate={cardData.winRate}
-                      lastSignalAt={cardData.lastSignalAt}
-                    />
-                  );
-                })}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {sortedCards.map((card) => (
+                  <BattleCardPreview
+                    key={card.id}
+                    card={card}
+                  />
+                ))}
               </div>
             )}
           </section>
