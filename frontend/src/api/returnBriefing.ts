@@ -24,7 +24,7 @@ export async function getReturnBriefing(): Promise<ReturnBriefing | null> {
     const response = await apiClient.get<ReturnBriefing>("/intelligence/return-briefing");
     if (
       !response.data ||
-      (response.data as Record<string, unknown>).status === "no_briefing_needed"
+      (response.data as unknown as Record<string, unknown>).status === "no_briefing_needed"
     ) {
       return null;
     }
