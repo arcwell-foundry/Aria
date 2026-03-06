@@ -702,7 +702,7 @@ async def get_email_context_for_chat(user_id: str) -> str:
         scans_result = (
             client.table("email_scan_log")
             .select(
-                "sender_name,sender_email,subject,category,urgency,"
+                "sender_name,sender_email,subject,snippet,category,urgency,"
                 "needs_draft,scanned_at"
             )
             .eq("user_id", user_id)
@@ -741,8 +741,13 @@ async def get_email_context_for_chat(user_id: str) -> str:
                 urg = s.get("urgency", "")
                 flag = " ⚡URGENT" if urg == "URGENT" else ""
                 draft_flag = " [draft pending]" if s.get("needs_draft") else ""
+                snippet = s.get("snippet") or ""
+                if snippet:
+                    preview = f"\n    Preview: {snippet[:200]}"
+                else:
+                    preview = "\n    Preview: NOT AVAILABLE (metadata only)"
                 header.append(
-                    f"  - {name}: \"{subj}\" [{cat}]{flag}{draft_flag}"
+                    f"  - {name}: \"{subj}\" [{cat}]{flag}{draft_flag}{preview}"
                 )
 
         if drafts:

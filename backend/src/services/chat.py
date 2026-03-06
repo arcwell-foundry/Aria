@@ -33,6 +33,7 @@ from src.memory.working import WorkingMemoryManager
 from src.models.cognitive_load import CognitiveLoadState, LoadLevel
 from src.models.proactive_insight import ProactiveInsight
 from src.onboarding.personality_calibrator import PersonalityCalibration, PersonalityCalibrator
+from src.core.llm_guardrails import get_email_guardrail
 from src.services.email_tools import (
     EMAIL_TOOL_DEFINITIONS,
     get_email_context_for_chat,
@@ -3470,6 +3471,7 @@ class ChatService:
                 f"email, gather full context, generate a style-matched draft, and save it "
                 f"to their {provider_name} drafts folder. Include any special instructions "
                 f"the user mentions (e.g. 'keep it brief', 'mention the Q3 timeline')."
+                f"\n\n{get_email_guardrail()}\n"
                 f"\n\n## Email Intelligence Rules\n"
                 f"When discussing the user's emails, follow these rules:\n"
                 f"1. FACTS you can state directly: sender name, subject line, date, "

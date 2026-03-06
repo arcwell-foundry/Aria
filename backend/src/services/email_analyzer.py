@@ -975,6 +975,10 @@ class EmailAnalyzer:
                 # Gmail returns emails in 'data.emails'
                 if response.get("successful") and response.get("data"):
                     emails = response["data"].get("emails", [])
+                    # Gmail list API doesn't return full body — fetch individually
+                    emails = await self._enrich_gmail_bodies(
+                        emails, connection_id, user_id
+                    )
                 else:
                     logger.warning(
                         "EMAIL_ANALYZER: Gmail fetch failed: %s",
@@ -1079,6 +1083,84 @@ class EmailAnalyzer:
                 exc_info=True,
             )
             return []
+
+    # ------------------------------------------------------------------
+    # Gmail body enrichment
+    # ------------------------------------------------------------------
+
+    async def _enrich_gmail_bodies(
+        self,
+        emails: list[dict[str, Any]],
+        connection_id: str,
+        user_id: str,
+    ) -> list[dict[str, Any]]:
+        """Fetch individual email bodies for Gmail emails missing body content.
+
+        GMAIL_FETCH_EMAILS returns a list without full body text. This method
+        fetches each email's body using GMAIL_GET_MESSAGE and merges it back.
+
+        Args:
+            emails: List of email dicts from GMAIL_FETCH_EMAILS.
+            connection_id: Composio connection ID.
+            user_id: The user's ID.
+
+        Returns:
+            The same list with body fields populated where possible.
+        """
+        from src.integrations.oauth import get_oauth_client
+
+        oauth_client = get_oauth_client()
+        enriched = 0
+
+        for email in emails:
+            # Skip if body already present and non-empty
+            existing_body = email.get("body", "")
+            if isinstance(existing_body, str) and len(existing_body.strip()) > 50:
+                continue
+            if isinstance(existing_body, dict) and existing_body.get("content", ""):
+                continue
+
+            email_id = email.get("id") or email.get("message_id")
+            if not email_id:
+                continue
+
+            try:
+                response = await oauth_client.execute_action(
+                    connection_id=connection_id,
+                    action="GMAIL_GET_MESSAGE",
+                    params={"message_id": email_id},
+                    user_id=user_id,
+                )
+                if response.get("successful") and response.get("data"):
+                    data = response["data"]
+                    # GMAIL_GET_MESSAGE returns body in various formats
+                    body = (
+                        data.get("body")
+                        or data.get("textBody")
+                        or data.get("snippet")
+                        or data.get("text")
+                        or ""
+                    )
+                    if isinstance(body, dict):
+                        body = body.get("content", body.get("data", ""))
+                    if body and isinstance(body, str) and len(body.strip()) > 0:
+                        email["body"] = body
+                        enriched += 1
+            except Exception as e:
+                logger.debug(
+                    "EMAIL_ANALYZER: Could not fetch body for email %s: %s",
+                    email_id,
+                    e,
+                )
+
+        if enriched > 0:
+            logger.info(
+                "EMAIL_ANALYZER: Enriched %d/%d Gmail emails with body content",
+                enriched,
+                len(emails),
+            )
+
+        return emails
 
     # ------------------------------------------------------------------
     # Privacy exclusions
@@ -1704,14 +1786,57 @@ class EmailAnalyzer:
     ) -> None:
         """Log a categorization decision to email_scan_log.
 
+        Uses upsert logic:
+        - If email_id already has an entry with NULL snippet: UPDATE with new snippet
+        - If email_id already has an entry with a snippet: SKIP (no duplicate)
+        - If email_id has no entry: INSERT new row
+
         Args:
             user_id: The user's ID.
             categorized: The categorized email.
         """
         try:
-            # Truncate snippet to 500 chars for storage (matching subject truncation)
             snippet_text = categorized.snippet[:500] if categorized.snippet else None
 
+            # Check for existing entry
+            existing = (
+                self._db.table("email_scan_log")
+                .select("id, snippet")
+                .eq("user_id", user_id)
+                .eq("email_id", categorized.email_id)
+                .order("scanned_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+
+            if existing.data:
+                row = existing.data[0]
+                if row.get("snippet"):
+                    # Already has snippet — skip to avoid duplicates
+                    logger.debug(
+                        "EMAIL_ANALYZER: Skipping duplicate scan for email %s (already has snippet)",
+                        categorized.email_id,
+                    )
+                    return
+
+                if snippet_text:
+                    # Existing entry with NULL snippet — update it
+                    self._db.table("email_scan_log").update(
+                        {
+                            "snippet": snippet_text,
+                            "category": categorized.category,
+                            "urgency": categorized.urgency,
+                            "needs_draft": categorized.needs_draft,
+                            "reason": categorized.reason,
+                        }
+                    ).eq("id", row["id"]).execute()
+                    logger.info(
+                        "EMAIL_ANALYZER: Updated NULL snippet for email %s",
+                        categorized.email_id,
+                    )
+                    return
+
+            # No existing entry — insert new row
             self._db.table("email_scan_log").insert(
                 {
                     "id": str(uuid.uuid4()),

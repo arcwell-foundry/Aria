@@ -25,6 +25,7 @@ from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.services import notification_integration
 from src.core.resilience import composio_calendar_circuit_breaker
 from src.services.activity_service import ActivityService
+from src.core.llm_guardrails import get_email_guardrail
 
 try:
     from src.intelligence.causal_reasoning import SalesCausalReasoningEngine
@@ -1566,7 +1567,9 @@ Drafts waiting for review: {drafts_waiting}{debrief_note}{queued_note}{patterns_
 
 Be concise and actionable. Do not use emojis. Use clean, professional language. Start with "{greeting}."
 
-IMPORTANT: Only describe information you can directly verify from the data provided. Never infer email content, conversation direction, or relationship narratives from metadata alone. It is better to say less than to say something inaccurate.
+{get_email_guardrail()}
+
+IMPORTANT: Only describe information you can directly verify from the data provided. It is better to say less than to say something inaccurate.
 """
 
         # Inject tone guidance if available

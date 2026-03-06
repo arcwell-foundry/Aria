@@ -28,6 +28,7 @@ from src.memory.digital_twin import DigitalTwin
 from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.services.email_analyzer import EmailAnalyzer
 from src.services.email_client_writer import DraftSaveError, EmailClientWriter
+from src.core.llm_guardrails import get_email_guardrail
 from src.services.email_context_gatherer import (
     DraftContext,
     EmailContextGatherer,
@@ -1134,6 +1135,9 @@ Do not include any text outside the JSON object."""
             )
             system_prompt += self._CALENDAR_GUARDRAIL_INSTRUCTION
 
+        # Email content guardrail: prevent hallucination of email body content
+        system_prompt += "\n" + get_email_guardrail()
+
         response = await self._llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
             system_prompt=system_prompt,
@@ -1188,7 +1192,7 @@ Do not include any text outside the JSON object."""
 From: {email.sender_name} <{email.sender_email}>
 Subject: {email.subject}
 Urgency: {email.urgency}
-Body: {email.snippet}""")
+Body: {email.snippet if email.snippet else 'NOT AVAILABLE (metadata only — do not fabricate content)'}""")
 
         # Thread context
         if context.thread_context and context.thread_context.messages:
