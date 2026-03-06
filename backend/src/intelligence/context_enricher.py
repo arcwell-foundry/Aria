@@ -11,6 +11,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.intelligence.regulatory_intelligence import detect_fda_event, format_regulatory_context
+from src.intelligence.clinical_trial_intelligence import detect_clinical_trial_signal, format_clinical_trial_context
+from src.intelligence.supply_chain_intelligence import detect_supply_chain_signal, format_supply_chain_context
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,6 +81,40 @@ class ContextEnricher:
             landscape = await self._get_competitive_landscape(user_id)
             if landscape:
                 context["competitive_landscape"] = landscape
+
+            # 8. Specialized signal detection
+            fda_event = detect_fda_event(event, signal_type)
+            if fda_event:
+                context["fda_event"] = fda_event
+                context["regulatory_context"] = format_regulatory_context(
+                    fda_event, context.get("battle_card"), company_name
+                )
+                logger.info(
+                    "[ContextEnricher] FDA event detected: %s (urgency: %s)",
+                    fda_event['fda_event_type'], fda_event['urgency'],
+                )
+
+            clinical_trial = detect_clinical_trial_signal(event, signal_type)
+            if clinical_trial:
+                context["clinical_trial"] = clinical_trial
+                context["clinical_trial_context"] = format_clinical_trial_context(
+                    clinical_trial, company_name
+                )
+                logger.info(
+                    "[ContextEnricher] Clinical trial detected: %s %s",
+                    clinical_trial['clinical_phase'], clinical_trial['drug_modality'],
+                )
+
+            supply_chain = detect_supply_chain_signal(event, signal_type)
+            if supply_chain:
+                context["supply_chain_vulnerability"] = supply_chain
+                context["supply_chain_context"] = format_supply_chain_context(
+                    supply_chain, context.get("battle_card"), company_name
+                )
+                logger.info(
+                    "[ContextEnricher] Supply chain vulnerability: %s (urgency: %s)",
+                    supply_chain['vulnerability_type'], supply_chain['urgency'],
+                )
 
             logger.info(
                 "[ContextEnricher] Enriched context for '%s': "
@@ -495,6 +533,16 @@ class ContextEnricher:
                     f"momentum={c.get('momentum', '?')}, "
                     f"{c.get('signal_count_30d', 0)} signals/30d"
                 )
+
+        # Specialized intelligence contexts
+        if context.get("regulatory_context"):
+            parts.append(context["regulatory_context"])
+
+        if context.get("clinical_trial_context"):
+            parts.append(context["clinical_trial_context"])
+
+        if context.get("supply_chain_context"):
+            parts.append(context["supply_chain_context"])
 
         # Active goals
         goals = context.get("active_goals", [])
