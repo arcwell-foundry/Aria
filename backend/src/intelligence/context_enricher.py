@@ -14,6 +14,7 @@ from typing import Any
 from src.intelligence.regulatory_intelligence import detect_fda_event, format_regulatory_context
 from src.intelligence.clinical_trial_intelligence import detect_clinical_trial_signal, format_clinical_trial_context
 from src.intelligence.supply_chain_intelligence import detect_supply_chain_signal, format_supply_chain_context
+from src.intelligence.pricing_intelligence import detect_pricing_signal, format_pricing_context
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,17 @@ class ContextEnricher:
                 logger.info(
                     "[ContextEnricher] Supply chain vulnerability: %s (urgency: %s)",
                     supply_chain['vulnerability_type'], supply_chain['urgency'],
+                )
+
+            pricing_signal = detect_pricing_signal(event, signal_type)
+            if pricing_signal:
+                context["pricing_signal"] = pricing_signal
+                context["pricing_context"] = format_pricing_context(
+                    pricing_signal, context.get("battle_card"), company_name
+                )
+                logger.info(
+                    "[ContextEnricher] Pricing signal: %s",
+                    pricing_signal['primary_type'],
                 )
 
             logger.info(
@@ -543,6 +555,9 @@ class ContextEnricher:
 
         if context.get("supply_chain_context"):
             parts.append(context["supply_chain_context"])
+
+        if context.get("pricing_context"):
+            parts.append(context["pricing_context"])
 
         # Active goals
         goals = context.get("active_goals", [])

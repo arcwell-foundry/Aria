@@ -43,6 +43,28 @@ _PROCESS_EVENT_TIMEOUTS: dict[str, int] = {
 }
 
 
+def _clean_title(raw_title: str) -> str:
+    """Extract clean event text from potentially enriched title."""
+    if not raw_title:
+        return "Untitled Insight"
+    # Strip context brief if present (enriched events use "EVENT TO ANALYZE:" marker)
+    marker = "EVENT TO ANALYZE:"
+    if marker in raw_title:
+        raw_title = raw_title[raw_title.index(marker) + len(marker):].strip()
+    elif "YOU WORK FOR" in raw_title:
+        # Try to find the actual event after all the context
+        lines = raw_title.split('\n')
+        for line in reversed(lines):
+            line = line.strip()
+            if line and not line.startswith(('YOU WORK FOR', 'ENTITY RELATIONSHIP', 'COMPETITOR BATTLE',
+                                            'COMPETITIVE LANDSCAPE', 'RELEVANT FACTS', 'RECENT SIGNALS',
+                                            'CRITICAL RULES', 'Their ', 'How We Win', 'Current Threat',
+                                            '---', 'EVENT TO ANALYZE', 'SIGNAL TO ANALYZE')):
+                raw_title = line
+                break
+    return raw_title[:200].strip()
+
+
 class JarvisOrchestrator:
     """Coordinates all Phase 7 intelligence engines.
 
@@ -401,7 +423,7 @@ class JarvisOrchestrator:
                     "user_id": user_id,
                     "insight_type": "butterfly",
                     "engine_source": "butterfly",
-                    "title": event[:100],
+                    "title": _clean_title(event),
                     "content": butterfly_content,
                     "classification": butterfly_classification,
                     "impact_score": min(total_impact / 10.0, 1.0),
@@ -429,7 +451,7 @@ class JarvisOrchestrator:
                     "user_id": user_id,
                     "insight_type": gi.insight_type or "goal_impact",
                     "engine_source": "goal_impact",
-                    "title": (gi.trigger_event or event)[:100],
+                    "title": _clean_title(gi.trigger_event or event),
                     "content": gi.content,
                     "classification": gi.classification or "neutral",
                     "impact_score": gi.impact_score,

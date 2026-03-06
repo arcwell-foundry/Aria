@@ -2232,3 +2232,48 @@ async def get_metacognition(
             status_code=500,
             detail="Metacognition assessment failed. Please try again.",
         ) from e
+
+
+# ==============================================================================
+# RETURN BRIEFING ENDPOINTS (E7)
+# ==============================================================================
+
+
+@router.get("/return-briefing")
+async def get_return_briefing(
+    current_user: CurrentUser,
+) -> dict:
+    """Get a 'what changed while you were away' briefing.
+
+    Generates a prioritized briefing of changes since the user was last active.
+    Returns a summary only if the user has been away for 4+ hours.
+
+    Args:
+        current_user: Authenticated user
+
+    Returns:
+        Briefing with changes, summary, and priority items, or a no-briefing-needed message
+
+    Raises:
+        HTTPException: If briefing generation fails
+    """
+    try:
+        from src.intelligence.return_briefing import ReturnBriefingGenerator
+
+        generator = ReturnBriefingGenerator(get_supabase_client())
+        briefing = await generator.generate_return_briefing(str(current_user.id))
+
+        if not briefing:
+            return {"status": "no_briefing_needed", "message": "You're all caught up."}
+
+        return briefing
+
+    except Exception as e:
+        logger.exception(
+            "Return briefing generation failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Return briefing generation failed. Please try again.",
+        ) from e

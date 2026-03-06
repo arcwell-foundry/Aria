@@ -33,6 +33,28 @@ from src.intelligence.causal.models import (
 logger = logging.getLogger(__name__)
 
 
+def _clean_title(raw_title: str) -> str:
+    """Extract clean event text from potentially enriched title."""
+    if not raw_title:
+        return "Untitled Insight"
+    # Strip context brief if present (enriched events use "EVENT TO ANALYZE:" marker)
+    marker = "EVENT TO ANALYZE:"
+    if marker in raw_title:
+        raw_title = raw_title[raw_title.index(marker) + len(marker):].strip()
+    elif "YOU WORK FOR" in raw_title:
+        # Try to find the actual event after all the context
+        lines = raw_title.split('\n')
+        for line in reversed(lines):
+            line = line.strip()
+            if line and not line.startswith(('YOU WORK FOR', 'ENTITY RELATIONSHIP', 'COMPETITOR BATTLE',
+                                            'COMPETITIVE LANDSCAPE', 'RELEVANT FACTS', 'RECENT SIGNALS',
+                                            'CRITICAL RULES', 'Their ', 'How We Win', 'Current Threat',
+                                            '---', 'EVENT TO ANALYZE', 'SIGNAL TO ANALYZE')):
+                raw_title = line
+                break
+    return raw_title[:200].strip()
+
+
 def _extract_json_array_from_response(response: str) -> list | None:
     """Extract JSON array from LLM response that may contain extra text.
 
@@ -284,7 +306,7 @@ class ImplicationEngine:
         """
         try:
             # Build title from trigger event (first 100 chars)
-            title = implication.trigger_event[:100] if implication.trigger_event else "Implication insight"
+            title = _clean_title(implication.trigger_event)
 
             data = {
                 "user_id": user_id,
