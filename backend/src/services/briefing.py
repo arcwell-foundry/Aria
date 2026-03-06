@@ -453,7 +453,8 @@ class BriefingService:
                     "content": content,
                     "generated_at": datetime.now(UTC).isoformat(),
                     "ws_delivered": False,
-                }
+                },
+                on_conflict="user_id,briefing_date",
             ).execute()
         except Exception:
             logger.warning(
@@ -1295,10 +1296,11 @@ class BriefingService:
         }
 
     async def _get_task_data(self, user_id: str) -> dict[str, Any]:
-        """Get task status from goals table.
+        """Get task status from goals and goal_milestones tables.
 
-        Queries the goals table for open (non-complete) tasks.
-        Also checks prospective_memories for overdue tasks.
+        Queries goals and goal_milestones for open (non-complete) tasks.
+        Also checks prospective_memories for overdue tasks (legacy support).
+        Deduplicates by title, keeping the item with the earliest due_date.
 
         Args:
             user_id: The user's ID.
@@ -1306,7 +1308,9 @@ class BriefingService:
         Returns:
             Dict with overdue, due_today, and open_tasks_count.
         """
-        # Get open tasks from goals table (non-complete, non-failed)
+        now = datetime.now(UTC)
+
+        # Get open tasks from goals table (non-complete, non-cancelled, non-failed)
         open_goals_result = (
             self._db.table("goals")
             .select("id, title, status, target_date")
@@ -1328,30 +1332,123 @@ class BriefingService:
                 "due_date": g.get("target_date"),
             })
 
-        # Get overdue tasks from prospective_memories (legacy support)
-        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        # Collect overdue items from multiple sources, then deduplicate
+        overdue_items: dict[str, dict[str, Any]] = {}  # title -> item (keep earliest due)
 
-        overdue_result = (
+        # 1. Overdue goals (due_date < now, not complete/cancelled/failed)
+        overdue_goals_result = (
+            self._db.table("goals")
+            .select("id, title, status, target_date")
+            .eq("user_id", user_id)
+            .not_.in_("status", ["complete", "cancelled", "failed"])
+            .lt("target_date", now.isoformat())
+            .limit(20)
+            .execute()
+        )
+        for g in overdue_goals_result.data or []:
+            if not isinstance(g, dict):
+                continue
+            title = g.get("title", "")
+            due_date = g.get("target_date")
+            if title and (
+                title not in overdue_items
+                or (due_date and overdue_items[title].get("due_at", "z") > due_date)
+            ):
+                overdue_items[title] = {
+                    "id": g["id"],
+                    "task": title,
+                    "source": "goal",
+                    "due_at": due_date,
+                }
+
+        # 2. Overdue goal_milestones (join with goals to ensure goal is active)
+        # Query milestones directly, then filter by goal status in Python
+        # since Supabase client doesn't support complex joins
+        overdue_milestones_result = (
+            self._db.table("goal_milestones")
+            .select("id, goal_id, title, status, due_date")
+            .not_.in_("status", ["complete", "cancelled", "done"])
+            .lt("due_date", now.isoformat())
+            .limit(50)
+            .execute()
+        )
+
+        # Get goal statuses for filtering
+        goal_ids = list({
+            m.get("goal_id")
+            for m in (overdue_milestones_result.data or [])
+            if isinstance(m, dict) and m.get("goal_id")
+        })
+        goal_statuses: dict[str, str] = {}
+        if goal_ids:
+            goals_for_milestones = (
+                self._db.table("goals")
+                .select("id, status, user_id")
+                .in_("id", goal_ids)
+                .execute()
+            )
+            for goal in goals_for_milestones.data or []:
+                if isinstance(goal, dict):
+                    # Only include milestones for user's active goals
+                    if goal.get("user_id") == user_id and goal.get("status") not in [
+                        "complete",
+                        "cancelled",
+                        "failed",
+                    ]:
+                        goal_statuses[goal["id"]] = goal.get("status", "")
+
+        for m in overdue_milestones_result.data or []:
+            if not isinstance(m, dict):
+                continue
+            goal_id = m.get("goal_id")
+            if goal_id not in goal_statuses:
+                continue  # Skip milestones from inactive/other-user goals
+            title = m.get("title", "")
+            due_date = m.get("due_date")
+            if title and (
+                title not in overdue_items
+                or (due_date and overdue_items[title].get("due_at", "z") > due_date)
+            ):
+                overdue_items[title] = {
+                    "id": m["id"],
+                    "task": title,
+                    "source": "milestone",
+                    "due_at": due_date,
+                }
+
+        # 3. Overdue tasks from prospective_memories (legacy support)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        overdue_pm_result = (
             self._db.table("prospective_memories")
             .select("id, task, priority, trigger_config")
             .eq("user_id", user_id)
             .eq("status", "pending")
             .lt("trigger_config->>due_at", today_start.isoformat())
-            .order("trigger_config->>due_at", desc=False)
-            .limit(10)
+            .limit(20)
             .execute()
         )
+        for t in overdue_pm_result.data or []:
+            if not isinstance(t, dict):
+                continue
+            title = t.get("task", "")
+            due_at = t.get("trigger_config", {}).get("due_at")
+            if title and (
+                title not in overdue_items
+                or (due_at and overdue_items[title].get("due_at", "z") > due_at)
+            ):
+                overdue_items[title] = {
+                    "id": t["id"],
+                    "task": title,
+                    "source": "prospective_memory",
+                    "priority": t.get("priority"),
+                    "due_at": due_at,
+                }
 
-        overdue = [
-            {
-                "id": t["id"],
-                "task": t["task"],
-                "priority": t["priority"],
-                "due_at": t.get("trigger_config", {}).get("due_at"),
-            }
-            for t in (overdue_result.data or [])
-            if isinstance(t, dict)
-        ]
+        # Sort by due_at and convert to list
+        overdue = sorted(
+            overdue_items.values(),
+            key=lambda x: x.get("due_at") or "z",
+        )[:10]  # Limit to 10 overdue items
 
         return {
             "overdue": overdue,

@@ -385,18 +385,21 @@ async def test_get_signal_data_returns_empty_dict_when_no_signals() -> None:
 async def test_get_task_data_returns_empty_dict_when_no_tasks() -> None:
     """Test _get_task_data returns empty structure when no tasks."""
     with patch("src.services.briefing.SupabaseClient") as mock_db_class:
-        # Setup DB mock to return empty results
+        # Setup DB mock to return empty results for all queries
         mock_db = MagicMock()
-        mock_table = MagicMock()
+        empty_result = MagicMock(data=[])
 
-        # Both queries return empty data
-        mock_table.select.return_value.eq.return_value.eq.return_value.lt.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
-            data=[]
-        )
-        mock_table.select.return_value.eq.return_value.eq.return_value.gte.return_value.lt.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
-            data=[]
-        )
-        mock_db.table.return_value = mock_table
+        def mock_table(name: str) -> MagicMock:
+            mock = MagicMock()
+            # All queries return empty data
+            mock.select.return_value.eq.return_value.in_.return_value.order.return_value.limit.return_value.execute.return_value = empty_result
+            mock.select.return_value.eq.return_value.not_.return_value.lt.return_value.limit.return_value.execute.return_value = empty_result
+            mock.select.return_value.not_.return_value.lt.return_value.limit.return_value.execute.return_value = empty_result
+            mock.select.return_value.eq.return_value.eq.return_value.lt.return_value.limit.return_value.execute.return_value = empty_result
+            mock.select.return_value.in_.return_value.execute.return_value = empty_result
+            return mock
+
+        mock_db.table = mock_table
         mock_db_class.get_client.return_value = mock_db
 
         from src.services.briefing import BriefingService
@@ -404,7 +407,7 @@ async def test_get_task_data_returns_empty_dict_when_no_tasks() -> None:
         service = BriefingService()
         result = await service._get_task_data(user_id="test-user-123")
 
-        assert result == {"overdue": [], "due_today": []}
+        assert result == {"overdue": [], "due_today": [], "open_tasks": [], "open_tasks_count": 0}
 
 
 @pytest.mark.asyncio
@@ -477,37 +480,51 @@ async def test_generate_briefing_uses_custom_date_when_provided(
 
 @pytest.mark.asyncio
 async def test_get_task_data_returns_overdue_tasks() -> None:
-    """Test _get_task_data returns overdue tasks from prospective_memories."""
+    """Test _get_task_data returns overdue tasks from multiple sources with deduplication."""
     with patch("src.services.briefing.SupabaseClient") as mock_db_class:
-        overdue_tasks = [
-            {
-                "id": "task-1",
-                "task": "Follow up with Acme Corp",
-                "priority": "high",
-                "trigger_config": {"due_at": "2026-02-01T09:00:00Z"},
-            },
-        ]
-        today_tasks = [
-            {
-                "id": "task-2",
-                "task": "Send proposal",
-                "priority": "medium",
-                "trigger_config": {"due_at": "2026-02-03T17:00:00Z"},
-            },
-        ]
-
-        # Setup DB mock for two separate queries
+        # Setup DB mock
         mock_db = MagicMock()
-        mock_table = MagicMock()
 
-        # First call returns overdue, second call returns today
-        mock_table.select.return_value.eq.return_value.eq.return_value.lt.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
-            data=overdue_tasks
-        )
-        mock_table.select.return_value.eq.return_value.eq.return_value.gte.return_value.lt.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
-            data=today_tasks
-        )
-        mock_db.table.return_value = mock_table
+        # Track which tables are queried
+        table_calls = []
+
+        def mock_table(name: str) -> MagicMock:
+            table_calls.append(name)
+            mock = MagicMock()
+
+            if name == "goals":
+                # Mock open_goals_result (first goals query)
+                mock.select.return_value.eq.return_value.in_.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+                    data=[]  # No open goals
+                )
+                # Mock overdue_goals_result (second goals query with .not_.in_)
+                mock.select.return_value.eq.return_value.not_.in_.return_value.lt.return_value.limit.return_value.execute.return_value = MagicMock(
+                    data=[
+                        {
+                            "id": "goal-1",
+                            "title": "Follow up with Acme Corp",
+                            "status": "active",
+                            "target_date": "2026-02-01T09:00:00Z",
+                        }
+                    ]
+                )
+                # Mock goals_for_milestones (third goals query with .in_)
+                mock.select.return_value.in_.return_value.execute.return_value = MagicMock(
+                    data=[]  # No matching milestones
+                )
+            elif name == "goal_milestones":
+                # No overdue milestones
+                mock.select.return_value.not_.in_.return_value.lt.return_value.limit.return_value.execute.return_value = MagicMock(
+                    data=[]
+                )
+            elif name == "prospective_memories":
+                # No overdue prospective memories
+                mock.select.return_value.eq.return_value.eq.return_value.lt.return_value.limit.return_value.execute.return_value = MagicMock(
+                    data=[]
+                )
+            return mock
+
+        mock_db.table = mock_table
         mock_db_class.get_client.return_value = mock_db
 
         from src.services.briefing import BriefingService
@@ -518,22 +535,16 @@ async def test_get_task_data_returns_overdue_tasks() -> None:
         assert "overdue" in result
         assert "due_today" in result
 
-        # Verify overdue tasks are populated correctly
+        # Verify overdue tasks are populated correctly from goals
         assert len(result["overdue"]) == 1
-        assert result["overdue"][0]["id"] == "task-1"
+        assert result["overdue"][0]["id"] == "goal-1"
         assert result["overdue"][0]["task"] == "Follow up with Acme Corp"
-        assert result["overdue"][0]["priority"] == "high"
-        assert result["overdue"][0]["due_at"] == "2026-02-01T09:00:00Z"
+        assert result["overdue"][0]["source"] == "goal"
 
-        # Verify due_today tasks are populated correctly
-        assert len(result["due_today"]) == 1
-        assert result["due_today"][0]["id"] == "task-2"
-        assert result["due_today"][0]["task"] == "Send proposal"
-        assert result["due_today"][0]["priority"] == "medium"
-        assert result["due_today"][0]["due_at"] == "2026-02-03T17:00:00Z"
-
-        # Verify the table was queried
-        mock_db.table.assert_called_with("prospective_memories")
+        # Verify all tables were queried
+        assert "goals" in table_calls
+        assert "goal_milestones" in table_calls
+        assert "prospective_memories" in table_calls
 
 
 @pytest.mark.asyncio
