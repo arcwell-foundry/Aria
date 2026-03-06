@@ -7,7 +7,6 @@ parallel execution, deduplication, and feedback tracking.
 from __future__ import annotations
 
 import asyncio
-import difflib
 import logging
 import time
 from datetime import UTC, datetime
@@ -42,9 +41,6 @@ _PROCESS_EVENT_TIMEOUTS: dict[str, int] = {
     "temporal": 10,
     "predictive": 15,
 }
-
-# Deduplication similarity threshold
-_DEDUP_THRESHOLD = 0.7
 
 
 class JarvisOrchestrator:
@@ -252,7 +248,7 @@ class JarvisOrchestrator:
         )
 
         deduplicated = self._deduplicate(all_insights)
-        deduplicated.sort(key=lambda i: i.combined_score, reverse=True)
+        # _deduplicate already sorts by confidence, just cap at 10 for briefings
         return deduplicated[:10]
 
     async def process_event(
@@ -440,8 +436,8 @@ class JarvisOrchestrator:
         )
 
         deduplicated = self._deduplicate(all_insights)
-        deduplicated.sort(key=lambda i: i.combined_score, reverse=True)
-        return deduplicated[:5]
+        # _deduplicate already sorts by confidence and caps at 5
+        return deduplicated
 
     async def get_active_insights(
         self,
@@ -694,47 +690,61 @@ class JarvisOrchestrator:
         return []
 
     def _deduplicate(self, insights: list[JarvisInsight]) -> list[JarvisInsight]:
-        """Remove near-duplicate insights by content similarity.
+        """Remove near-duplicate insights, keeping highest confidence per classification group.
 
-        Uses SequenceMatcher with threshold 0.7. Also deduplicates
-        by identical trigger_event values, keeping higher-scored insight.
+        Groups insights by classification (threat/opportunity), deduplicates within
+        each group using word-overlap similarity, limits to 3 per classification,
+        and returns max 5 insights sorted by confidence.
         """
-        if len(insights) <= 1:
+        if len(insights) <= 5:
             return insights
 
-        # First pass: deduplicate by trigger_event
-        seen_triggers: dict[str, JarvisInsight] = {}
-        trigger_deduped: list[JarvisInsight] = []
-
+        # Group by classification
+        groups: dict[str, list[JarvisInsight]] = {}
         for insight in insights:
-            trigger = (insight.trigger_event or insight.title or insight.content[:50] or "").strip().lower()
-            if trigger in seen_triggers:
-                existing = seen_triggers[trigger]
-                if insight.combined_score > existing.combined_score:
-                    trigger_deduped.remove(existing)
-                    trigger_deduped.append(insight)
-                    seen_triggers[trigger] = insight
-            else:
-                seen_triggers[trigger] = insight
-                trigger_deduped.append(insight)
+            cls = insight.classification or "neutral"
+            groups.setdefault(cls, []).append(insight)
 
-        # Second pass: deduplicate by content similarity
-        result: list[JarvisInsight] = []
-        for insight in trigger_deduped:
-            is_duplicate = False
-            for existing in result:
-                ratio = difflib.SequenceMatcher(None, insight.content, existing.content).ratio()
-                if ratio > _DEDUP_THRESHOLD:
-                    # Keep the higher-scored one
-                    if insight.combined_score > existing.combined_score:
-                        result.remove(existing)
-                        result.append(insight)
-                    is_duplicate = True
-                    break
-            if not is_duplicate:
-                result.append(insight)
+        deduped: list[JarvisInsight] = []
+        for cls, group_insights in groups.items():
+            # Sort by confidence (combined_score) descending
+            group_insights.sort(key=lambda x: x.combined_score, reverse=True)
 
-        return result
+            kept: list[JarvisInsight] = []
+            for insight in group_insights:
+                # Check if this is too similar to any already-kept insight
+                is_duplicate = False
+                for kept_insight in kept:
+                    if self._content_similarity(insight.content, kept_insight.content) > 0.6:
+                        is_duplicate = True
+                        break
+
+                if not is_duplicate:
+                    kept.append(insight)
+                    if len(kept) >= 3:  # Max 3 per classification
+                        break
+
+            deduped.extend(kept)
+
+        # Final cap at 5, sorted by confidence
+        deduped.sort(key=lambda x: x.combined_score, reverse=True)
+        return deduped[:5]
+
+    @staticmethod
+    def _content_similarity(text1: str, text2: str) -> float:
+        """Simple word-overlap similarity (Jaccard index).
+
+        Returns a value between 0.0 (no overlap) and 1.0 (identical word sets).
+        """
+        if not text1 or not text2:
+            return 0.0
+        words1 = set(text1.lower().split())
+        words2 = set(text2.lower().split())
+        if not words1 or not words2:
+            return 0.0
+        intersection = words1 & words2
+        union = words1 | words2
+        return len(intersection) / len(union)
 
     def _predictions_to_insights(self, predictions: Any, user_id: str) -> list[JarvisInsight]:
         """Convert PredictiveEngine output to JarvisInsight objects."""
