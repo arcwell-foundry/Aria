@@ -1144,3 +1144,123 @@ async def test_text_fallback() -> dict[str, Any]:
         "message": "Tavus is configured, would proceed with video delivery.",
         "status": "delivered",
     }
+
+
+# TEMPORARY: Backfill endpoint for email intelligence extraction
+# Uses running backend's LLM client (avoids .env issues in standalone scripts)
+# Can be removed after one-time backfill is complete
+@router.post("/run-backfill")
+async def run_email_intelligence_backfill(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Trigger email intelligence backfill from within the running backend.
+
+    This endpoint processes existing emails that haven't had intelligence
+    extracted yet. Uses the backend's already-configured LLM client.
+    """
+    import asyncio
+
+    from src.db.supabase import SupabaseClient
+    from src.services.email_analyzer import EmailCategory
+    from src.services.email_intelligence import EmailIntelligenceService
+
+    client = SupabaseClient.get_client()
+    user_id_str = str(current_user.id)
+
+    # Get NEEDS_REPLY and FYI emails from scan log
+    result = (
+        client.table("email_scan_log")
+        .select("email_id, thread_id, sender_email, sender_name, subject, snippet, category, urgency")
+        .eq("user_id", user_id_str)
+        .in_("category", ["NEEDS_REPLY", "FYI"])
+        .order("scanned_at", desc=True)
+        .limit(100)
+        .execute()
+    )
+
+    if not result.data:
+        return {"status": "no_emails", "message": "No emails found to process"}
+
+    # Deduplicate by email_id
+    seen: set[str] = set()
+    unique_emails: list[dict[str, Any]] = []
+    for row in result.data:
+        if row["email_id"] not in seen:
+            seen.add(row["email_id"])
+            unique_emails.append(row)
+
+    # Check which already have facts extracted
+    existing = (
+        client.table("memory_semantic")
+        .select("metadata->>email_id")
+        .eq("user_id", user_id_str)
+        .eq("source", "email_content_extraction")
+        .execute()
+    )
+
+    processed_ids: set[str] = set()
+    for r in existing.data or []:
+        email_id = r.get("metadata->>email_id")
+        if email_id:
+            processed_ids.add(email_id)
+
+    # Filter to unprocessed emails
+    to_process = [e for e in unique_emails if e["email_id"] not in processed_ids]
+
+    if not to_process:
+        return {
+            "status": "already_complete",
+            "message": "All emails already have intelligence extracted",
+            "total_emails": len(unique_emails),
+            "already_processed": len(processed_ids),
+        }
+
+    # Convert to EmailCategory objects
+    email_categories = [
+        EmailCategory(
+            email_id=e["email_id"],
+            thread_id=e.get("thread_id", e["email_id"]),
+            sender_email=e["sender_email"],
+            sender_name=e.get("sender_name", ""),
+            subject=e["subject"],
+            snippet=e.get("snippet", ""),
+            body=e.get("snippet", ""),
+            category=e["category"],
+            urgency=e.get("urgency", "NORMAL"),
+            topic_summary="",
+            needs_draft=False,
+            reason="Backfill processing",
+        )
+        for e in to_process
+    ]
+
+    # Run extraction in background
+    async def run_extraction() -> None:
+        try:
+            service = EmailIntelligenceService()
+            extraction_result = await service.extract_and_store(user_id_str, email_categories)
+            logger.info(
+                "Email intelligence backfill complete",
+                extra={
+                    "user_id": user_id_str,
+                    "emails_processed": extraction_result.emails_processed,
+                    "facts_extracted": extraction_result.facts_extracted,
+                    "insights_generated": extraction_result.insights_generated,
+                    "actions_created": extraction_result.actions_created,
+                },
+            )
+        except Exception as e:
+            logger.exception(
+                "Email intelligence backfill failed",
+                extra={"user_id": user_id_str, "error": str(e)},
+            )
+
+    asyncio.create_task(run_extraction())
+
+    return {
+        "status": "backfill_started",
+        "emails_to_process": len(to_process),
+        "already_processed": len(processed_ids),
+        "total_unique_emails": len(unique_emails),
+        "message": f"Processing {len(to_process)} emails in background. Check logs for completion.",
+    }
