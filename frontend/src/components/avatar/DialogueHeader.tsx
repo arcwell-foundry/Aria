@@ -3,7 +3,11 @@ import { useModalityStore } from '@/stores/modalityStore';
 import { modalityController } from '@/core/ModalityController';
 import { EmotionIndicator } from '@/components/shell/EmotionIndicator';
 
-export function DialogueHeader() {
+interface DialogueHeaderProps {
+  textOnlyMode?: boolean;
+}
+
+export function DialogueHeader({ textOnlyMode = false }: DialogueHeaderProps) {
   const tavusSession = useModalityStore((s) => s.tavusSession);
   const isActive = tavusSession.status === 'active';
 
@@ -24,11 +28,20 @@ export function DialogueHeader() {
                 ? 'bg-emerald-400 animate-pulse'
                 : tavusSession.status === 'connecting'
                   ? 'bg-amber-400 animate-pulse'
-                  : 'bg-[#555770]'
+                  : textOnlyMode
+                    ? 'bg-[#2E66FF]'
+                    : 'bg-[#555770]'
             }`}
           />
           <span className="font-mono text-[11px] text-[#8B8FA3]">
-            {isActive ? 'LIVE' : tavusSession.status === 'connecting' ? 'CONNECTING' : 'OFFLINE'}
+            {isActive
+              ? 'LIVE'
+              : tavusSession.status === 'connecting'
+                ? 'CONNECTING'
+                : textOnlyMode
+                  ? 'TEXT MODE'
+                  : 'OFFLINE'
+            }
           </span>
         </div>
       </div>

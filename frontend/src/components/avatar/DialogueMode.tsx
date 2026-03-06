@@ -17,6 +17,7 @@ import { BriefingControls } from './BriefingControls';
 import { AudioCallControls } from './AudioCallControls';
 import { VideoToastStack } from '@/components/video/VideoToastStack';
 import type { ToastItem } from '@/components/video/VideoContentToast';
+import { useServiceHealth } from '@/hooks/useServiceHealth';
 
 interface DialogueModeProps {
   sessionType?: 'chat' | 'briefing' | 'debrief';
@@ -39,6 +40,12 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   const { user } = useAuth();
   useUICommands();
   useEmotionDetection();
+
+  // Track service health to add padding when banner is visible
+  // Note: Banner can be dismissed locally, so this is a best-effort approach
+  const serviceHealth = useServiceHealth(!!user?.id);
+  // Add top padding when service health banner might be visible (h-12 = 48px to match banner)
+  const showTopPadding = serviceHealth.isCritical && !serviceHealth.isLoading;
 
   const streamingIdRef = useRef<string | null>(null);
 
@@ -438,11 +445,11 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
 
   return (
     <div
-      className="flex-1 flex flex-col h-full"
+      className={`flex-1 flex flex-col h-full ${showTopPadding ? 'pt-12' : ''}`}
       style={{ backgroundColor: '#0A0A0B' }}
       data-aria-id="dialogue-mode"
     >
-      <DialogueHeader />
+      <DialogueHeader textOnlyMode={textOnlyMode} />
 
       {isAudioOnly ? (
         /* Audio-only layout: single column */
