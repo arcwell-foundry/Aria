@@ -34,6 +34,11 @@ except ImportError:
     SalesCausalReasoningEngine = None  # type: ignore[assignment,misc]
 
 
+def _sanitize_text(text: str) -> str:
+    """Replace em dashes and en dashes with plain dashes."""
+    return text.replace("\u2014", " - ").replace("\u2013", "-")
+
+
 class NeedsAttentionItem(BaseModel):
     """A single email that needs attention with draft details."""
 
@@ -452,7 +457,7 @@ class BriefingService:
             })
 
         # Generate summary using LLM with PersonaBuilder
-        summary = await self._generate_summary(
+        raw_summary = await self._generate_summary(
             user_id,
             calendar_data,
             lead_data,
@@ -463,6 +468,7 @@ class BriefingService:
             queued_insights=combined_insights if combined_insights else queued_insights,
             causal_actions=causal_actions,
         )
+        summary = _sanitize_text(raw_summary)
 
         content: dict[str, Any] = {
             "summary": summary,
@@ -728,7 +734,7 @@ class BriefingService:
                     "type": "alert_card",
                     "data": {
                         "id": task.get("id"),
-                        "headline": f"Overdue: {task.get('task', 'Unknown task')}",
+                        "headline": f"Overdue: {_sanitize_text(task.get('task', 'Unknown task'))}",
                         "summary": f"Priority: {task.get('priority', 'normal')}. Due: {task.get('due_at', 'unknown')}",
                         "severity": "high",
                     },
@@ -1393,7 +1399,7 @@ class BriefingService:
         for g in overdue_goals_result.data or []:
             if not isinstance(g, dict):
                 continue
-            title = g.get("title", "")
+            title = _sanitize_text(g.get("title", ""))
             due_date = g.get("target_date")
             if title and (
                 title not in overdue_items
@@ -1448,7 +1454,7 @@ class BriefingService:
             goal_id = m.get("goal_id")
             if goal_id not in goal_statuses:
                 continue  # Skip milestones from inactive/other-user goals
-            title = m.get("title", "")
+            title = _sanitize_text(m.get("title", ""))
             due_date = m.get("due_date")
             if title and (
                 title not in overdue_items
@@ -1475,7 +1481,7 @@ class BriefingService:
         for t in overdue_pm_result.data or []:
             if not isinstance(t, dict):
                 continue
-            title = t.get("task", "")
+            title = _sanitize_text(t.get("task", ""))
             due_at = t.get("trigger_config", {}).get("due_at")
             if title and (
                 title not in overdue_items
@@ -1632,7 +1638,7 @@ class BriefingService:
                             days_overdue = f" (overdue by {delta} days)" if delta > 0 else ""
                         except (ValueError, TypeError):
                             pass
-                    overdue_lines.append(f"  - \"{t.get('task', 'Untitled')}\"{days_overdue}")
+                    overdue_lines.append(f"  - \"{_sanitize_text(t.get('task', 'Untitled'))}\"{days_overdue}")
                 overdue_details = "\n".join(overdue_lines)
             overdue_section = (
                 f"OVERDUE TASKS ({overdue_count}):\n{overdue_details}"
@@ -2298,7 +2304,7 @@ IMPORTANT: Only describe information you can directly verify from the data provi
                 f"You have {len(overdue)} overdue task{'s' if len(overdue) > 1 else ''}."
             )
             for task in overdue[:2]:
-                task_desc = task.get("task", "a task")
+                task_desc = _sanitize_text(task.get("task", "a task"))
                 script_parts.append(f"{task_desc}.")
 
         if due_today:

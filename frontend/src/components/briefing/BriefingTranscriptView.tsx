@@ -21,6 +21,11 @@ interface BriefingTranscriptViewProps {
   richContent: RichContent[];
 }
 
+/** Strip em dashes, en dashes, and other typographic artifacts from text */
+function cleanText(text: string): string {
+  return text.replace(/\u2014/g, ' - ').replace(/\u2013/g, '-');
+}
+
 interface GroupedContent {
   priorityActions: RichContent[];
   meetings: RichContent[];
@@ -79,14 +84,17 @@ function groupContent(richContent: RichContent[]): GroupedContent {
           // Sort by most overdue first
           overdueItems.sort((a: { _daysOverdue: number }, b: { _daysOverdue: number }) => b._daysOverdue - a._daysOverdue);
 
-          // Group tasks by contact name (e.g. "Track: Rob Douglas" -> "Rob Douglas")
+          // Group tasks by contact name (e.g. "Track: Rob Douglas - Review proposal" -> "Rob Douglas")
           const contactGroups = new Map<string, typeof overdueItems>();
           const ungrouped: typeof overdueItems = [];
           for (const t of overdueItems) {
-            const taskName = (t.task as string) ?? '';
+            const taskName = cleanText((t.task as string) ?? '');
             const trackMatch = taskName.match(/^Track:\s*(.+)/i);
-            const contactName = trackMatch ? trackMatch[1].trim() : null;
-            if (contactName) {
+            if (trackMatch) {
+              const rest = trackMatch[1].trim();
+              // Split on " - " to separate contact name from task description
+              const separatorIdx = rest.indexOf(' - ');
+              const contactName = separatorIdx >= 0 ? rest.substring(0, separatorIdx).trim() : rest;
               const existing = contactGroups.get(contactName) ?? [];
               existing.push(t);
               contactGroups.set(contactName, existing);
@@ -95,51 +103,74 @@ function groupContent(richContent: RichContent[]): GroupedContent {
             }
           }
 
-          // Render grouped contacts as single cards
+          // Build all overdue cards (grouped + ungrouped) with sort key
+          const overdueCards: { card: RichContent; maxOverdue: number }[] = [];
+
+          // Grouped contacts as single cards
           for (const [contactName, groupTasks] of contactGroups) {
+            const maxOverdue = Math.max(...groupTasks.map((gt: { _daysOverdue: number }) => gt._daysOverdue));
             if (groupTasks.length >= 2) {
-              const maxOverdue = Math.max(...groupTasks.map((gt: { _daysOverdue: number }) => gt._daysOverdue));
-              const taskNames = groupTasks.map((gt: Record<string, unknown>) => (gt.task as string)?.replace(/^Track:\s*/i, '') ?? 'Unknown task');
-              result.priorityActions.push({
-                type: 'alert_card',
-                data: {
-                  id: `grouped-${contactName}`,
-                  company_name: '',
-                  headline: contactName,
-                  summary: `${groupTasks.length} follow-ups overdue (${maxOverdue} days)\n${taskNames.map((n: string) => `- ${n}`).join('\n')}`,
-                  severity: 'high',
+              const taskNames = groupTasks.map((gt: Record<string, unknown>) => {
+                const raw = cleanText((gt.task as string) ?? 'Unknown task');
+                // Remove "Track: ContactName - " prefix to show just the description
+                const stripped = raw.replace(/^Track:\s*.+?\s*-\s*/i, '');
+                return stripped || raw;
+              });
+              overdueCards.push({
+                maxOverdue,
+                card: {
+                  type: 'alert_card',
+                  data: {
+                    id: `grouped-${contactName}`,
+                    company_name: '',
+                    headline: contactName,
+                    summary: `${groupTasks.length} follow-ups overdue (${maxOverdue} days)\n${taskNames.map((n: string) => `- ${n}`).join('\n')}`,
+                    severity: 'high',
+                  },
                 },
               });
             } else {
               // Single task for this contact, render normally
               const t = groupTasks[0];
               const overdueSuffix = t._daysOverdue > 0 ? ` (${t._daysOverdue} days overdue)` : '';
-              result.priorityActions.push({
-                type: 'alert_card',
-                data: {
-                  id: t.id as string,
-                  company_name: '',
-                  headline: `Overdue: ${(t.task as string) ?? 'Unknown task'}`,
-                  summary: `Priority: ${(t.priority as string) ?? 'high'}${overdueSuffix}`,
-                  severity: 'high',
+              overdueCards.push({
+                maxOverdue,
+                card: {
+                  type: 'alert_card',
+                  data: {
+                    id: t.id as string,
+                    company_name: '',
+                    headline: `Overdue: ${cleanText((t.task as string) ?? 'Unknown task')}`,
+                    summary: `Priority: ${(t.priority as string) ?? 'high'}${overdueSuffix}`,
+                    severity: 'high',
+                  },
                 },
               });
             }
           }
 
-          // Render ungrouped overdue tasks individually (sorted by most overdue)
+          // Ungrouped overdue tasks
           for (const t of ungrouped) {
             const overdueSuffix = t._daysOverdue > 0 ? ` (${t._daysOverdue} days overdue)` : '';
-            result.priorityActions.push({
-              type: 'alert_card',
-              data: {
-                id: t.id as string,
-                company_name: '',
-                headline: `Overdue: ${(t.task as string) ?? 'Unknown task'}`,
-                summary: `Priority: ${(t.priority as string) ?? 'high'}${overdueSuffix}`,
-                severity: 'high',
+            overdueCards.push({
+              maxOverdue: t._daysOverdue,
+              card: {
+                type: 'alert_card',
+                data: {
+                  id: t.id as string,
+                  company_name: '',
+                  headline: `Overdue: ${cleanText((t.task as string) ?? 'Unknown task')}`,
+                  summary: `Priority: ${(t.priority as string) ?? 'high'}${overdueSuffix}`,
+                  severity: 'high',
+                },
               },
             });
+          }
+
+          // Sort all overdue cards by most overdue first, then add to priorityActions
+          overdueCards.sort((a, b) => b.maxOverdue - a.maxOverdue);
+          for (const { card } of overdueCards) {
+            result.priorityActions.push(card);
           }
 
           for (const t of tasks.due_today ?? []) {
@@ -148,7 +179,7 @@ function groupContent(richContent: RichContent[]): GroupedContent {
               data: {
                 id: t.id,
                 company_name: '',
-                headline: t.task ?? 'Unknown task',
+                headline: cleanText(t.task ?? 'Unknown task'),
                 summary: `Due today`,
                 severity: 'medium',
               },
@@ -203,7 +234,7 @@ function groupContent(richContent: RichContent[]): GroupedContent {
                 id: s.id,
                 company_name: '',
                 signal_type: 'engagement',
-                headline: `${s.title}: ${s.summary}`,
+                headline: cleanText(`${s.title}: ${s.summary}`),
               },
             });
           }
@@ -239,7 +270,7 @@ export function BriefingTranscriptView({ summary, richContent }: BriefingTranscr
       {/* Summary - always visible, not collapsible */}
       {summary && (
         <div className="pb-3 mb-1 border-b border-[var(--border)]/40">
-          <p className="text-sm leading-relaxed text-[var(--text-primary)] font-light">{summary}</p>
+          <p className="text-sm leading-relaxed text-[var(--text-primary)] font-light">{cleanText(summary)}</p>
         </div>
       )}
 
@@ -375,14 +406,14 @@ function EmailSummaryContent({ data }: { data: NonNullable<BriefingCardData['ema
                 </span>
               </div>
               <p className="text-[11px] text-[var(--text-primary)] leading-snug mt-0.5 truncate">
-                {item.subject}
+                {cleanText(item.subject)}
               </p>
               <p className="text-[10px] text-[var(--text-secondary)] leading-snug mt-0.5">
-                {item.summary}
+                {cleanText(item.summary)}
               </p>
               {item.aria_notes && (
                 <p className="text-[10px] text-[var(--accent)] leading-snug mt-0.5 italic">
-                  {item.aria_notes}
+                  {cleanText(item.aria_notes)}
                 </p>
               )}
               {item.draft_confidence && (
@@ -410,7 +441,7 @@ function EmailSummaryContent({ data }: { data: NonNullable<BriefingCardData['ema
             <ul className="mt-1 space-y-0.5 pl-3">
               {data.fyi_highlights.map((h, i) => (
                 <li key={i} className="text-[10px] text-[var(--text-secondary)] leading-snug">
-                  &middot; {h}
+                  &middot; {cleanText(h)}
                 </li>
               ))}
             </ul>
@@ -432,14 +463,14 @@ function EmailSummaryContent({ data }: { data: NonNullable<BriefingCardData['ema
                 className="rounded border border-[var(--accent)]/20 px-2 py-1"
                 style={{ backgroundColor: 'color-mix(in srgb, var(--accent) 5%, transparent)' }}
               >
-                <p className="text-[10px] text-[var(--accent)] font-medium">{conn.topic}</p>
+                <p className="text-[10px] text-[var(--accent)] font-medium">{cleanText(conn.topic)}</p>
                 {conn.emails.map((e, j) => (
                   <p key={j} className="text-[10px] text-[var(--text-secondary)] leading-snug">
-                    &middot; {e}
+                    &middot; {cleanText(e)}
                   </p>
                 ))}
                 <p className="text-[9px] text-[var(--text-secondary)] italic mt-0.5">
-                  {conn.insight}
+                  {cleanText(conn.insight)}
                 </p>
               </li>
             ))}
