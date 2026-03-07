@@ -74,11 +74,35 @@ export function WhyIWroteThisModule({ reasoning: propReasoning }: WhyIWroteThisM
           >
             Why I Wrote This
           </h3>
-          <div
-            className="text-sm leading-relaxed whitespace-pre-line"
-            style={{ color: 'var(--text-primary)' }}
-          >
-            {draft.aria_reasoning}
+          <div className="text-sm leading-relaxed">
+            {draft.aria_reasoning.split('\n').map((line, i) => {
+              if (line.startsWith('## ')) {
+                return (
+                  <h4
+                    key={i}
+                    className="text-xs font-semibold uppercase tracking-wide text-blue-600 mt-3 mb-1"
+                  >
+                    {line.replace('## ', '')}
+                  </h4>
+                );
+              }
+              if (line.startsWith('• ') || line.startsWith('- ')) {
+                return (
+                  <div key={i} className="flex gap-2 pl-1" style={{ color: 'var(--text-primary)' }}>
+                    <span className="text-slate-400">•</span>
+                    <span>{line.replace(/^[•\-]\s*/, '')}</span>
+                  </div>
+                );
+              }
+              if (line.trim() === '') {
+                return <div key={i} className="h-2" />;
+              }
+              return (
+                <p key={i} className="mb-1" style={{ color: 'var(--text-primary)' }}>
+                  {line}
+                </p>
+              );
+            })}
           </div>
           {draft.style_match_score !== undefined && (
             <div className="flex items-center gap-2 text-xs pt-1 border-t"
