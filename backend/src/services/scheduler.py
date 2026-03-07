@@ -1883,6 +1883,73 @@ async def _run_conference_recommendations() -> None:
         logger.exception("[Scheduler] Conference recommendations failed")
 
 
+async def _run_pre_conference_briefings() -> None:
+    """Generate pre-conference briefings for upcoming conferences (14-30 days out)."""
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        from src.db.supabase import SupabaseClient
+        from src.intelligence.conference_intelligence import ConferenceIntelligenceEngine
+
+        db = SupabaseClient.get_client()
+        now = datetime.now(timezone.utc).date()
+        window_start = now + timedelta(days=14)
+        window_end = now + timedelta(days=30)
+
+        recs = (
+            db.table("conference_recommendations")
+            .select("user_id, conference_id")
+            .in_("recommendation_type", ["must_attend", "consider"])
+            .execute()
+        )
+
+        if not recs.data:
+            return
+
+        for rec in recs.data:
+            try:
+                conf = (
+                    db.table("conferences")
+                    .select("id, name, start_date")
+                    .eq("id", rec["conference_id"])
+                    .gte("start_date", window_start.isoformat())
+                    .lte("start_date", window_end.isoformat())
+                    .limit(1)
+                    .execute()
+                )
+                if not conf.data:
+                    continue
+
+                existing = (
+                    db.table("conference_insights")
+                    .select("id")
+                    .eq("user_id", rec["user_id"])
+                    .eq("conference_id", rec["conference_id"])
+                    .eq("insight_type", "pre_conference_briefing")
+                    .limit(1)
+                    .execute()
+                )
+                if existing.data:
+                    continue
+
+                engine = ConferenceIntelligenceEngine(db)
+                await engine.generate_pre_conference_briefing(
+                    rec["user_id"], rec["conference_id"]
+                )
+                logger.info(
+                    "Pre-conference briefing generated for %s",
+                    conf.data[0]["name"],
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to generate pre-conference briefing for conference %s",
+                    rec["conference_id"],
+                    exc_info=True,
+                )
+    except Exception:
+        logger.warning("Pre-conference briefing job failed", exc_info=True)
+
+
 _scheduler: Any = None
 
 
@@ -2183,6 +2250,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(day_of_week="mon", hour=5, minute=0),
             id="conference_recommendations",
             name="Weekly conference recommendations refresh",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_pre_conference_briefings,
+            trigger=CronTrigger(day_of_week="mon", hour=6, minute=0),
+            id="pre_conference_briefings",
+            name="Weekly pre-conference briefing generation",
             replace_existing=True,
         )
         _scheduler.start()
