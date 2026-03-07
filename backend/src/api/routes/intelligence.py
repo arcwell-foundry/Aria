@@ -2369,3 +2369,106 @@ async def get_therapeutic_trends(
             status_code=500,
             detail="Failed to retrieve therapeutic trends. Please try again.",
         ) from e
+
+
+@router.get("/conferences/upcoming")
+async def get_upcoming_conferences(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get upcoming conferences with relevance recommendations for the user."""
+    try:
+        from src.intelligence.conference_intelligence import (
+            ConferenceIntelligenceEngine,
+        )
+
+        db = get_supabase_client()
+        engine = ConferenceIntelligenceEngine(db)
+        recommendations = await engine.generate_recommendations(
+            str(current_user.id)
+        )
+
+        logger.info(
+            "Conference recommendations retrieved",
+            extra={
+                "user_id": current_user.id,
+                "count": len(recommendations),
+            },
+        )
+
+        return {"conferences": recommendations, "count": len(recommendations)}
+
+    except Exception as e:
+        logger.exception(
+            "Conference recommendations failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve conference recommendations.",
+        ) from e
+
+
+@router.get("/conferences/{conference_id}")
+async def get_conference_detail(
+    conference_id: str,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get detailed conference info with participants and insights."""
+    try:
+        db = get_supabase_client()
+
+        conf = (
+            db.table("conferences")
+            .select("*")
+            .eq("id", conference_id)
+            .limit(1)
+            .execute()
+        )
+        if not conf.data:
+            raise HTTPException(
+                status_code=404, detail="Conference not found"
+            )
+
+        participants = (
+            db.table("conference_participants")
+            .select("*")
+            .eq("conference_id", conference_id)
+            .order("participation_type")
+            .execute()
+        )
+
+        insights = (
+            db.table("conference_insights")
+            .select("*")
+            .eq("conference_id", conference_id)
+            .eq("user_id", str(current_user.id))
+            .order("created_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+
+        return {
+            "conference": conf.data[0],
+            "participants": participants.data or [],
+            "insights": insights.data or [],
+            "competitor_count": sum(
+                1
+                for p in (participants.data or [])
+                if p.get("is_competitor")
+            ),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(
+            "Conference detail retrieval failed",
+            extra={
+                "user_id": current_user.id,
+                "conference_id": conference_id,
+            },
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve conference details.",
+        ) from e

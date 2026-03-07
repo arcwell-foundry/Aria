@@ -39,6 +39,7 @@ import {
   StakeholderMapModule,
   DocumentIntelModule,
   PendingApprovalsModule,
+  UpcomingConferencesModule,
 } from '@/components/shell/intel-modules';
 
 interface IntelPanelProps {
@@ -103,6 +104,7 @@ function getPanelConfig(pathname: string): PanelConfig {
       modules: [
         <JarvisInsightsModule key="jarvis" />,
         <CompetitiveIntelModule key="competitive" />,
+        <UpcomingConferencesModule key="conferences" />,
         <NewsAlertsModule key="news" />,
         <DocumentIntelModule key="documents" />,
         <NextBestActionModule key="action" />,

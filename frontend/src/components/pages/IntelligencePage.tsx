@@ -19,7 +19,7 @@ import { useParams } from 'react-router-dom';
 import { useState, useMemo } from 'react';
 import { Newspaper, TrendingUp, FlaskConical, ChevronDown, ChevronUp } from 'lucide-react';
 import { useBattleCards } from '@/hooks/useBattleCards';
-import { BattleCardPreview, BattleCardPreviewSkeleton, MarketSignalsFeed } from '@/components/intelligence';
+import { BattleCardPreview, BattleCardPreviewSkeleton, MarketSignalsFeed, ConferenceSection } from '@/components/intelligence';
 import { EmptyState } from '@/components/common/EmptyState';
 import { useUnreadSignalCount, useTherapeuticTrends, useReturnBriefing } from '@/hooks/useIntelPanelData';
 import { BattleCardDetail } from '@/components/pages/BattleCardDetail';
@@ -319,6 +319,9 @@ function IntelligenceOverview() {
 
           {/* Therapeutic Trends Section */}
           <TherapeuticTrendsSection />
+
+          {/* Conference Recommendations Section */}
+          <ConferenceSection />
 
           {/* Market Signals Section */}
           <section>

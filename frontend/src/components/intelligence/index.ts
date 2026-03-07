@@ -8,3 +8,4 @@
 export { BattleCardPreview, BattleCardPreviewSkeleton } from './BattleCardPreview';
 export type { BattleCardPreviewProps } from './BattleCardPreview';
 export { MarketSignalsFeed } from './MarketSignalsFeed';
+export { ConferenceSection } from './ConferenceSection';

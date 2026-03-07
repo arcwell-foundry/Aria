@@ -1781,6 +1781,60 @@ async def _run_reconciliation_sweep() -> None:
     logger.info("Reconciliation sweep: stub (not yet implemented)")
 
 
+async def _run_conference_enrichment() -> None:
+    """Weekly: Enrich upcoming conferences with exhibitor/speaker data via Exa."""
+    logger.info("[Scheduler] Running conference enrichment")
+    try:
+        from src.db.supabase import SupabaseClient
+        from src.intelligence.conference_intelligence import (
+            ConferenceIntelligenceEngine,
+        )
+
+        db = SupabaseClient.get_client()
+
+        exa = None
+        try:
+            from src.services.exa_service import get_exa_client
+
+            exa = get_exa_client()
+        except Exception:
+            pass
+
+        engine = ConferenceIntelligenceEngine(db, exa)
+        count = await engine.enrich_upcoming_conferences(days_ahead=90)
+        logger.info(
+            "[Scheduler] Conference enrichment complete: %d participants added",
+            count,
+        )
+    except Exception:
+        logger.exception("[Scheduler] Conference enrichment failed")
+
+
+async def _run_conference_recommendations() -> None:
+    """Weekly: Regenerate conference recommendations for all users."""
+    logger.info("[Scheduler] Running conference recommendations")
+    try:
+        from src.db.supabase import SupabaseClient
+        from src.intelligence.conference_intelligence import (
+            ConferenceIntelligenceEngine,
+        )
+
+        db = SupabaseClient.get_client()
+        engine = ConferenceIntelligenceEngine(db)
+
+        users = db.table("user_profiles").select("id").execute()
+        if users.data:
+            for user in users.data:
+                recs = await engine.generate_recommendations(user["id"])
+                logger.info(
+                    "[Scheduler] Generated %d recommendations for user %s",
+                    len(recs),
+                    user["id"],
+                )
+    except Exception:
+        logger.exception("[Scheduler] Conference recommendations failed")
+
+
 _scheduler: Any = None
 
 
@@ -2067,6 +2121,20 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(day=1, hour=3, minute=0),  # 1st of month, 3 AM UTC
             id="market_cap_update",
             name="Monthly market cap Exa enrichment",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_conference_enrichment,
+            trigger=CronTrigger(day_of_week="mon", hour=4, minute=0),
+            id="conference_enrichment",
+            name="Weekly conference exhibitor/speaker enrichment",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_conference_recommendations,
+            trigger=CronTrigger(day_of_week="mon", hour=5, minute=0),
+            id="conference_recommendations",
+            name="Weekly conference recommendations refresh",
             replace_existing=True,
         )
         _scheduler.start()

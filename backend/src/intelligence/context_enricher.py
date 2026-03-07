@@ -20,6 +20,7 @@ from src.intelligence.therapeutic_area_intelligence import (
     detect_manufacturing_modality,
     format_therapeutic_context,
 )
+from src.intelligence.conference_intelligence import ConferenceIntelligenceEngine
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,24 @@ class ContextEnricher:
                     "[ContextEnricher] Therapeutic: %s, Modalities: %s",
                     therapeutic_areas,
                     manufacturing_modalities,
+                )
+
+            # Conference mention detection
+            try:
+                conf_engine = ConferenceIntelligenceEngine(self._db)
+                conf_mention = conf_engine.detect_conference_mention(event)
+                if conf_mention:
+                    context["conference"] = conf_mention
+                    context["conference_context"] = (
+                        conf_engine.format_conference_context(conf_mention)
+                    )
+                    logger.info(
+                        "[ContextEnricher] Conference detected: %s",
+                        conf_mention["conference_name"],
+                    )
+            except Exception as e:
+                logger.warning(
+                    "[ContextEnricher] Conference detection failed: %s", e
                 )
 
             logger.info(
@@ -583,6 +602,9 @@ class ContextEnricher:
 
         if context.get("therapeutic_context"):
             parts.append(context["therapeutic_context"])
+
+        if context.get("conference_context"):
+            parts.append(context["conference_context"])
 
         # Active goals
         goals = context.get("active_goals", [])

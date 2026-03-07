@@ -38,6 +38,7 @@ export function useRouteContext() {
 import { listSignals, markSignalRead, markAllRead, dismissSignal, getUnreadCount, type SignalFilters } from "@/api/signals";
 import { getTherapeuticTrends, type TherapeuticTrend } from "@/api/therapeuticTrends";
 import { getReturnBriefing, type ReturnBriefing } from "@/api/returnBriefing";
+import { getUpcomingConferences, type ConferenceRecommendation } from "@/api/conferences";
 import {
   listInsights,
   updateInsightFeedback,
@@ -241,6 +242,17 @@ export function useTherapeuticTrends(days = 30) {
     queryKey: ["intel", "therapeutic-trends", days],
     queryFn: () => getTherapeuticTrends(days),
     staleTime: 5 * 60_000, // 5 minutes
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Conference recommendations hooks (IntelligencePage + IntelPanel)
+// ---------------------------------------------------------------------------
+export function useUpcomingConferences() {
+  return useQuery<ConferenceRecommendation[]>({
+    queryKey: ["intel", "conferences", "upcoming"],
+    queryFn: getUpcomingConferences,
+    staleTime: 30 * 60_000, // 30 minutes
   });
 }
 
