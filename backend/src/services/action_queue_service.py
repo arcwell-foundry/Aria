@@ -221,11 +221,29 @@ class ActionQueueService:
         )
 
         if result.data:
+            action = cast(dict[str, Any], result.data[0])
             logger.info(
                 "Action approved",
                 extra={"action_id": action_id, "user_id": user_id},
             )
-            return cast(dict[str, Any], result.data[0])
+
+            # Execute post-approval downstream actions
+            try:
+                from src.intelligence.action_executor import ActionExecutor
+
+                executor = ActionExecutor(self._db)
+                execution_result = await executor.execute_approved_action(
+                    action_id, user_id
+                )
+                action["execution"] = execution_result
+            except Exception:
+                logger.warning(
+                    "Post-approval execution failed",
+                    extra={"action_id": action_id},
+                    exc_info=True,
+                )
+
+            return action
 
         logger.warning(
             "Action not found or not pending for approval",
@@ -280,6 +298,26 @@ class ActionQueueService:
                     extra={"action_id": action_id},
                     exc_info=True,
                 )
+
+            # Sync proactive_proposals status to dismissed
+            try:
+                payload = action.get("payload", {})
+                if isinstance(payload, str):
+                    import json
+                    payload = json.loads(payload)
+                insight_id = payload.get("insight_id") if isinstance(payload, dict) else None
+                if insight_id:
+                    self._db.table("proactive_proposals").update({
+                        "status": "dismissed",
+                        "responded_at": datetime.now(UTC).isoformat(),
+                    }).eq("insight_id", insight_id).eq("user_id", user_id).execute()
+            except Exception:
+                logger.warning(
+                    "Failed to sync proactive_proposals on rejection",
+                    extra={"action_id": action_id},
+                    exc_info=True,
+                )
+
             return action
 
         logger.warning(
