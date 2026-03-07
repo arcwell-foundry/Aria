@@ -56,9 +56,9 @@ const PURPOSE_LABELS: Record<EmailDraftPurpose, string> = {
 
 // Draft type badge styles for intelligence-generated drafts
 const DRAFT_TYPE_STYLES: Record<string, { label: string; bg: string; text: string; icon?: string }> = {
-  competitive_displacement: { label: '🎯 Displacement', bg: '#7c3aed', text: 'white' },
-  conference_outreach: { label: '📢 Conference', bg: '#0891b2', text: 'white' },
-  clinical_trial_outreach: { label: '🔬 Clinical', bg: '#059669', text: 'white' },
+  competitive_displacement: { label: 'Displacement', bg: '#7c3aed', text: 'white' },
+  conference_outreach: { label: 'Conference', bg: '#0891b2', text: 'white' },
+  clinical_trial_outreach: { label: 'Clinical', bg: '#059669', text: 'white' },
 };
 
 // Status badge styles - covers all known statuses plus fallback for unknown
