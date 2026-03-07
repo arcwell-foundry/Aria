@@ -760,6 +760,12 @@ These are signals ARIA has detected. You gathered this intelligence - reference 
 
 {signals}"""
 
+JARVIS_INSIGHTS_TEMPLATE = """## ARIA's Recent Intelligence Insights
+
+These are Jarvis-generated intelligence insights. Reference them when relevant to the conversation:
+
+{insights}"""
+
 USER_CALIBRATION_TEMPLATE = """## User Communication Preferences
 
 {tone_guidance}
@@ -2954,6 +2960,7 @@ class ChatService:
             causal_result,
             user_mental_model,
             market_signals_ctx,
+            jarvis_insights_ctx,
         ) = await asyncio.gather(
             _safe(self._query_relevant_memories(
                 user_id=user_id, query=message, memory_types=memory_types,
@@ -2971,6 +2978,7 @@ class ChatService:
             ), None, "causal"),
             _safe(self._user_model_service.get_model(user_id), None, "user_model"),
             _safe(self._get_recent_signals(user_id, message), [], "market_signals"),
+            _safe(self._get_recent_jarvis_insights(user_id), "", "jarvis_insights"),
         )
         context_ms = (time.perf_counter() - context_start) * 1000
 
@@ -2984,6 +2992,8 @@ class ChatService:
             user_mental_model = None
         if isinstance(market_signals_ctx, Exception):
             market_signals_ctx = []
+        if isinstance(jarvis_insights_ctx, Exception):
+            jarvis_insights_ctx = ""
 
         # Timing placeholders (parallelized - individual times ~ total)
         memory_ms = context_ms
@@ -3222,6 +3232,7 @@ class ChatService:
                 causal_actions=causal_actions,
                 user_mental_model=user_mental_model,
                 market_signals=market_signals_ctx,
+                jarvis_insights=jarvis_insights_ctx,
             )
         else:
             system_prompt = self._build_system_prompt(
@@ -3237,6 +3248,7 @@ class ChatService:
                 digital_twin_calibration=digital_twin_calibration,
                 capability_context=capability_context,
                 market_signals=market_signals_ctx,
+                jarvis_insights=jarvis_insights_ctx,
             )
 
         # Inject friction flag note into system prompt if flagged
@@ -3941,6 +3953,34 @@ class ChatService:
             logger.warning("Failed to fetch market signals for context: %s", e)
             return []
 
+    async def _get_recent_jarvis_insights(self, user_id: str) -> str:
+        """Fetch recent Jarvis intelligence insights for chat context."""
+        try:
+            db = get_supabase_client()
+            result = (
+                db.table("jarvis_insights")
+                .select("classification, content, confidence")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .limit(5)
+                .execute()
+            )
+
+            if not result.data:
+                return ""
+
+            lines = ["ARIA's Recent Intelligence Insights:"]
+            for i in result.data:
+                classification = (i.get("classification") or "intelligence").upper()
+                content = (i.get("content") or "")[:150]
+                confidence = i.get("confidence", 0)
+                lines.append(
+                    f"- [{classification}] ({confidence:.0%}) {content}"
+                )
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
     async def _enrich_message_with_signal_context(
         self, user_id: str, message: str
     ) -> str:
@@ -4226,6 +4266,7 @@ class ChatService:
         digital_twin_calibration: dict[str, Any] | None = None,
         capability_context: str | None = None,
         market_signals: list[dict[str, Any]] | None = None,
+        jarvis_insights: str | None = None,
     ) -> str:
         """Build system prompt with all context layers.
 
@@ -4335,6 +4376,12 @@ class ChatService:
                 signals="\n".join(signal_lines)
             )
 
+        # Add Jarvis intelligence insights
+        if jarvis_insights:
+            base_prompt += "\n\n" + JARVIS_INSIGHTS_TEMPLATE.format(
+                insights=jarvis_insights
+            )
+
         # Add dedicated procedural memory section
         if procedural_memories:
             workflow_lines = [f"- {mem['content']}" for mem in procedural_memories]
@@ -4431,6 +4478,7 @@ class ChatService:
         causal_actions: list[Any] | None = None,
         user_mental_model: Any = None,
         market_signals: list[dict[str, Any]] | None = None,
+        jarvis_insights: str | None = None,
     ) -> str:
         """Build system prompt using PersonaBuilder (v2).
 
@@ -4591,6 +4639,12 @@ class ChatService:
                     signal_lines.append(line)
                 prompt += "\n\n" + MARKET_SIGNALS_TEMPLATE.format(
                     signals="\n".join(signal_lines)
+                )
+
+            # Add Jarvis intelligence insights
+            if jarvis_insights:
+                prompt += "\n\n" + JARVIS_INSIGHTS_TEMPLATE.format(
+                    insights=jarvis_insights
                 )
 
             # Add capability context for ARIA self-awareness
