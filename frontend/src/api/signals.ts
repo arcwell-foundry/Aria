@@ -14,6 +14,9 @@ export interface Signal {
   read_at: string | null;
   dismissed_at: string | null;
   created_at: string;
+  cluster_id?: string | null;
+  is_cluster_primary?: boolean;
+  linked_insight_id?: string | null;
 }
 
 export interface SignalFilters {

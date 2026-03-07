@@ -5,6 +5,12 @@
  * changes, earnings, partnerships, regulatory updates, product launches, and
  * hiring signals detected by ARIA's Scout and Analyst agents.
  *
+ * V2 Enhancements:
+ * - Priority Signals section at top (highest-relevance signals from last 48h)
+ * - Signal deduplication (cluster_id grouping, primary-only display)
+ * - ARIA analysis on expand (linked insight + recommended actions)
+ * - "Watched" filter chip
+ *
  * Light theme component (Intelligence page context).
  */
 
@@ -24,6 +30,8 @@ import {
   X,
   Eye,
   Filter,
+  Zap,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { sanitizeSignalText } from "@/utils/sanitizeSignalText";
@@ -34,8 +42,11 @@ import {
   useMarkSignalRead,
   useMarkAllSignalsRead,
   useDismissSignal,
+  usePrioritySignals,
+  useWatchTopics,
   formatRelativeTime,
 } from "@/hooks/useIntelPanelData";
+import { useIntelligenceInsights } from "@/hooks/useIntelPanelData";
 import type { Signal } from "@/api/signals";
 
 // ---------------------------------------------------------------------------
@@ -103,16 +114,118 @@ function FilterChip({
 }
 
 // ---------------------------------------------------------------------------
-// Signal Card
+// Priority Signal Card
+// ---------------------------------------------------------------------------
+function PrioritySignalCard({
+  signal,
+}: {
+  signal: {
+    id: string;
+    headline: string;
+    company_name: string;
+    signal_type: string;
+    relevance_score: number;
+    linked_insight_id: string | null;
+    linked_action_summary: string | null;
+  };
+}) {
+  const config = getSignalConfig(signal.signal_type);
+  const Icon = config.icon;
+
+  return (
+    <div
+      className="rounded-lg border p-4"
+      style={{
+        backgroundColor: "#FFFBEB",
+        borderColor: "#FDE68A",
+        borderLeftWidth: "3px",
+        borderLeftColor: config.color,
+      }}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center"
+          style={{ backgroundColor: `${config.color}18` }}
+        >
+          <Icon className="w-4 h-4" style={{ color: config.color }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span
+              className="text-sm font-medium"
+              style={{ color: "var(--text-primary)" }}
+            >
+              {signal.company_name}
+            </span>
+            <span
+              className="px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide"
+              style={{
+                backgroundColor: `${config.color}18`,
+                color: config.color,
+              }}
+            >
+              {config.label}
+            </span>
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-semibold"
+              style={{ color: "#DC2626" }}
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ backgroundColor: "#DC2626" }}
+              />
+              High
+            </span>
+          </div>
+          <p
+            className="text-sm leading-relaxed"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            {sanitizeSignalText(signal.headline, 300)}
+          </p>
+          {signal.linked_action_summary && (
+            <div
+              className="mt-2 flex items-start gap-1.5 text-xs"
+              style={{ color: "var(--accent, #2E66FF)" }}
+            >
+              <Zap className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+              <span>ARIA insight: {signal.linked_action_summary}</span>
+            </div>
+          )}
+          {!signal.linked_action_summary && signal.linked_insight_id && (
+            <div
+              className="mt-2 flex items-start gap-1.5 text-xs"
+              style={{ color: "#94A3B8" }}
+            >
+              <Zap className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+              <span>ARIA is analyzing...</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Signal Card (with dedup badge and ARIA analysis)
 // ---------------------------------------------------------------------------
 function SignalCard({
   signal,
+  clusterCount,
   onMarkRead,
   onDismiss,
+  linkedInsight,
 }: {
   signal: Signal;
+  clusterCount: number;
   onMarkRead: (id: string) => void;
   onDismiss: (id: string) => void;
+  linkedInsight?: {
+    content: string;
+    recommended_actions: string[];
+    classification: string;
+  } | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const config = getSignalConfig(signal.signal_type);
@@ -162,6 +275,16 @@ function SignalCard({
           >
             {config.label}
           </span>
+          {/* Cluster/dedup badge */}
+          {clusterCount > 1 && (
+            <span
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium"
+              style={{ backgroundColor: "#F1F5F9", color: "#5B6E8A" }}
+            >
+              <Layers className="w-3 h-3" />
+              {clusterCount} sources
+            </span>
+          )}
           {/* Relevance indicator */}
           {relevance >= 0.9 && (
             <span
@@ -208,6 +331,42 @@ function SignalCard({
                 {sanitizeSignalText(signal.summary, 1000)}
               </p>
             )}
+
+            {/* ARIA Analysis (from linked insight) */}
+            {linkedInsight && (
+              <div
+                className="rounded-lg p-3 mt-2"
+                style={{
+                  backgroundColor: linkedInsight.classification === 'threat' ? '#FEF2F210' : '#F0FDF410',
+                  border: `1px solid ${linkedInsight.classification === 'threat' ? '#FECACA' : '#BBF7D0'}`,
+                }}
+              >
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Zap className="w-3.5 h-3.5" style={{ color: 'var(--accent, #2E66FF)' }} />
+                  <span className="text-xs font-semibold" style={{ color: '#1E293B' }}>
+                    ARIA&apos;s Analysis
+                  </span>
+                </div>
+                <p className="text-xs leading-relaxed" style={{ color: '#5B6E8A' }}>
+                  {linkedInsight.content}
+                </p>
+                {linkedInsight.recommended_actions.length > 0 && (
+                  <div className="mt-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#5B6E8A' }}>
+                      Recommended:
+                    </span>
+                    <ul className="mt-1 space-y-0.5">
+                      {linkedInsight.recommended_actions.slice(0, 3).map((action, i) => (
+                        <li key={i} className="text-xs" style={{ color: '#5B6E8A' }}>
+                          &bull; {action}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center gap-3 flex-wrap">
               {signal.source_url && (
                 <a
@@ -390,6 +549,7 @@ export function MarketSignalsFeed() {
   const [selectedType, setSelectedType] = useState<string | undefined>(undefined);
   const [selectedCompany, setSelectedCompany] = useState<string | undefined>(undefined);
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [watchedOnly, setWatchedOnly] = useState(false);
 
   // Data hooks
   const { data: signals, isLoading } = useSignals({
@@ -398,9 +558,28 @@ export function MarketSignalsFeed() {
     limit: 50,
   });
   const { data: unreadCount } = useUnreadSignalCount();
+  const { data: priorityData } = usePrioritySignals(48);
+  const { data: watchTopicsData } = useWatchTopics();
+  const { data: allInsights } = useIntelligenceInsights({ limit: 30 });
   const markRead = useMarkSignalRead();
   const markAllRead = useMarkAllSignalsRead();
   const dismiss = useDismissSignal();
+
+  const watchTopics = watchTopicsData?.topics ?? [];
+  const prioritySignals = priorityData?.signals ?? [];
+
+  // Build insight lookup by ID for linked insights
+  const insightById = useMemo(() => {
+    const map: Record<string, { content: string; recommended_actions: string[]; classification: string }> = {};
+    for (const ins of allInsights ?? []) {
+      map[ins.id] = {
+        content: ins.content,
+        recommended_actions: ins.recommended_actions ?? [],
+        classification: ins.classification,
+      };
+    }
+    return map;
+  }, [allInsights]);
 
   // Build company filter chips from loaded signals
   const companyChips = useMemo(() => {
@@ -416,9 +595,30 @@ export function MarketSignalsFeed() {
     return { named, hasOther };
   }, [signals]);
 
-  // Filter dismissed signals client-side + company filter
+  // Build cluster counts for deduplication
+  const clusterCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const s of signals ?? []) {
+      const clusterId = (s as unknown as { cluster_id?: string }).cluster_id;
+      if (clusterId) {
+        counts[clusterId] = (counts[clusterId] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [signals]);
+
+  // Filter: dismissed, company, dedup (show only primary or no cluster), watched
   const visibleSignals = useMemo(() => {
     let filtered = (signals ?? []).filter((s) => !s.dismissed_at);
+
+    // Dedup: hide non-primary cluster members
+    filtered = filtered.filter((s) => {
+      const ext = s as unknown as { is_cluster_primary?: boolean; cluster_id?: string };
+      if (ext.cluster_id && ext.is_cluster_primary === false) return false;
+      return true;
+    });
+
+    // Company filter
     if (selectedCompany === "__other__") {
       const namedSet = new Set(companyChips.named);
       filtered = filtered.filter(
@@ -427,10 +627,21 @@ export function MarketSignalsFeed() {
     } else if (selectedCompany) {
       filtered = filtered.filter((s) => s.company_name === selectedCompany);
     }
-    return filtered;
-  }, [signals, selectedCompany, companyChips.named]);
 
-  const hasFilters = !!selectedType || !!selectedCompany || unreadOnly;
+    // Watched filter
+    if (watchedOnly && watchTopics.length > 0) {
+      const watchKeywords = watchTopics
+        .flatMap((t) => [t.topic_value.toLowerCase(), ...t.keywords.map((k) => k.toLowerCase())]);
+      filtered = filtered.filter((s) => {
+        const text = ((s.content ?? '') + ' ' + (s.company_name ?? '')).toLowerCase();
+        return watchKeywords.some((kw) => text.includes(kw));
+      });
+    }
+
+    return filtered;
+  }, [signals, selectedCompany, companyChips.named, watchedOnly, watchTopics]);
+
+  const hasFilters = !!selectedType || !!selectedCompany || unreadOnly || watchedOnly;
 
   return (
     <div
@@ -440,6 +651,29 @@ export function MarketSignalsFeed() {
         backgroundColor: "var(--bg-elevated)",
       }}
     >
+      {/* Priority Signals Section */}
+      {prioritySignals.length > 0 && !hasFilters && (
+        <div
+          className="px-4 py-3 border-b"
+          style={{ borderColor: "var(--border)", backgroundColor: "#FFFDF7" }}
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <Zap className="w-4 h-4" style={{ color: "#F59E0B" }} />
+            <span
+              className="text-xs font-semibold uppercase tracking-wider"
+              style={{ color: "#92400E" }}
+            >
+              Priority Signals ({prioritySignals.length})
+            </span>
+          </div>
+          <div className="space-y-2">
+            {prioritySignals.slice(0, 3).map((ps) => (
+              <PrioritySignalCard key={ps.id} signal={ps} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div
         className="px-4 py-3 border-b flex items-center justify-between gap-3"
@@ -449,19 +683,30 @@ export function MarketSignalsFeed() {
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
           <FilterChip
             label="All"
-            active={!selectedType}
-            onClick={() => setSelectedType(undefined)}
+            active={!selectedType && !watchedOnly}
+            onClick={() => { setSelectedType(undefined); setWatchedOnly(false); }}
           />
           {ALL_SIGNAL_TYPES.map((type) => (
             <FilterChip
               key={type}
               label={SIGNAL_TYPE_MAP[type].label}
               active={selectedType === type}
-              onClick={() =>
-                setSelectedType(selectedType === type ? undefined : type)
-              }
+              onClick={() => {
+                setSelectedType(selectedType === type ? undefined : type);
+                setWatchedOnly(false);
+              }}
             />
           ))}
+          {watchTopics.length > 0 && (
+            <FilterChip
+              label="Watched"
+              active={watchedOnly}
+              onClick={() => {
+                setWatchedOnly(!watchedOnly);
+                setSelectedType(undefined);
+              }}
+            />
+          )}
         </div>
 
         {/* Right actions */}
@@ -552,14 +797,22 @@ export function MarketSignalsFeed() {
           <SignalEmptyState hasFilters={hasFilters} />
         ) : (
           <div className="space-y-2">
-            {visibleSignals.map((signal) => (
-              <SignalCard
-                key={signal.id}
-                signal={signal}
-                onMarkRead={(id) => markRead.mutate(id)}
-                onDismiss={(id) => dismiss.mutate(id)}
-              />
-            ))}
+            {visibleSignals.map((signal) => {
+              const ext = signal as unknown as { cluster_id?: string; linked_insight_id?: string };
+              const clusterCount = ext.cluster_id ? (clusterCounts[ext.cluster_id] ?? 1) : 1;
+              const insight = ext.linked_insight_id ? insightById[ext.linked_insight_id] : null;
+
+              return (
+                <SignalCard
+                  key={signal.id}
+                  signal={signal}
+                  clusterCount={clusterCount}
+                  onMarkRead={(id) => markRead.mutate(id)}
+                  onDismiss={(id) => dismiss.mutate(id)}
+                  linkedInsight={insight}
+                />
+              );
+            })}
           </div>
         )}
       </div>

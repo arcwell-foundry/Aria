@@ -10,7 +10,6 @@
  */
 
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { ArrowUp, ArrowDown, ArrowRight, Activity } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { BattleCard } from '@/api/battleCards';
@@ -129,7 +128,6 @@ export function BattleCardPreviewSkeleton() {
 }
 
 export function BattleCardPreview({ card, className = '' }: BattleCardPreviewProps) {
-  const navigate = useNavigate();
   const analysis = card.analysis;
 
   const threatLevel = analysis?.threat_level;
@@ -150,13 +148,9 @@ export function BattleCardPreview({ card, className = '' }: BattleCardPreviewPro
       }).filter(Boolean)
     : (card.strengths ?? []).slice(0, 2);
 
-  const handleClick = () => {
-    navigate(`/intelligence/battle-cards/${encodeURIComponent(card.competitor_name)}`);
-  };
-
   // Build threat tooltip
   const threatTooltip = threatLevel
-    ? `${threatLevel.charAt(0).toUpperCase() + threatLevel.slice(1)} Threat: ${signalCount30d ?? 0} signals in 30 days, ${highImpactSignals ?? 0} high-impact signals. Threat is calculated from signal volume, impact types (product launches, funding, FDA approvals), and recency of activity.`
+    ? `Threat Level: ${threatLevel.charAt(0).toUpperCase() + threatLevel.slice(1)} \u2014 ${signalCount30d ?? 0} signals in 30 days, ${highImpactSignals ?? 0} high-impact. Based on signal volume, impact types, and recency.`
     : '';
 
   // Build momentum tooltip
@@ -166,7 +160,6 @@ export function BattleCardPreview({ card, className = '' }: BattleCardPreviewPro
 
   return (
     <div
-      onClick={handleClick}
       data-aria-id={`battle-card-${card.competitor_name}`}
       className={cn(
         'rounded-xl border cursor-pointer',
@@ -188,14 +181,6 @@ export function BattleCardPreview({ card, className = '' }: BattleCardPreviewPro
       onMouseLeave={(e) => {
         e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)';
         e.currentTarget.style.borderColor = '#E2E8F0';
-      }}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          handleClick();
-        }
       }}
     >
       {/* Row 1: Competitor Name + Threat Dot */}
@@ -308,19 +293,6 @@ export function BattleCardPreview({ card, className = '' }: BattleCardPreviewPro
         </div>
       )}
 
-      {/* Divider + Win Rate CRM Hint */}
-      <div
-        className="pt-3 mt-auto"
-        style={{ borderTop: '1px solid #F1F5F9' }}
-      >
-        <span
-          className="text-[11px] flex items-center gap-1"
-          style={{ color: '#CBD5E1' }}
-        >
-          Win Rate: Connect CRM
-          <span style={{ fontSize: '10px' }}>&nearr;</span>
-        </span>
-      </div>
     </div>
   );
 }

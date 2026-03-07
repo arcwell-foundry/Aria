@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Calendar, MapPin, Users, ChevronDown, ChevronUp } from 'lucide-react';
+import { Calendar, MapPin, Users, ChevronDown, ChevronUp, ExternalLink, CheckCircle2, XCircle } from 'lucide-react';
 import { useUpcomingConferences } from '@/hooks/useIntelPanelData';
 import type { ConferenceRecommendation } from '@/api/conferences';
 
@@ -82,6 +82,7 @@ export function ConferenceSection() {
   const { data: conferences, isLoading } = useUpcomingConferences();
   const [filter, setFilter] = useState<FilterType>('relevant');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [attending, setAttending] = useState<Record<string, boolean>>({});
 
   const filtered = useMemo(() => {
     if (!conferences) return [];
@@ -172,6 +173,8 @@ export function ConferenceSection() {
             const config = RECOMMENDATION_CONFIG[conf.recommendation_type];
             const dateStr = formatDateRange(conf.start_date, conf.end_date);
             const location = formatLocation(conf.city, conf.country);
+            const isAttending = attending[conf.conference_id];
+            const topReasons = conf.reasons?.slice(0, 2) ?? [];
 
             return (
               <div
@@ -210,7 +213,7 @@ export function ConferenceSection() {
                 </div>
 
                 {/* Date + Location */}
-                <div className="flex items-center gap-3 text-[11px] mb-3" style={{ color: '#5B6E8A' }}>
+                <div className="flex items-center gap-3 text-[11px] mb-2" style={{ color: '#5B6E8A' }}>
                   <span className="flex items-center gap-1">
                     <Calendar className="w-3 h-3" />
                     {dateStr}
@@ -221,8 +224,8 @@ export function ConferenceSection() {
                   </span>
                 </div>
 
-                {/* Recommendation badge */}
-                <div className="flex items-center justify-between">
+                {/* Recommendation badge + competitor count */}
+                <div className="flex items-center justify-between mb-2">
                   <span
                     className="inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide"
                     style={{ backgroundColor: config.bg, color: config.text }}
@@ -245,10 +248,34 @@ export function ConferenceSection() {
                   )}
                 </div>
 
-                {/* Expanded: reasons + attendance */}
+                {/* Reasons preview on card face */}
+                {topReasons.length > 0 && !isExpanded && (
+                  <div className="text-[11px] leading-relaxed" style={{ color: '#5B6E8A' }}>
+                    {topReasons.map((r, i) => (
+                      <span key={i}>
+                        {i > 0 && ' · '}
+                        {r.reason}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Attendance + website on face */}
+                {!isExpanded && (
+                  <div className="flex items-center gap-2 mt-1.5 text-[10px]" style={{ color: '#94A3B8' }}>
+                    {conf.estimated_attendance && (
+                      <span>~{conf.estimated_attendance.toLocaleString()} attendees</span>
+                    )}
+                    {conf.website_url && (
+                      <span className="truncate">{new URL(conf.website_url).hostname.replace('www.', '')}</span>
+                    )}
+                  </div>
+                )}
+
+                {/* Expanded: full details */}
                 {isExpanded && (
                   <div className="mt-3 pt-3" style={{ borderTop: '1px solid #F1F5F9' }}>
-                    {/* Reasons */}
+                    {/* Full reasons */}
                     {conf.reasons.length > 0 && (
                       <div className="space-y-1.5 mb-3">
                         {conf.reasons.map((r, i) => (
@@ -264,9 +291,24 @@ export function ConferenceSection() {
                       </div>
                     )}
 
+                    {/* Topics/focus tags */}
+                    {conf.topics && conf.topics.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-3">
+                        {conf.topics.map((topic: string, i: number) => (
+                          <span
+                            key={i}
+                            className="text-[10px] px-1.5 py-0.5 rounded"
+                            style={{ backgroundColor: '#F1F5F9', color: '#475569' }}
+                          >
+                            {topic}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Attendance + relevance */}
                     <div
-                      className="flex items-center gap-3 text-[10px]"
+                      className="flex items-center gap-3 text-[10px] mb-3"
                       style={{ color: '#94A3B8' }}
                     >
                       {conf.estimated_attendance && (
@@ -277,6 +319,58 @@ export function ConferenceSection() {
                       <span>
                         Relevance: {Math.round(conf.relevance_score * 100)}%
                       </span>
+                    </div>
+
+                    {/* Website link */}
+                    {conf.website_url && (
+                      <a
+                        href={conf.website_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-xs font-medium mb-3"
+                        style={{ color: 'var(--accent)' }}
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        Visit website
+                      </a>
+                    )}
+
+                    {/* Attending toggle */}
+                    <div
+                      className="flex items-center gap-2 pt-2"
+                      style={{ borderTop: '1px solid #F1F5F9' }}
+                    >
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAttending((prev) => ({ ...prev, [conf.conference_id]: true }));
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+                        style={{
+                          backgroundColor: isAttending === true ? '#DCFCE7' : '#F8FAFC',
+                          color: isAttending === true ? '#166534' : '#64748B',
+                          border: `1px solid ${isAttending === true ? '#86EFAC' : '#E2E8F0'}`,
+                        }}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Attending
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAttending((prev) => ({ ...prev, [conf.conference_id]: false }));
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+                        style={{
+                          backgroundColor: isAttending === false ? '#FEF2F2' : '#F8FAFC',
+                          color: isAttending === false ? '#991B1B' : '#64748B',
+                          border: `1px solid ${isAttending === false ? '#FECACA' : '#E2E8F0'}`,
+                        }}
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        Not Attending
+                      </button>
                     </div>
                   </div>
                 )}

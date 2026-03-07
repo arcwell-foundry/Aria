@@ -94,3 +94,172 @@ export async function engageInsight(insightId: string): Promise<void> {
 export async function dismissInsight(insightId: string): Promise<void> {
   await apiClient.post(`/insights/${insightId}/dismiss`);
 }
+
+// =============================================================================
+// INTELLIGENCE PAGE V2 API CLIENTS
+// =============================================================================
+
+// --- Watch Topics ---
+
+export interface WatchTopic {
+  id: string;
+  user_id: string;
+  topic_type: "keyword" | "company" | "therapeutic_area";
+  topic_value: string;
+  description: string | null;
+  keywords: string[];
+  signal_count: number;
+  is_active: boolean;
+  last_matched_at: string | null;
+  created_at: string;
+}
+
+export interface WatchTopicsResponse {
+  topics: WatchTopic[];
+  count: number;
+}
+
+export interface AddWatchTopicRequest {
+  topic_type?: "keyword" | "company" | "therapeutic_area";
+  topic_value: string;
+  description?: string;
+}
+
+export async function getWatchTopics(): Promise<WatchTopicsResponse> {
+  const response = await apiClient.get<WatchTopicsResponse>("/intelligence/watch-topics");
+  return response.data;
+}
+
+export async function addWatchTopic(data: AddWatchTopicRequest): Promise<{ topic: WatchTopic; retroactive_matches: number }> {
+  const response = await apiClient.post<{ topic: WatchTopic; retroactive_matches: number }>(
+    "/intelligence/watch-topics",
+    data
+  );
+  return response.data;
+}
+
+export async function deleteWatchTopic(topicId: string): Promise<{ deleted: boolean }> {
+  const response = await apiClient.delete<{ deleted: boolean }>(
+    `/intelligence/watch-topics/${topicId}`
+  );
+  return response.data;
+}
+
+// --- Competitor Activity ---
+
+export interface CompetitorSignal {
+  headline: string;
+  signal_type: string;
+  detected_at: string;
+}
+
+export interface CompetitorActivity {
+  competitor: string;
+  signal_count: number;
+  signals: CompetitorSignal[];
+}
+
+export interface CompetitorActivityResponse {
+  activity: CompetitorActivity[];
+  days: number;
+}
+
+export async function getCompetitorActivity(days: number = 30): Promise<CompetitorActivityResponse> {
+  const response = await apiClient.get<CompetitorActivityResponse>(
+    `/intelligence/competitor-activity?days=${days}`
+  );
+  return response.data;
+}
+
+// --- CRM Status ---
+
+export interface CRMStatusResponse {
+  connected: boolean;
+  type: "salesforce" | "hubspot" | "dynamics" | null;
+}
+
+export async function getCRMStatus(): Promise<CRMStatusResponse> {
+  const response = await apiClient.get<CRMStatusResponse>("/intelligence/crm-status");
+  return response.data;
+}
+
+// --- Battle Card Detail ---
+
+export interface BattleCardDetailSignal {
+  id: string;
+  headline: string;
+  signal_type: string;
+  detected_at: string;
+}
+
+export interface BattleCardDetailInsight {
+  id: string;
+  classification: string;
+  content: string;
+  confidence: number;
+  priority_label: string | null;
+}
+
+export interface BattleCardDetailResponse {
+  card: Record<string, unknown>;
+  signals: BattleCardDetailSignal[];
+  insights: BattleCardDetailInsight[];
+}
+
+export async function getBattleCardDetail(cardId: string): Promise<BattleCardDetailResponse> {
+  const response = await apiClient.get<BattleCardDetailResponse>(
+    `/intelligence/battle-cards/${cardId}`
+  );
+  return response.data;
+}
+
+// --- Priority Signals ---
+
+export interface PrioritySignal {
+  id: string;
+  headline: string;
+  company_name: string;
+  signal_type: string;
+  relevance_score: number;
+  detected_at: string;
+  linked_insight_id: string | null;
+  linked_action_summary: string | null;
+  is_cluster_primary: boolean;
+}
+
+export interface PrioritySignalsResponse {
+  signals: PrioritySignal[];
+  hours: number;
+}
+
+export async function getPrioritySignals(hours: number = 48): Promise<PrioritySignalsResponse> {
+  const response = await apiClient.get<PrioritySignalsResponse>(
+    `/intelligence/signals/priority?hours=${hours}`
+  );
+  return response.data;
+}
+
+// --- Therapeutic Trends ---
+
+export interface TherapeuticTrend {
+  trend_type: "therapeutic_area" | "manufacturing_modality";
+  name: string;
+  signal_count: number;
+  companies_involved: string[];
+  company_count: number;
+  description: string;
+  narrative: string;
+  aligned_goal?: string;
+}
+
+export interface TherapeuticTrendsResponse {
+  trends: TherapeuticTrend[];
+  goals_count?: number;
+}
+
+export async function getTherapeuticTrendsWithNarratives(): Promise<TherapeuticTrendsResponse> {
+  const response = await apiClient.get<TherapeuticTrendsResponse>(
+    "/intelligence/therapeutic-trends-v2"
+  );
+  return response.data;
+}

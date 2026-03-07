@@ -43,6 +43,13 @@ import {
   listInsights,
   updateInsightFeedback,
   type InsightFilters,
+  getWatchTopics,
+  addWatchTopic,
+  deleteWatchTopic,
+  getCompetitorActivity,
+  getPrioritySignals,
+  getTherapeuticTrendsWithNarratives,
+  type AddWatchTopicRequest,
 } from "@/api/intelligence";
 import { listBattleCards } from "@/api/battleCards";
 import { listLeads, getLead, getLeadInsights } from "@/api/leads";
@@ -265,5 +272,69 @@ export function useReturnBriefing() {
     queryFn: getReturnBriefing,
     staleTime: 30 * 60_000, // 30 minutes
     retry: false,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Watch Topics hooks (IntelligencePage V2)
+// ---------------------------------------------------------------------------
+export function useWatchTopics() {
+  return useQuery({
+    queryKey: ["intel", "watch-topics"],
+    queryFn: getWatchTopics,
+    staleTime: 2 * 60_000,
+  });
+}
+
+export function useAddWatchTopic() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: AddWatchTopicRequest) => addWatchTopic(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["intel", "watch-topics"] });
+    },
+  });
+}
+
+export function useDeleteWatchTopic() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (topicId: string) => deleteWatchTopic(topicId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["intel", "watch-topics"] });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Competitor Activity hooks (IntelligencePage V2)
+// ---------------------------------------------------------------------------
+export function useCompetitorActivity(days = 30) {
+  return useQuery({
+    queryKey: ["intel", "competitor-activity", days],
+    queryFn: () => getCompetitorActivity(days),
+    staleTime: 5 * 60_000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Priority Signals hooks (IntelligencePage V2)
+// ---------------------------------------------------------------------------
+export function usePrioritySignals(hours = 48) {
+  return useQuery({
+    queryKey: ["intel", "priority-signals", hours],
+    queryFn: () => getPrioritySignals(hours),
+    staleTime: 2 * 60_000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Therapeutic Trends V2 hooks (IntelligencePage V2)
+// ---------------------------------------------------------------------------
+export function useTherapeuticTrendsV2() {
+  return useQuery({
+    queryKey: ["intel", "therapeutic-trends-v2"],
+    queryFn: getTherapeuticTrendsWithNarratives,
+    staleTime: 5 * 60_000,
   });
 }

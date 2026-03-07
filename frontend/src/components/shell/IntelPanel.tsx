@@ -22,7 +22,6 @@ import {
   AlertsModule,
   BuyingSignalsModule,
   CompetitiveIntelModule,
-  NewsAlertsModule,
   WhyIWroteThisModule,
   ToneModule,
   AnalysisModule,
@@ -97,12 +96,11 @@ function getPanelConfig(pathname: string): PanelConfig {
     return {
       title: 'ARIA Intel',
       modules: [
+        <NextBestActionModule key="action" />,
         <JarvisInsightsModule key="jarvis" />,
         <CompetitiveIntelModule key="competitive" />,
         <UpcomingConferencesModule key="conferences" />,
-        <NewsAlertsModule key="news" />,
         <DocumentIntelModule key="documents" />,
-        <NextBestActionModule key="action" />,
       ],
     };
   }

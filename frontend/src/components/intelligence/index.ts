@@ -9,3 +9,6 @@ export { BattleCardPreview, BattleCardPreviewSkeleton } from './BattleCardPrevie
 export type { BattleCardPreviewProps } from './BattleCardPreview';
 export { MarketSignalsFeed } from './MarketSignalsFeed';
 export { ConferenceSection } from './ConferenceSection';
+export { BattleCardModal } from './BattleCardModal';
+export { WatchTopicsSection } from './WatchTopicsSection';
+export { CompetitorActivityTimeline } from './CompetitorActivityTimeline';

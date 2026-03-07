@@ -19,6 +19,9 @@ export interface ConferenceRecommendation {
   topic_relevance: number;
   reasons: ConferenceReason[];
   estimated_attendance: number | null;
+  website_url?: string | null;
+  topics?: string[];
+  description?: string | null;
 }
 
 export interface ConferenceDetail {

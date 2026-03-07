@@ -1,27 +1,35 @@
 /**
  * IntelligencePage - Competitive intelligence overview and battle card views
  *
- * Follows ARIA Design System v1.0:
- * - LIGHT THEME (content pages use light background)
- * - Header: "Competitive Intelligence" with subtitle
- * - Battle Cards section: Grid of competitor cards
- * - Market Signals section: Empty state (no API yet)
- * - Empty state drives to ARIA conversation
- *
- * All data sourced from the battle_cards API (analysis JSONB column).
+ * V2 Overhaul:
+ * - Battle cards open a modal dossier on click (not navigate to detail page)
+ * - Flexible grid (no empty cells)
+ * - Competitor Activity Timeline (after battle cards)
+ * - Therapeutic Trends with narratives + goal alignment
+ * - Watch Topics section
+ * - Market Signals with priority signals, deduplication, ARIA analysis
+ * - Conference section with reasons on card, expandable details
  *
  * Routes:
- * - /intelligence -> IntelligenceOverview
- * - /intelligence/battle-cards/:competitorId -> BattleCardDetail
+ * - /intelligence -> IntelligenceOverview (V2)
+ * - /intelligence/battle-cards/:competitorId -> BattleCardDetail (kept for deep links)
  */
 
 import { useParams } from 'react-router-dom';
 import { useState, useMemo } from 'react';
-import { Newspaper, TrendingUp, FlaskConical, ChevronDown, ChevronUp } from 'lucide-react';
+import { Newspaper, TrendingUp, FlaskConical, ChevronDown, ChevronUp, Target } from 'lucide-react';
 import { useBattleCards } from '@/hooks/useBattleCards';
 import { BattleCardPreview, BattleCardPreviewSkeleton, MarketSignalsFeed, ConferenceSection } from '@/components/intelligence';
+import { BattleCardModal } from '@/components/intelligence/BattleCardModal';
+import { WatchTopicsSection } from '@/components/intelligence/WatchTopicsSection';
+import { CompetitorActivityTimeline } from '@/components/intelligence/CompetitorActivityTimeline';
 import { EmptyState } from '@/components/common/EmptyState';
-import { useUnreadSignalCount, useTherapeuticTrends, useReturnBriefing } from '@/hooks/useIntelPanelData';
+import {
+  useUnreadSignalCount,
+  useTherapeuticTrendsV2,
+  useReturnBriefing,
+} from '@/hooks/useIntelPanelData';
+import { useIntelGoals } from '@/hooks/useIntelPanelData';
 import { BattleCardDetail } from '@/components/pages/BattleCardDetail';
 
 // Skeleton grid for loading state
@@ -38,7 +46,7 @@ function IntelligenceSkeleton() {
       <div>
         <div className="h-5 w-28 bg-[var(--border)] rounded mb-4" />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => (
+          {Array.from({ length: 5 }).map((_, i) => (
             <BattleCardPreviewSkeleton key={i} />
           ))}
         </div>
@@ -140,12 +148,36 @@ function ReturnBriefingBanner() {
   );
 }
 
-// Therapeutic & Manufacturing Trends
+// Therapeutic & Manufacturing Trends (V2 with narratives + goal alignment)
 function TherapeuticTrendsSection() {
-  const { data: trends } = useTherapeuticTrends();
+  const { data: trendsData } = useTherapeuticTrendsV2();
+  const { data: goals } = useIntelGoals('active');
   const [expandedTrend, setExpandedTrend] = useState<string | null>(null);
 
-  if (!trends || trends.length === 0) return null;
+  const trends = trendsData?.trends ?? [];
+
+  if (trends.length === 0) return null;
+
+  // Match trends to goals by keyword overlap
+  const goalMatches = useMemo(() => {
+    const matches: Record<string, string> = {};
+    if (!goals) return matches;
+    for (const trend of trends) {
+      const trendWords = trend.name.toLowerCase().split(/\s+/);
+      for (const goal of goals) {
+        const goalTitle = ((goal as { title?: string }).title ?? '').toLowerCase();
+        if (trendWords.some((w) => w.length > 3 && goalTitle.includes(w))) {
+          matches[trend.name] = (goal as { title?: string }).title ?? '';
+          break;
+        }
+      }
+      // Use backend-provided alignment if available
+      if (trend.aligned_goal) {
+        matches[trend.name] = trend.aligned_goal;
+      }
+    }
+    return matches;
+  }, [trends, goals]);
 
   return (
     <section>
@@ -161,6 +193,7 @@ function TherapeuticTrendsSection() {
           const isExpanded = expandedTrend === trend.name;
           const maxSignals = Math.max(...trends.map(t => t.signal_count));
           const barWidth = maxSignals > 0 ? (trend.signal_count / maxSignals) * 100 : 0;
+          const matchedGoal = goalMatches[trend.name];
 
           return (
             <div
@@ -187,6 +220,25 @@ function TherapeuticTrendsSection() {
                 <span>{trend.signal_count} signals</span>
                 <span>{trend.company_count} companies</span>
               </div>
+
+              {/* Narrative line */}
+              {trend.narrative && (
+                <p className="text-xs mb-2 italic" style={{ color: '#5B6E8A' }}>
+                  {trend.narrative}
+                </p>
+              )}
+
+              {/* Goal alignment badge */}
+              {matchedGoal && (
+                <div
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium mb-2"
+                  style={{ backgroundColor: '#EFF6FF', color: '#1E40AF' }}
+                >
+                  <Target className="w-3 h-3" />
+                  Aligns with: {matchedGoal.length > 50 ? matchedGoal.slice(0, 50) + '...' : matchedGoal}
+                </div>
+              )}
+
               {/* Strength bar */}
               <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: '#F1F5F9' }}>
                 <div
@@ -222,14 +274,23 @@ function TherapeuticTrendsSection() {
           );
         })}
       </div>
+
+      {/* Market sizing coming soon note */}
+      <p
+        className="text-xs mt-3 text-center"
+        style={{ color: '#94A3B8' }}
+      >
+        Market sizing estimates coming soon
+      </p>
     </section>
   );
 }
 
-// Intelligence Overview Component
+// Intelligence Overview Component (V2)
 function IntelligenceOverview() {
   const { data: battleCards, isLoading, error } = useBattleCards();
   const { data: unreadCount } = useUnreadSignalCount();
+  const [modalCompetitor, setModalCompetitor] = useState<string | null>(null);
 
   // Sort battle cards by threat_score descending (highest threat first)
   const sortedCards = useMemo(() => {
@@ -308,17 +369,30 @@ function IntelligenceOverview() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                 {sortedCards.map((card) => (
-                  <BattleCardPreview
+                  <div
                     key={card.id}
-                    card={card}
-                  />
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setModalCompetitor(card.competitor_name);
+                    }}
+                  >
+                    <BattleCardPreview
+                      card={card}
+                    />
+                  </div>
                 ))}
               </div>
             )}
           </section>
 
+          {/* Competitor Activity Timeline */}
+          <CompetitorActivityTimeline />
+
           {/* Therapeutic Trends Section */}
           <TherapeuticTrendsSection />
+
+          {/* Watch Topics Section */}
+          <WatchTopicsSection />
 
           {/* Conference Recommendations Section */}
           <ConferenceSection />
@@ -344,6 +418,14 @@ function IntelligenceOverview() {
           </section>
         </div>
       )}
+
+      {/* Battle Card Modal */}
+      {modalCompetitor && (
+        <BattleCardModal
+          competitorName={modalCompetitor}
+          onClose={() => setModalCompetitor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -352,7 +434,7 @@ function IntelligenceOverview() {
 export function IntelligencePage() {
   const { competitorId } = useParams<{ competitorId: string }>();
 
-  // Show detail view if competitorId is present
+  // Show detail view if competitorId is present (for deep links)
   if (competitorId) {
     return <BattleCardDetail competitorId={competitorId} />;
   }

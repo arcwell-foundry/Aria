@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Zap, Shield, TrendingUp, ThumbsUp, ThumbsDown, Clock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Zap, Shield, TrendingUp, ThumbsUp, ThumbsDown, Clock, Bookmark, ChevronDown, ChevronUp } from 'lucide-react';
 import { useIntelligenceInsights, useInsightFeedback } from '@/hooks/useIntelPanelData';
 
 interface JarvisInsightData {
@@ -29,6 +30,19 @@ const HORIZON_LABELS: Record<string, string> = {
   long_term: 'Long-term',
 };
 
+function getPriorityLabel(insight: JarvisInsightData): { label: string; color: string } {
+  if (insight.confidence >= 0.7 && insight.classification === 'threat') {
+    return { label: 'Critical', color: '#DC2626' };
+  }
+  if (insight.confidence >= 0.6) {
+    return { label: 'High Priority', color: '#F59E0B' };
+  }
+  if (insight.confidence >= 0.4) {
+    return { label: 'Medium', color: '#5B6E8A' };
+  }
+  return { label: 'Low', color: '#94A3B8' };
+}
+
 function JarvisInsightsSkeleton() {
   return (
     <div className="space-y-2">
@@ -48,8 +62,11 @@ export interface JarvisInsightsModuleProps {
 
 export function JarvisInsightsModule({ insights: propInsights }: JarvisInsightsModuleProps) {
   const [feedbackGiven, setFeedbackGiven] = useState<Record<string, string>>({});
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [bookmarked, setBookmarked] = useState<Set<string>>(new Set());
   const { data: apiInsights, isLoading } = useIntelligenceInsights({ limit: 5 });
   const feedbackMutation = useInsightFeedback();
+  const navigate = useNavigate();
 
   if (isLoading && !propInsights) return <JarvisInsightsSkeleton />;
 
@@ -58,7 +75,7 @@ export function JarvisInsightsModule({ insights: propInsights }: JarvisInsightsM
     content: i.content,
     classification: i.classification,
     confidence: i.confidence,
-    combined_score: i.combined_score ?? i.confidence, // Fallback to confidence if no combined_score
+    combined_score: i.combined_score ?? i.confidence,
     time_horizon: i.time_horizon,
   }));
 
@@ -71,6 +88,28 @@ export function JarvisInsightsModule({ insights: propInsights }: JarvisInsightsM
   const handleFeedback = (insightId: string, feedback: string) => {
     setFeedbackGiven((prev) => ({ ...prev, [insightId]: feedback }));
     feedbackMutation.mutate({ insightId, feedback });
+  };
+
+  const toggleExpand = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleBookmark = (id: string) => {
+    setBookmarked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleAct = (insight: JarvisInsightData) => {
+    navigate(`/?discuss=insight&title=${encodeURIComponent(insight.content.slice(0, 80))}`);
   };
 
   if (insights.length === 0) {
@@ -107,6 +146,9 @@ export function JarvisInsightsModule({ insights: propInsights }: JarvisInsightsM
           const style = CLASSIFICATION_STYLES[insight.classification] ?? CLASSIFICATION_STYLES.neutral;
           const Icon = style.icon;
           const hasFeedback = feedbackGiven[insight.id];
+          const isExpanded = expandedIds.has(insight.id);
+          const isBookmarked = bookmarked.has(insight.id);
+          const priority = getPriorityLabel(insight);
 
           return (
             <div
@@ -122,38 +164,56 @@ export function JarvisInsightsModule({ insights: propInsights }: JarvisInsightsM
               <div className="flex items-start gap-2">
                 <Icon size={14} className="mt-0.5 flex-shrink-0" style={{ color: style.color }} />
                 <div className="min-w-0 flex-1">
-                  <span
-                    className="font-mono text-[10px] uppercase font-medium"
-                    style={{ color: style.color }}
-                  >
-                    {insight.classification}
-                  </span>
-                  <p
-                    className="font-sans text-[12px] leading-[1.5] mt-0.5"
-                    style={{
-                      color: 'var(--text-primary)',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {insight.content}
-                  </p>
-
-                  {/* Quality score bar */}
-                  <div
-                    className="mt-1.5 h-[3px] rounded-full"
-                    style={{ backgroundColor: 'var(--border)', width: '100%' }}
-                  >
-                    <div
-                      className="h-full rounded-full"
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span
+                      className="font-mono text-[10px] uppercase font-medium"
+                      style={{ color: style.color }}
+                    >
+                      {insight.classification}
+                    </span>
+                    <span
+                      className="font-mono text-[10px] font-semibold px-1 py-0.5 rounded"
                       style={{
-                        width: `${insight.combined_score * 100}%`,
-                        backgroundColor: style.color,
-                        opacity: 0.7,
+                        color: priority.color,
+                        backgroundColor: `${priority.color}15`,
                       }}
-                    />
+                    >
+                      {priority.label}
+                    </span>
+                  </div>
+
+                  {/* Expandable content */}
+                  <div
+                    onClick={() => toggleExpand(insight.id)}
+                    className="cursor-pointer"
+                  >
+                    <p
+                      className="font-sans text-[12px] leading-[1.5] mt-0.5"
+                      style={{
+                        color: 'var(--text-primary)',
+                        ...(isExpanded ? {} : {
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical' as const,
+                          overflow: 'hidden',
+                        }),
+                      }}
+                    >
+                      {insight.content}
+                    </p>
+                    <button
+                      className="flex items-center gap-0.5 mt-1"
+                      style={{ color: 'var(--text-secondary)' }}
+                    >
+                      {isExpanded ? (
+                        <ChevronUp size={12} />
+                      ) : (
+                        <ChevronDown size={12} />
+                      )}
+                      <span className="font-mono text-[10px]">
+                        {isExpanded ? 'Less' : 'More'}
+                      </span>
+                    </button>
                   </div>
 
                   <div className="flex items-center justify-between mt-1.5">
@@ -169,54 +229,70 @@ export function JarvisInsightsModule({ insights: propInsights }: JarvisInsightsM
                           </span>
                         </span>
                       )}
-                      <span
-                        className="font-mono text-[10px]"
-                        style={{ color: 'var(--text-secondary)' }}
+                      {/* Act button */}
+                      <button
+                        onClick={() => handleAct(insight)}
+                        className="inline-flex items-center gap-0.5 font-sans text-[10px] font-medium px-1.5 py-0.5 rounded-md transition-colors"
+                        style={{ color: 'var(--accent)', backgroundColor: 'rgba(46, 102, 255, 0.08)' }}
                       >
-                        {(insight.combined_score * 100).toFixed(0)}% quality
-                      </span>
+                        <Zap size={10} />
+                        Act
+                      </button>
                     </div>
 
-                    {/* Feedback buttons */}
-                    {!hasFeedback ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleFeedback(insight.id, 'helpful')}
-                          className="p-0.5 rounded transition-colors cursor-pointer"
+                    {/* Feedback + Bookmark buttons */}
+                    <div className="flex items-center gap-1">
+                      {!hasFeedback ? (
+                        <>
+                          <button
+                            onClick={() => handleFeedback(insight.id, 'helpful')}
+                            className="p-0.5 rounded transition-colors cursor-pointer"
+                            style={{ color: 'var(--text-secondary)' }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.color = 'var(--success)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.color = 'var(--text-secondary)';
+                            }}
+                            title="Mark as useful (improves ARIA's relevance)"
+                            aria-label="Helpful"
+                          >
+                            <ThumbsUp size={11} />
+                          </button>
+                          <button
+                            onClick={() => handleFeedback(insight.id, 'not_helpful')}
+                            className="p-0.5 rounded transition-colors cursor-pointer"
+                            style={{ color: 'var(--text-secondary)' }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.color = 'var(--critical)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.color = 'var(--text-secondary)';
+                            }}
+                            title="Not helpful (improves ARIA's relevance)"
+                            aria-label="Not helpful"
+                          >
+                            <ThumbsDown size={11} />
+                          </button>
+                        </>
+                      ) : (
+                        <span
+                          className="font-mono text-[10px]"
                           style={{ color: 'var(--text-secondary)' }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.color = 'var(--success)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.color = 'var(--text-secondary)';
-                          }}
-                          aria-label="Helpful"
                         >
-                          <ThumbsUp size={11} />
-                        </button>
-                        <button
-                          onClick={() => handleFeedback(insight.id, 'not_helpful')}
-                          className="p-0.5 rounded transition-colors cursor-pointer"
-                          style={{ color: 'var(--text-secondary)' }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.color = 'var(--critical)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.color = 'var(--text-secondary)';
-                          }}
-                          aria-label="Not helpful"
-                        >
-                          <ThumbsDown size={11} />
-                        </button>
-                      </div>
-                    ) : (
-                      <span
-                        className="font-mono text-[10px]"
-                        style={{ color: 'var(--text-secondary)' }}
+                          Noted
+                        </span>
+                      )}
+                      <button
+                        onClick={() => toggleBookmark(insight.id)}
+                        className="p-0.5 rounded transition-colors cursor-pointer"
+                        style={{ color: isBookmarked ? 'var(--accent)' : 'var(--text-secondary)' }}
+                        title="Save to your intelligence library"
+                        aria-label="Bookmark"
                       >
-                        Noted
-                      </span>
-                    )}
+                        <Bookmark size={11} fill={isBookmarked ? 'currentColor' : 'none'} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
