@@ -20,7 +20,6 @@ import {
   Loader2,
   AlertCircle,
   GitBranch,
-  MessageSquare,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { UpcomingMeetings } from '@/components/actions/UpcomingMeetings';
@@ -305,137 +304,261 @@ function ActionItem({
   action,
   onApprove,
   onReject,
-  onDiscuss,
   isApproving,
   isRejecting,
 }: {
   action: Action;
   onApprove: () => void;
   onReject: () => void;
-  onDiscuss?: () => void;
   isApproving: boolean;
   isRejecting: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const riskColor = RISK_COLORS[action.risk_level];
   const agentInfo = resolveAgent(action.agent);
 
+  const payload = (action.payload ?? {}) as Record<string, unknown>;
+  const competitiveContext = (payload.competitive_context ?? {}) as Record<string, unknown>;
+  const differentiation = (competitiveContext.differentiation ?? []) as string[];
+  const weaknesses = (competitiveContext.weaknesses ?? []) as string[];
+  const pricing = (competitiveContext.pricing ?? {}) as Record<string, unknown>;
+  const companyName = (payload.company_name ?? '') as string;
+
+  const descriptionLines = (action.description ?? '').split('\n');
+  const mainDescription = descriptionLines
+    .filter((l) => !l.startsWith('- '))
+    .join(' ')
+    .trim();
+  const recommendedActions = descriptionLines.filter((l) => l.startsWith('- '));
+
+  const hasCompetitiveContext =
+    differentiation.length > 0 || weaknesses.length > 0 || Object.keys(pricing).length > 0;
+
   return (
     <div
-      className="border rounded-lg p-4"
+      className={cn(
+        'border rounded-lg transition-all duration-200',
+        expanded ? 'ring-1 ring-[var(--accent)]/30' : 'hover:border-[var(--accent)]/30',
+        action.status === 'pending' && 'cursor-pointer'
+      )}
       style={{
         borderColor: 'var(--border)',
         backgroundColor: 'var(--bg-elevated)',
       }}
+      onClick={() => action.status === 'pending' && setExpanded(!expanded)}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3 min-w-0 flex-1">
-          <div className="flex-shrink-0">
-            <AgentAvatar agentKey={action.agent} size={32} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p
-              className="font-medium text-sm truncate"
-              style={{ color: 'var(--text-primary)' }}
-            >
-              {action.title}
-            </p>
-            <div className="flex items-center gap-2 mt-1">
-              <span
-                className="font-mono text-xs"
-                style={{ color: 'var(--text-secondary)' }}
+      {/* Collapsed header — always visible */}
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
+            <div className="flex-shrink-0 mt-0.5">
+              <AgentAvatar agentKey={action.agent} size={32} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p
+                className="font-medium text-sm"
+                style={{ color: 'var(--text-primary)' }}
               >
-                {agentInfo.name}
-              </span>
-              <span
-                className="px-1.5 py-0.5 rounded text-xs font-medium"
-                style={{
-                  backgroundColor: `${riskColor}20`,
-                  color: riskColor,
-                }}
-              >
-                {action.risk_level?.toUpperCase() ?? 'UNKNOWN'}
-              </span>
-              <span
-                className="font-mono text-xs"
-                style={{ color: 'var(--text-secondary)' }}
-              >
-                {formatRelativeTime(action.created_at)}
-              </span>
+                {action.title}
+              </p>
+              {!expanded && mainDescription && (
+                <p
+                  className="text-xs mt-1 line-clamp-1"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  {mainDescription}
+                </p>
+              )}
+              <div className="flex items-center gap-2 mt-1.5">
+                <span
+                  className="font-mono text-xs"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  {agentInfo.name}
+                </span>
+                <span
+                  className="px-1.5 py-0.5 rounded text-xs font-medium"
+                  style={{
+                    backgroundColor: `${riskColor}20`,
+                    color: riskColor,
+                  }}
+                >
+                  {action.risk_level?.toUpperCase() ?? 'UNKNOWN'}
+                </span>
+                <span
+                  className="font-mono text-xs"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  {formatRelativeTime(action.created_at)}
+                </span>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Action buttons for pending items */}
-        {action.status === 'pending' && (
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {onDiscuss && (
-              <button
-                onClick={onDiscuss}
-                className={cn(
-                  'p-2 rounded-lg transition-colors',
-                  'border border-[var(--border)] hover:bg-[var(--bg-subtle)]',
-                )}
-                style={{ color: 'var(--accent)' }}
-                title="Discuss with ARIA"
+          {/* Status indicator for non-pending */}
+          {action.status !== 'pending' && (
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span
+                className="flex items-center gap-1 text-xs"
+                style={{ color: ACTION_STATUS_COLORS[action.status] }}
               >
-                <MessageSquare className="w-4 h-4" />
-              </button>
-            )}
+                {action.status === 'completed' && <CheckCircle className="w-3.5 h-3.5" />}
+                {action.status === 'rejected' && <XCircle className="w-3.5 h-3.5" />}
+                {action.status === 'failed' && <AlertCircle className="w-3.5 h-3.5" />}
+                {action.status === 'executing' && (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                )}
+                {(action.status ?? '').replace('_', ' ').toUpperCase()}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Expanded details */}
+      {expanded && action.status === 'pending' && (
+        <div
+          className="px-4 pb-4 pt-0 border-t"
+          style={{ borderColor: 'var(--border)' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {mainDescription && (
+            <p
+              className="text-sm mt-3 leading-relaxed"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {mainDescription}
+            </p>
+          )}
+
+          {hasCompetitiveContext && (
+            <div className="mt-4 space-y-2">
+              <p
+                className="text-[11px] font-medium uppercase tracking-wider"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                Competitive Context
+                {companyName && ` — ${companyName}`}
+              </p>
+              {differentiation.length > 0 && (
+                <div
+                  className="rounded-md p-2.5 text-xs space-y-1"
+                  style={{ backgroundColor: 'var(--bg-subtle)' }}
+                >
+                  <span className="font-medium" style={{ color: 'var(--success)' }}>
+                    Your advantages:
+                  </span>
+                  {differentiation.map((d, i) => (
+                    <p key={i} style={{ color: 'var(--text-primary)' }}>
+                      &bull; {String(d)}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {weaknesses.length > 0 && (
+                <div
+                  className="rounded-md p-2.5 text-xs space-y-1"
+                  style={{ backgroundColor: 'var(--bg-subtle)' }}
+                >
+                  <span className="font-medium" style={{ color: 'var(--warning)' }}>
+                    Their weaknesses:
+                  </span>
+                  {weaknesses.map((w, i) => (
+                    <p key={i} style={{ color: 'var(--text-primary)' }}>
+                      &bull; {String(w)}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {pricing && (pricing.range || pricing.strategy || pricing.notes) && (
+                <div
+                  className="rounded-md p-2.5 text-xs"
+                  style={{ backgroundColor: 'var(--bg-subtle)' }}
+                >
+                  <span className="font-medium" style={{ color: 'var(--accent)' }}>
+                    Pricing intel:
+                  </span>
+                  <p style={{ color: 'var(--text-primary)' }}>
+                    {[pricing.range, pricing.strategy, pricing.notes]
+                      .filter(Boolean)
+                      .map(String)
+                      .join(' — ')}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {recommendedActions.length > 0 && (
+            <div className="mt-4">
+              <p
+                className="text-[11px] font-medium uppercase tracking-wider mb-2"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                Recommended Actions
+              </p>
+              <div className="space-y-1">
+                {recommendedActions.map((ra, i) => (
+                  <p key={i} className="text-xs" style={{ color: 'var(--text-primary)' }}>
+                    {ra}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {action.reasoning && (
+            <p
+              className="text-xs mt-3 italic"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              {action.reasoning}
+            </p>
+          )}
+
+          <div
+            className="flex items-center justify-end gap-2 mt-4 pt-3 border-t"
+            style={{ borderColor: 'var(--border)' }}
+          >
             <button
               onClick={onReject}
               disabled={isRejecting || isApproving}
               className={cn(
-                'p-2 rounded-lg transition-colors',
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
                 'border border-[var(--border)] hover:bg-[var(--bg-subtle)]',
                 (isRejecting || isApproving) && 'opacity-50 cursor-not-allowed'
               )}
               style={{ color: 'var(--critical)' }}
-              title="Reject"
             >
               {isRejecting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
-                <XCircle className="w-4 h-4" />
+                <XCircle className="w-3.5 h-3.5" />
               )}
+              Reject
             </button>
             <button
               onClick={onApprove}
               disabled={isApproving || isRejecting}
               className={cn(
-                'p-2 rounded-lg transition-colors',
+                'flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium transition-colors',
                 (isApproving || isRejecting) && 'opacity-50 cursor-not-allowed'
               )}
               style={{
                 backgroundColor: 'var(--success)',
                 color: 'white',
               }}
-              title="Approve"
             >
               {isApproving ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
-                <CheckCircle className="w-4 h-4" />
+                <CheckCircle className="w-3.5 h-3.5" />
               )}
+              Approve
             </button>
           </div>
-        )}
-
-        {/* Status indicator for non-pending */}
-        {action.status !== 'pending' && (
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <span
-              className="flex items-center gap-1 text-xs"
-              style={{ color: ACTION_STATUS_COLORS[action.status] }}
-            >
-              {action.status === 'completed' && <CheckCircle className="w-3.5 h-3.5" />}
-              {action.status === 'rejected' && <XCircle className="w-3.5 h-3.5" />}
-              {action.status === 'failed' && <AlertCircle className="w-3.5 h-3.5" />}
-              {action.status === 'executing' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              {(action.status ?? '').replace('_', ' ').toUpperCase()}
-            </span>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -681,7 +804,6 @@ export function ActionsPage() {
                         action={action}
                         onApprove={() => approveMutation.mutate(action.id)}
                         onReject={() => rejectMutation.mutate({ actionId: action.id })}
-                        onDiscuss={() => navigate(`/?discuss=action&id=${action.id}&title=${encodeURIComponent(action.title)}`)}
                         isApproving={approveMutation.isPending}
                         isRejecting={rejectMutation.isPending}
                       />
