@@ -62,6 +62,8 @@ export function useUpdateDraft() {
     onSuccess: (updatedDraft) => {
       queryClient.invalidateQueries({ queryKey: draftKeys.lists() });
       queryClient.setQueryData(draftKeys.detail(updatedDraft.id), updatedDraft);
+      // Also update IntelPanel's separate cache for the same draft
+      queryClient.setQueryData(["intel-panel", "draft", updatedDraft.id], updatedDraft);
     },
   });
 }
@@ -88,6 +90,8 @@ export function useRegenerateDraft() {
     onSuccess: (updatedDraft) => {
       queryClient.invalidateQueries({ queryKey: draftKeys.lists() });
       queryClient.setQueryData(draftKeys.detail(updatedDraft.id), updatedDraft);
+      // Also update IntelPanel's separate cache for the same draft
+      queryClient.setQueryData(["intel-panel", "draft", updatedDraft.id], updatedDraft);
     },
   });
 }

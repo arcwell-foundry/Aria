@@ -50,6 +50,7 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedRecipient, setEditedRecipient] = useState('');
   const [editedSubject, setEditedSubject] = useState('');
+  const [editedBody, setEditedBody] = useState('');
   const [saveToClientError, setSaveToClientError] = useState('');
 
   // Queries and mutations
@@ -69,6 +70,7 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
   if (draft && !editedRecipient && !editedSubject) {
     setEditedRecipient(draft.recipient_email);
     setEditedSubject(draft.subject);
+    setEditedBody(draft.body);
   }
 
   // Handlers
@@ -79,6 +81,7 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
       data: {
         recipient_email: editedRecipient,
         subject: editedSubject,
+        body: editedBody,
       },
     });
     setIsEditing(false);
@@ -90,11 +93,15 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
     navigate('/communications');
   };
 
-  const handleRegenerate = async (tone?: EmailDraftTone) => {
-    await regenerateDraft.mutateAsync({
+  const handleRegenerate = async (tone?: EmailDraftTone, additionalContext?: string) => {
+    const updated = await regenerateDraft.mutateAsync({
       draftId,
-      data: tone ? { tone } : undefined,
+      data: tone || additionalContext ? { tone, additional_context: additionalContext } : undefined,
     });
+    // Sync edited body with regenerated content
+    if (updated?.body) {
+      setEditedBody(updated.body);
+    }
   };
 
   const handleSaveToClient = async () => {
@@ -332,18 +339,44 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
           </div>
 
           {/* Email Body */}
-          <div className="p-6">
-            <div
-              className="prose prose-sm max-w-none"
-              style={{ color: 'var(--text-primary)' }}
-            >
-              {/* Render body with line breaks */}
-              {draft.body.split('\n').map((paragraph, i) => (
-                <p key={i} className="mb-4 last:mb-0 leading-relaxed">
-                  {paragraph || '\u00A0'}
-                </p>
-              ))}
-            </div>
+          <div className="p-6 relative">
+            {isRegenerating && (
+              <div className="absolute inset-0 flex items-center justify-center z-10 rounded-b-lg"
+                style={{ backgroundColor: 'rgba(255,255,255,0.7)' }}
+              >
+                <div className="flex items-center gap-2 px-4 py-2 rounded-lg"
+                  style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}
+                >
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-sm">Regenerating...</span>
+                </div>
+              </div>
+            )}
+            {isEditing ? (
+              <textarea
+                value={editedBody}
+                onChange={(e) => setEditedBody(e.target.value)}
+                className={cn(
+                  'w-full min-h-[300px] p-4 rounded border text-sm leading-relaxed resize-y font-sans',
+                  'border-[var(--border)] bg-[var(--bg-subtle)]',
+                  'focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/30'
+                )}
+                style={{ color: 'var(--text-primary)' }}
+                placeholder="Email body..."
+              />
+            ) : (
+              <div
+                className="prose prose-sm max-w-none"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                {/* Render body with line breaks */}
+                {draft.body.split('\n').map((paragraph, i) => (
+                  <p key={i} className="mb-4 last:mb-0 leading-relaxed">
+                    {paragraph || '\u00A0'}
+                  </p>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

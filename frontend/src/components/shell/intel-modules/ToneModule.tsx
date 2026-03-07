@@ -42,7 +42,7 @@ export function ToneModule({ tone: propTone }: ToneModuleProps) {
     tone = {
       current: `${draft.tone ? draft.tone.charAt(0).toUpperCase() + draft.tone.slice(1) : 'Default'}, ${draft.purpose ?? ''}`,
       recommendation: draft.style_match_score
-        ? `Style match score: ${draft.style_match_score}%. ${draft.style_match_score > 80 ? 'Well-matched to your writing style.' : 'Consider adjusting to better match your voice.'}`
+        ? `Style match score: ${Math.round(draft.style_match_score * 100)}%. ${draft.style_match_score > 0.8 ? 'Well-matched to your writing style.' : 'Consider adjusting to better match your voice.'}`
         : `Tone is set to ${draft.tone}. ARIA adapts this based on recipient preferences.`,
       formalityScore: TONE_FORMALITY[draft.tone] ?? 60,
     };

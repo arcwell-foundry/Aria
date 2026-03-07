@@ -32,7 +32,6 @@ import {
   NextStepsModule,
   AgentStatusModule,
   CRMSnapshotModule,
-  ChatInputModule,
   SuggestedRefinementsModule,
   JarvisInsightsModule,
   TerritoryForecastModule,
@@ -50,7 +49,6 @@ interface IntelPanelProps {
 interface PanelConfig {
   title: string;
   modules: ReactNode[];
-  chatContext?: string;
 }
 
 function getPanelConfig(pathname: string): PanelConfig {
@@ -65,7 +63,6 @@ function getPanelConfig(pathname: string): PanelConfig {
         <NextStepsModule key="steps" />,
         <CRMSnapshotModule key="crm" />,
       ],
-      chatContext: 'lead-detail',
     };
   }
 
@@ -80,7 +77,6 @@ function getPanelConfig(pathname: string): PanelConfig {
         <NextBestActionModule key="action" />,
         <SuggestedRefinementsModule key="refinements" />,
       ],
-      chatContext: 'draft-detail',
     };
   }
 
@@ -94,7 +90,6 @@ function getPanelConfig(pathname: string): PanelConfig {
         <StakeholderMapModule key="stakeholders" />,
         <CRMSnapshotModule key="crm" />,
       ],
-      chatContext: 'pipeline',
     };
   }
 
@@ -109,7 +104,6 @@ function getPanelConfig(pathname: string): PanelConfig {
         <DocumentIntelModule key="documents" />,
         <NextBestActionModule key="action" />,
       ],
-      chatContext: 'intelligence',
     };
   }
 
@@ -121,7 +115,6 @@ function getPanelConfig(pathname: string): PanelConfig {
         <ToneModule key="tone" />,
         <AnalysisModule key="analysis" />,
       ],
-      chatContext: 'communications',
     };
   }
 
@@ -133,7 +126,6 @@ function getPanelConfig(pathname: string): PanelConfig {
         <AgentStatusModule key="agents" />,
         <NextBestActionModule key="action" />,
       ],
-      chatContext: 'actions',
     };
   }
 
@@ -145,7 +137,6 @@ function getPanelConfig(pathname: string): PanelConfig {
         <AgentStatusModule key="agents" />,
         <NextBestActionModule key="action" />,
       ],
-      chatContext: 'activity',
     };
   }
 
@@ -156,7 +147,6 @@ function getPanelConfig(pathname: string): PanelConfig {
         <JarvisInsightsModule key="jarvis" />,
         <NextBestActionModule key="action" />,
       ],
-      chatContext: 'analytics',
     };
   }
 
@@ -170,7 +160,6 @@ function getPanelConfig(pathname: string): PanelConfig {
       <DocumentIntelModule key="documents" />,
       <NextBestActionModule key="action" />,
     ],
-    chatContext: 'general',
   };
 }
 
@@ -234,9 +223,6 @@ export function IntelPanel({ className }: IntelPanelProps) {
         >
           Last updated: just now
         </p>
-
-        {/* Contextual chat input */}
-        <ChatInputModule context={config.chatContext} />
       </div>
     </aside>
   );

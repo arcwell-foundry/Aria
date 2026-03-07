@@ -225,8 +225,9 @@ async def regenerate_draft(
         ):
             # Route to intelligence draft regeneration
             tone = request.tone.value if request and request.tone else None
+            additional_context = request.additional_context if request else None
             return await _regenerate_intelligence_draft(
-                draft_check.data[0], draft_id, tone, current_user.id, db
+                draft_check.data[0], draft_id, tone, current_user.id, db, additional_context
             )
 
         # Standard draft regeneration via DraftService
@@ -253,8 +254,9 @@ async def _regenerate_intelligence_draft(
     new_tone: str | None,
     user_id: str,
     db,
+    additional_context: str | None = None,
 ) -> dict[str, Any]:
-    """Regenerate an intelligence-generated draft with a new tone.
+    """Regenerate an intelligence-generated draft with a new tone or refinement.
 
     Intelligence drafts don't have thread_id or original_email_id like reply drafts.
     They use competitive_positioning and signal context instead.
@@ -353,6 +355,8 @@ YOUR ADVANTAGES: {diff_text}
 CONTEXT: {signal_context[:200] if signal_context else ''}
 
 Write ONLY the email body. No JSON, no markdown formatting, no subject line. Just the email text."""
+    if additional_context:
+        user_prompt += f"\n\nADDITIONAL REFINEMENT: {additional_context}"
 
     try:
         from src.core.llm import LLMClient
