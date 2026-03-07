@@ -1,11 +1,13 @@
-"""Cognitive load API routes for ARIA.
+"""Cognitive load and user utility API routes for ARIA.
 
 This module provides endpoints for:
 - Getting current cognitive load state
 - Retrieving cognitive load history
+- Checking CRM connectivity status
 """
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -136,3 +138,17 @@ async def get_cognitive_load_history(
             status_code=503,
             detail="Cognitive load service temporarily unavailable",
         ) from None
+
+
+@router.get("/crm-status")
+async def get_crm_status_endpoint(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Check if user has an active CRM integration.
+
+    Returns connected status and CRM type.
+    """
+    from src.intelligence.crm_status import get_crm_status
+
+    db = get_supabase_client()
+    return await get_crm_status(str(current_user.id), db)

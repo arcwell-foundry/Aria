@@ -702,7 +702,128 @@ class TestPersistence:
         assert result is not None
         assert str(result.id) == str(insight_id)
         assert result.content == "Test content"
-        mock_db.table.assert_called_with("jarvis_insights")
+        # confidence=0.7 + opportunity => priority_label "high"
+        assert result.priority_label == "high"
+        mock_db.table.assert_any_call("jarvis_insights")
+
+    @pytest.mark.asyncio
+    async def test_save_insight_critical_priority_for_high_confidence_threat(
+        self,
+        implication_engine: ImplicationEngine,
+    ):
+        """Test that high-confidence threats get critical priority label."""
+        user_id = str(uuid4())
+        insight_id = uuid4()
+
+        implication = Implication(
+            id=None,
+            trigger_event="Competitor threat event",
+            content="Competitor launched competing product",
+            type=ImplicationType.THREAT,
+            impact_score=0.9,
+            confidence=0.75,
+            urgency=0.8,
+            combined_score=0.82,
+            causal_chain=[],
+            affected_goals=[],
+            recommended_actions=["Counter-position immediately"],
+        )
+
+        from unittest.mock import MagicMock
+
+        now = datetime.now(UTC).isoformat()
+        mock_db = MagicMock()
+        mock_result = MagicMock()
+        mock_result.data = [{
+            "id": str(insight_id),
+            "user_id": user_id,
+            "insight_type": "implication",
+            "trigger_event": "Competitor threat event",
+            "content": "Competitor launched competing product",
+            "classification": "threat",
+            "impact_score": 0.9,
+            "confidence": 0.75,
+            "urgency": 0.8,
+            "combined_score": 0.82,
+            "causal_chain": [],
+            "affected_goals": [],
+            "recommended_actions": ["Counter-position immediately"],
+            "time_horizon": None,
+            "time_to_impact": None,
+            "status": "new",
+            "feedback_text": None,
+            "created_at": now,
+            "updated_at": now,
+        }]
+
+        mock_db.table.return_value.insert.return_value.execute.return_value = mock_result
+        implication_engine._db = mock_db
+
+        result = await implication_engine.save_insight(user_id, implication)
+
+        assert result is not None
+        assert result.priority_label == "critical"
+
+    @pytest.mark.asyncio
+    async def test_save_insight_links_source_signal(
+        self,
+        implication_engine: ImplicationEngine,
+    ):
+        """Test that source signal linking is attempted when causal chain has source_signal_id."""
+        user_id = str(uuid4())
+        insight_id = uuid4()
+        signal_id = str(uuid4())
+
+        implication = Implication(
+            id=None,
+            trigger_event="Signal-driven event",
+            content="Insight from market signal",
+            type=ImplicationType.OPPORTUNITY,
+            impact_score=0.7,
+            confidence=0.65,
+            urgency=0.5,
+            combined_score=0.63,
+            causal_chain=[{"source_entity": "A", "target_entity": "B", "relationship": "causes", "confidence": 0.8, "explanation": "test", "source_signal_id": signal_id}],
+            affected_goals=[],
+            recommended_actions=["Take action now"],
+        )
+
+        from unittest.mock import MagicMock, call
+
+        now = datetime.now(UTC).isoformat()
+        mock_db = MagicMock()
+        mock_result = MagicMock()
+        mock_result.data = [{
+            "id": str(insight_id),
+            "user_id": user_id,
+            "insight_type": "implication",
+            "trigger_event": "Signal-driven event",
+            "content": "Insight from market signal",
+            "classification": "opportunity",
+            "impact_score": 0.7,
+            "confidence": 0.65,
+            "urgency": 0.5,
+            "combined_score": 0.63,
+            "causal_chain": [{"source_entity": "A", "target_entity": "B", "relationship": "causes", "confidence": 0.8, "explanation": "test", "source_signal_id": signal_id}],
+            "affected_goals": [],
+            "recommended_actions": ["Take action now"],
+            "time_horizon": None,
+            "time_to_impact": None,
+            "status": "new",
+            "feedback_text": None,
+            "created_at": now,
+            "updated_at": now,
+        }]
+
+        mock_db.table.return_value.insert.return_value.execute.return_value = mock_result
+        implication_engine._db = mock_db
+
+        result = await implication_engine.save_insight(user_id, implication)
+
+        assert result is not None
+        assert result.priority_label == "high"
+        # Verify market_signals table was called for linking
+        mock_db.table.assert_any_call("market_signals")
 
     @pytest.mark.asyncio
     async def test_save_insight_failure(

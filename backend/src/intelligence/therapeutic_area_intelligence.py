@@ -279,11 +279,83 @@ async def detect_therapeutic_trends(
 
         # Sort by signal count
         trends.sort(key=lambda t: t["signal_count"], reverse=True)
+
+        # Generate LLM narratives for top trends
+        for trend in trends[:10]:
+            try:
+                narrative = await generate_trend_narrative(trend)
+                trend["narrative"] = narrative
+            except Exception:
+                trend["narrative"] = ""
+
         return trends[:10]  # Top 10 trends
 
     except Exception as e:
         logger.error("[TherapeuticArea] Failed to detect trends: %s", e)
         return []
+
+
+async def generate_trend_narrative(
+    trend: dict[str, Any],
+    user_goals: list[dict[str, Any]] | None = None,
+) -> str:
+    """Generate a strategic 'so what?' narrative for a trend.
+
+    Uses LLM to create a 2-3 sentence narrative explaining what this trend
+    means for a bioprocessing sales professional.
+
+    Args:
+        trend: Trend dict with area, signal_count, company_count, companies, etc.
+        user_goals: Optional list of user's active goals.
+
+    Returns:
+        Narrative string, or empty string if generation fails.
+    """
+    try:
+        from src.core.llm import LLMClient
+        from src.core.task_types import TaskType
+
+        companies = trend.get("companies_involved", [])
+        signal_types_raw = [
+            s.get("signal_type", "")
+            for s in trend.get("recent_signals", [])
+        ]
+        signal_types = list(set(t for t in signal_types_raw if t))
+
+        goal_text = ""
+        if user_goals:
+            goal_titles = [g.get("title", "") for g in user_goals[:3] if g.get("title")]
+            if goal_titles:
+                goal_text = f"\nUser's active goals: {', '.join(goal_titles)}"
+
+        prompt = (
+            f"Trend: {trend.get('name', '')} — "
+            f"{trend.get('signal_count', 0)} signals from "
+            f"{trend.get('company_count', 0)} companies.\n"
+            f"Companies involved: {', '.join(companies[:5])}\n"
+            f"Signal types: {', '.join(signal_types[:3])}"
+            f"{goal_text}\n\n"
+            "In 2 sentences, explain what this trend means for a "
+            "bioprocessing sales professional. Be specific. Connect to "
+            "their goals if relevant. Don't say 'this creates an "
+            "opportunity' — say WHAT opportunity."
+        )
+
+        llm = LLMClient()
+        response = await llm.generate_response(
+            task_type=TaskType.ANALYST_RESEARCH,
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt=(
+                "You are a life sciences market intelligence analyst. "
+                "Write concise, actionable trend narratives. No fluff."
+            ),
+        )
+
+        return response.text.strip() if hasattr(response, "text") else str(response).strip()
+
+    except Exception as e:
+        logger.warning("[TherapeuticArea] Narrative generation failed: %s", e)
+        return ""
 
 
 def format_therapeutic_context(

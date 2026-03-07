@@ -148,6 +148,29 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
 
                 stats["signals_detected"] += 1
 
+                # Check watch topics for this signal
+                try:
+                    from src.intelligence.watch_topics_service import WatchTopicsService
+
+                    wts = WatchTopicsService(db)
+                    watch_matches = await wts.match_signal(
+                        user_id=user_id,
+                        signal={
+                            "id": signal_id,
+                            "headline": headline,
+                            "company_name": canonical_company_name,
+                            "signal_type": signal.get("signal_type", "news"),
+                        },
+                    )
+                    if watch_matches:
+                        logger.debug(
+                            "Signal matched %d watch topics: %s",
+                            len(watch_matches),
+                            headline[:60],
+                        )
+                except Exception:
+                    logger.debug("Watch topic matching failed", exc_info=True)
+
                 # Memory compounding: write high-relevance signals to institutional memory
                 if relevance >= 0.85:
                     try:
@@ -250,6 +273,17 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                 exc_info=True,
             )
             stats["errors"] += 1
+
+    # Post-scan deduplication: cluster near-duplicate signals
+    try:
+        from src.intelligence.signal_deduplication import SignalDeduplicator
+
+        dedup = SignalDeduplicator(db)
+        clusters = await dedup.deduplicate_signals(window_hours=48)
+        if clusters > 0:
+            logger.info("Signal deduplication: %d clusters created", clusters)
+    except Exception:
+        logger.debug("Signal deduplication failed", exc_info=True)
 
     logger.info("Scout signal scan complete", extra=stats)
     return stats

@@ -71,6 +71,7 @@ from src.api.routes import (
     tool_request,  # Phase 4D: User tool request workflow
     traces,  # Wave 2: Delegation traces
     trust,  # Wave 4: Trust dashboard
+    watch_topics,  # Custom watch topics for intelligence monitoring
     usage,  # Wave 0: Cost Governor usage tracking
     video,
     webhooks,  # Tavus webhook handler
@@ -377,6 +378,7 @@ app.include_router(insights.router, prefix="/api/v1")
 app.include_router(integrations.router, prefix="/api/v1")
 app.include_router(intelligence.router, prefix="/api/v1")  # Phase 7: Causal intelligence
 app.include_router(intelligence_panel.router, prefix="/api/v1")  # Chat page right panel
+app.include_router(watch_topics.router, prefix="/api/v1")  # Custom watch topics
 app.include_router(leads.router, prefix="/api/v1")
 app.include_router(meetings.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")

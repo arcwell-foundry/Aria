@@ -342,6 +342,7 @@ class JarvisInsight(BaseModel):
     time_to_impact: str | None = None
     impact_type: str | None = None
     priority: float | None = None
+    priority_label: str | None = None
     status: str = Field(default="active")
     feedback: Any | None = None
     feedback_text: str | None = None

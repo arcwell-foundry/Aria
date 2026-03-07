@@ -329,12 +329,61 @@ class ImplicationEngine:
 
             if result.data and len(result.data) > 0:
                 row = result.data[0]
+                insight_id = row.get("id")
+
+                # Compute priority label
+                conf = implication.confidence
+                classification = implication.type.value
+                if conf >= 0.7 and classification == "threat":
+                    priority_label = "critical"
+                elif conf >= 0.6:
+                    priority_label = "high"
+                elif conf >= 0.4:
+                    priority_label = "medium"
+                else:
+                    priority_label = "low"
+
+                # Update with priority label
+                try:
+                    self._db.table("jarvis_insights").update(
+                        {"priority_label": priority_label}
+                    ).eq("id", insight_id).execute()
+                    row["priority_label"] = priority_label
+                except Exception:
+                    logger.debug("Failed to set priority_label for insight %s", insight_id)
+
+                # Link back to source signal if available
+                try:
+                    source_id = None
+                    # Try to extract from causal chain
+                    chain = implication.causal_chain or []
+                    for link in chain:
+                        if isinstance(link, dict) and link.get("source_signal_id"):
+                            source_id = link["source_signal_id"]
+                            break
+
+                    if source_id:
+                        action_summary = (
+                            implication.recommended_actions[0][:200]
+                            if implication.recommended_actions
+                            else ""
+                        )
+                        self._db.table("market_signals").update(
+                            {
+                                "linked_insight_id": insight_id,
+                                "linked_action_summary": action_summary,
+                            }
+                        ).eq("id", source_id).execute()
+                except Exception:
+                    logger.debug("Failed to link insight %s to source signal", insight_id)
+
                 logger.info(
                     "Saved insight to database",
                     extra={
-                        "insight_id": row.get("id"),
+                        "insight_id": insight_id,
                         "user_id": user_id,
-                        "classification": implication.type.value,
+                        "classification": classification,
+                        "priority_label": priority_label,
                     },
                 )
                 return JarvisInsight(**row)

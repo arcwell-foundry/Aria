@@ -2293,6 +2293,7 @@ class TherapeuticTrendResponse(BaseModel):
     companies_involved: list[str]
     company_count: int
     description: str
+    narrative: str = ""
 
 
 class TherapeuticTrendsListResponse(BaseModel):
@@ -2354,6 +2355,7 @@ async def get_therapeutic_trends(
                     companies_involved=t["companies_involved"],
                     company_count=t["company_count"],
                     description=t["description"],
+                    narrative=t.get("narrative", ""),
                 )
                 for t in trends
             ],

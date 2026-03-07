@@ -805,6 +805,36 @@ async def _run_competitive_docs_refresh() -> None:
         logger.exception("Competitive docs refresh scheduler run failed")
 
 
+async def _run_battle_card_product_enrichment() -> None:
+    """Monthly enrichment of battle cards with competitor product data via Exa."""
+    try:
+        from src.db.supabase import SupabaseClient
+        from src.intelligence.battle_card_enrichment import BattleCardEnricher
+
+        db = SupabaseClient.get_client()
+
+        exa_client = None
+        try:
+            from src.core.config import settings
+
+            if settings.exa_configured:
+                from src.agents.capabilities.enrichment_providers.exa_provider import (
+                    ExaEnrichmentProvider,
+                )
+
+                exa_client = ExaEnrichmentProvider()
+        except Exception:
+            logger.warning("Exa client not available for battle card enrichment")
+
+        enricher = BattleCardEnricher(supabase_client=db, exa_client=exa_client)
+        count = await enricher.enrich_all_battle_cards()
+        logger.info(
+            "Battle card product enrichment complete: %d cards enriched", count
+        )
+    except Exception:
+        logger.exception("Battle card product enrichment scheduler run failed")
+
+
 async def _run_scout_signal_scan() -> None:
     """Run proactive Scout signal scan for market intelligence."""
     try:
@@ -2257,6 +2287,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(day_of_week="mon", hour=6, minute=0),
             id="pre_conference_briefings",
             name="Weekly pre-conference briefing generation",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_battle_card_product_enrichment,
+            trigger=CronTrigger(day=15, hour=3, minute=0),
+            id="battle_card_product_enrichment",
+            name="Monthly battle card product enrichment via Exa",
             replace_existing=True,
         )
         _scheduler.start()
