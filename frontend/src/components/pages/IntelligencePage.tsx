@@ -156,12 +156,10 @@ function TherapeuticTrendsSection() {
 
   const trends = trendsData?.trends ?? [];
 
-  if (trends.length === 0) return null;
-
-  // Match trends to goals by keyword overlap
+  // Match trends to goals by keyword overlap - MUST be before any early returns (React hooks rule)
   const goalMatches = useMemo(() => {
     const matches: Record<string, string> = {};
-    if (!goals) return matches;
+    if (!goals || trends.length === 0) return matches;
     for (const trend of trends) {
       const trendWords = trend.name.toLowerCase().split(/\s+/);
       for (const goal of goals) {
@@ -178,6 +176,8 @@ function TherapeuticTrendsSection() {
     }
     return matches;
   }, [trends, goals]);
+
+  if (trends.length === 0) return null;
 
   return (
     <section>
