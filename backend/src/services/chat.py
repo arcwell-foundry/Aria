@@ -762,7 +762,7 @@ These are signals ARIA has detected. You gathered this intelligence - reference 
 
 JARVIS_INSIGHTS_TEMPLATE = """## ARIA's Recent Intelligence Insights
 
-These are Jarvis-generated intelligence insights. Reference them when relevant to the conversation:
+These are ARIA-generated intelligence insights. Reference them when relevant to the conversation:
 
 {insights}"""
 

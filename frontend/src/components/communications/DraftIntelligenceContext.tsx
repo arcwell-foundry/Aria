@@ -1,5 +1,5 @@
 /**
- * DraftIntelligenceContext - Collapsible panel showing Jarvis insights
+ * DraftIntelligenceContext - Collapsible panel showing intelligence insights
  * and market signals relevant to an email draft's recipient.
  *
  * Follows ARIA Design System v1.0:
@@ -135,14 +135,14 @@ export function DraftIntelligenceContext({
           className="border-t px-4 pb-4"
           style={{ borderColor: 'var(--border)' }}
         >
-          {/* Jarvis Insights sub-section */}
+          {/* Intelligence Insights sub-section */}
           {relevantInsights.length > 0 && (
             <div className="mt-4">
               <h4
                 className="text-xs font-medium uppercase tracking-wider mb-3"
                 style={{ color: 'var(--text-secondary)' }}
               >
-                Jarvis Insights
+                Intelligence Insights
               </h4>
               <div className="space-y-3">
                 {relevantInsights.map((insight: IntelligenceInsight) => {

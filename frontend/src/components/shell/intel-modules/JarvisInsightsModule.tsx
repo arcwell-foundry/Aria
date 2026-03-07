@@ -87,7 +87,7 @@ export function JarvisInsightsModule({ insights: propInsights }: JarvisInsightsM
           style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
         >
           <p className="font-sans text-[12px]" style={{ color: 'var(--text-secondary)' }}>
-            No intelligence insights yet. ARIA&apos;s Jarvis engine is analyzing your market.
+            No intelligence insights yet. ARIA is analyzing your market.
           </p>
         </div>
       </div>

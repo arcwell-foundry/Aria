@@ -1,7 +1,7 @@
 """
 Action Router: Transforms intelligence into execution.
 
-Every Jarvis insight flows through this router. The router matches insights
+Every intelligence insight flows through this router. The router matches insights
 against configurable rules and triggers downstream actions:
 - Create proactive proposals (for user approval)
 - Draft emails with competitive positioning
@@ -36,7 +36,7 @@ def _valid_insight_id(insight: dict[str, Any]) -> str | None:
 
 
 class ActionRouter:
-    """Routes Jarvis insights to appropriate downstream actions."""
+    """Routes intelligence insights to appropriate downstream actions."""
 
     def __init__(self, supabase_client: Any) -> None:
         self._db = supabase_client
@@ -285,7 +285,7 @@ class ActionRouter:
                         "user_id": user_id,
                         "fact": fact,
                         "confidence": insight.get("confidence", 0.5),
-                        "source": "jarvis_insight",
+                        "source": "aria_intelligence",
                         "metadata": metadata,
                     }
                 )
@@ -387,7 +387,7 @@ class ActionRouter:
                     "risk_level": "low",
                     "status": "pending",
                     "payload": action_payload,
-                    "reasoning": f"Jarvis detected {classification} for {entity_type} {company}",
+                    "reasoning": f"ARIA detected {classification} for {entity_type} {company}",
                 }
             ).execute()
 
@@ -469,10 +469,10 @@ class ActionRouter:
                 .insert(
                     {
                         "user_id": user_id,
-                        "pulse_type": "jarvis_insight",
+                        "pulse_type": "intelligent",
                         "title": f"{insight.get('classification', 'intelligence').title()}: {company}",
                         "content": insight.get("content", "")[:500],
-                        "source": "jarvis_action_router",
+                        "source": "aria_intelligence",
                         "signal_category": "competitive_intelligence",
                         "priority_score": priority_score,
                         "time_sensitivity": 0.8 if priority in ("urgent", "high") else 0.4,
@@ -524,7 +524,7 @@ class ActionRouter:
                     "headline": insight.get("title", "")[:200],
                     "summary": insight.get("content", "")[:300],
                     "date": datetime.now(timezone.utc).isoformat(),
-                    "source": "jarvis_insight",
+                    "source": "aria_intelligence",
                     "classification": insight.get("classification", ""),
                 }
                 recent_news.insert(0, new_entry)
