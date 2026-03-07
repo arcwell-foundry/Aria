@@ -1,10 +1,11 @@
 """Pydantic models for email drafts."""
 
+import json
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class EmailDraftPurpose(str, Enum):
@@ -74,8 +75,22 @@ class EmailDraftUpdate(BaseModel):
     tone: EmailDraftTone | None = Field(None, description="Updated tone")
 
 
+def _parse_json_string(v: Any) -> dict[str, Any] | None:
+    """Parse JSON string fields from Supabase into dicts."""
+    if v is None:
+        return None
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except json.JSONDecodeError:
+            return None
+    return v
+
+
 class EmailDraftResponse(BaseModel):
     """Response model for an email draft."""
+
+    model_config = {"extra": "ignore"}  # Ignore extra fields from DB
 
     id: str = Field(..., description="Draft ID")
     user_id: str = Field(..., description="Owner user ID")
@@ -149,9 +164,17 @@ class EmailDraftResponse(BaseModel):
         None, description="ID of the jarvis_insight that triggered this draft"
     )
 
+    # Validators for JSON string fields from Supabase
+    _parse_context = field_validator("context", mode="before")(_parse_json_string)
+    _parse_competitive_positioning = field_validator("competitive_positioning", mode="before")(
+        _parse_json_string
+    )
+
 
 class EmailDraftListResponse(BaseModel):
     """Response model for listing email drafts."""
+
+    model_config = {"extra": "ignore"}
 
     id: str
     recipient_email: str
