@@ -8,7 +8,7 @@ waiting for the user to manually scan or the morning briefing.
 """
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from src.db.supabase import SupabaseClient
@@ -87,14 +87,22 @@ async def run_periodic_email_check() -> dict[str, Any]:
                     )
                     continue
 
+                # Get watermark timestamp for dedup filtering
+                watermark_ts = _get_watermark_timestamp(db, user_id)
+
                 # Scan inbox for new emails
                 logger.info(
-                    "PERIODIC_EMAIL_CHECK: Scanning inbox for user %s (since %0.1f hours)",
+                    "PERIODIC_EMAIL_CHECK: Scanning inbox for user %s (since %0.1f hours, watermark=%s)",
                     user_id,
                     since_hours,
+                    watermark_ts or "none",
                 )
 
-                scan_result = await analyzer.scan_inbox(user_id, since_hours=since_hours)
+                scan_result = await analyzer.scan_inbox(
+                    user_id,
+                    since_hours=since_hours,
+                    since_timestamp=watermark_ts,
+                )
 
                 if scan_result.urgent:
                     stats["users_with_urgent"] += 1
@@ -259,3 +267,39 @@ def _calculate_hours_since_last_run(db: Any, user_id: str) -> float:
             e,
         )
         return 24.0
+
+
+def _get_watermark_timestamp(db: Any, user_id: str) -> str | None:
+    """Get the watermark timestamp from the last completed processing run.
+
+    This is the timestamp of the newest email successfully processed,
+    used to avoid re-fetching and re-classifying already-scanned emails.
+
+    Args:
+        db: Supabase client.
+        user_id: The user's ID.
+
+    Returns:
+        ISO timestamp string, or None if no watermark exists.
+    """
+    try:
+        result = (
+            db.table("email_processing_runs")
+            .select("watermark_timestamp")
+            .eq("user_id", user_id)
+            .eq("status", "completed")
+            .not_.is_("watermark_timestamp", "null")
+            .order("watermark_timestamp", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            return result.data[0].get("watermark_timestamp")
+        return None
+    except Exception as e:
+        logger.warning(
+            "PERIODIC_EMAIL_CHECK: Failed to get watermark for %s: %s",
+            user_id,
+            e,
+        )
+        return None

@@ -211,6 +211,24 @@ class EmailAnalyzer:
                 logger.info("EMAIL_ANALYZER: No emails found for user %s", user_id)
                 return result
 
+            # 2b. Batch dedup: fetch already-scanned email_ids to skip re-classification
+            already_scanned = await self._get_already_scanned_ids(user_id, emails)
+            if already_scanned:
+                original_count = len(emails)
+                emails = [e for e in emails if (e.get("id") or e.get("message_id", "")) not in already_scanned]
+                skipped_count = original_count - len(emails)
+                logger.info(
+                    "EMAIL_ANALYZER: Dedup filtered %d already-scanned emails for user %s (%d remaining)",
+                    skipped_count,
+                    user_id,
+                    len(emails),
+                )
+                result.total_emails = len(emails)
+
+            if not emails:
+                logger.info("EMAIL_ANALYZER: All emails already scanned for user %s", user_id)
+                return result
+
             # Track newest email for watermark
             newest_timestamp: str | None = None
             newest_email_id: str | None = None
@@ -1774,6 +1792,64 @@ class EmailAnalyzer:
                 "needs_draft": False,
                 "reason": f"LLM response parse failed ({e}), defaulting to FYI",
             }
+
+    # ------------------------------------------------------------------
+    # Deduplication
+    # ------------------------------------------------------------------
+
+    async def _get_already_scanned_ids(
+        self,
+        user_id: str,
+        emails: list[dict[str, Any]],
+    ) -> set[str]:
+        """Batch-check which email IDs have already been scanned.
+
+        Queries email_scan_log for existing entries with non-NULL snippets,
+        meaning they were fully processed in a prior scan run.
+
+        Args:
+            user_id: The user's ID.
+            emails: List of raw email dicts from Composio.
+
+        Returns:
+            Set of email_id strings that have already been scanned.
+        """
+        try:
+            # Collect all email IDs from the fetched batch
+            email_ids = []
+            for e in emails:
+                eid = e.get("id") or e.get("message_id")
+                if eid:
+                    email_ids.append(eid)
+
+            if not email_ids:
+                return set()
+
+            # Query in batches of 100 to avoid overly large IN clauses
+            already_scanned: set[str] = set()
+            batch_size = 100
+            for i in range(0, len(email_ids), batch_size):
+                batch = email_ids[i : i + batch_size]
+                result = (
+                    self._db.table("email_scan_log")
+                    .select("email_id")
+                    .eq("user_id", user_id)
+                    .in_("email_id", batch)
+                    .not_.is_("snippet", "null")
+                    .execute()
+                )
+                if result.data:
+                    already_scanned.update(row["email_id"] for row in result.data)
+
+            return already_scanned
+
+        except Exception as e:
+            logger.warning(
+                "EMAIL_ANALYZER: Failed to check already-scanned IDs for user %s: %s",
+                user_id,
+                e,
+            )
+            return set()
 
     # ------------------------------------------------------------------
     # Decision logging
