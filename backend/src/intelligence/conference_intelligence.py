@@ -391,6 +391,134 @@ class ConferenceIntelligenceEngine:
 
         return recommendations
 
+    async def generate_pre_conference_briefing(
+        self, user_id: str, conference_id: str
+    ) -> Optional[dict]:
+        """Generate a pre-conference competitive briefing 2 weeks before the event."""
+        import json as _json
+
+        conf = (
+            self._db.table("conferences")
+            .select("*")
+            .eq("id", conference_id)
+            .limit(1)
+            .execute()
+        )
+        if not conf.data:
+            return None
+        conference = conf.data[0]
+
+        participants = (
+            self._db.table("conference_participants")
+            .select("*")
+            .eq("conference_id", conference_id)
+            .execute()
+        )
+
+        competitors = await self._get_competitor_names(user_id)
+
+        competitor_exhibitors: list[dict] = []
+        prospect_speakers: list[dict] = []
+        for p in participants.data or []:
+            company = p.get("company_name", "")
+            if any(comp.lower() in company.lower() for comp in competitors):
+                competitor_exhibitors.append(p)
+            elif not p.get("is_own_company"):
+                prospect_speakers.append(p)
+
+        # Pull battle card positioning for each competitor
+        battle_briefs: list[dict] = []
+        seen_companies: set[str] = set()
+        for p in competitor_exhibitors:
+            comp_name = p["company_name"]
+            if comp_name in seen_companies:
+                continue
+            seen_companies.add(comp_name)
+
+            bc = (
+                self._db.table("battle_cards")
+                .select("competitor_name, differentiation, pricing, weaknesses")
+                .ilike("competitor_name", f"%{comp_name}%")
+                .limit(1)
+                .execute()
+            )
+            if bc.data:
+                card = bc.data[0]
+                battle_briefs.append({
+                    "competitor": card["competitor_name"],
+                    "differentiation": (card.get("differentiation") or [])[:3],
+                    "weaknesses": (card.get("weaknesses") or [])[:3],
+                    "pricing": card.get("pricing", {}),
+                })
+
+        briefing = {
+            "conference_name": conference.get("name"),
+            "start_date": conference.get("start_date"),
+            "city": conference.get("city"),
+            "competitor_count": len(competitor_exhibitors),
+            "prospect_count": len(prospect_speakers),
+            "competitor_exhibitors": [
+                {
+                    "company": p["company_name"],
+                    "type": p.get("participation_type"),
+                    "booth": p.get("booth_number"),
+                    "presentation": p.get("presentation_title"),
+                }
+                for p in competitor_exhibitors[:10]
+            ],
+            "prospect_speakers": [
+                {
+                    "company": p["company_name"],
+                    "person": p.get("person_name"),
+                    "presentation": p.get("presentation_title"),
+                }
+                for p in prospect_speakers[:10]
+            ],
+            "battle_briefs": battle_briefs,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        all_companies = list(
+            set(
+                p["company_name"]
+                for p in competitor_exhibitors + prospect_speakers
+            )
+        )
+        self._db.table("conference_insights").insert({
+            "user_id": user_id,
+            "conference_id": conference_id,
+            "insight_type": "pre_conference_briefing",
+            "content": _json.dumps(briefing),
+            "companies_mentioned": all_companies,
+            "urgency": "high",
+            "actionable": True,
+            "recommended_actions": _json.dumps([
+                "Review competitor booth positions and prepare talking points",
+                "Schedule meetings with prospect speakers before the conference",
+                "Prepare competitive displacement materials for booth visits",
+            ]),
+        }).execute()
+
+        self._db.table("memory_semantic").insert({
+            "user_id": user_id,
+            "fact": (
+                f"[Conference Briefing] {conference['name']} "
+                f"({conference.get('start_date')}): "
+                f"{len(competitor_exhibitors)} competitors, "
+                f"{len(prospect_speakers)} prospects. "
+                f"Battle card positioning prepared."
+            ),
+            "confidence": 0.9,
+            "source": "conference_briefing",
+            "metadata": _json.dumps({"conference_id": conference_id}),
+        }).execute()
+
+        logger.info(
+            "[ConferenceIntel] Pre-briefing generated for %s",
+            conference["name"],
+        )
+        return briefing
+
     # ================================================================
     # CONFERENCE SIGNAL DETECTION
     # ================================================================
