@@ -163,6 +163,9 @@ class EmailDraftResponse(BaseModel):
     insight_id: str | None = Field(
         None, description="ID of the jarvis_insight that triggered this draft"
     )
+    aria_reasoning: str | None = Field(
+        None, description="LLM-generated strategic reasoning narrative explaining ARIA's decisions"
+    )
 
     # Validators for JSON string fields from Supabase
     _parse_context = field_validator("context", mode="before")(_parse_json_string)

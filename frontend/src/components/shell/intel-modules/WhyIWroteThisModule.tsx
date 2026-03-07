@@ -64,6 +64,34 @@ export function WhyIWroteThisModule({ reasoning: propReasoning }: WhyIWroteThisM
 
   // Render full ARIA reasoning chain for intelligence drafts
   if (isIntelligenceDraft && draft) {
+    // If aria_reasoning exists (LLM-generated narrative), show it as primary
+    if (draft.aria_reasoning) {
+      return (
+        <div data-aria-id="intel-why-wrote" className="space-y-3">
+          <h3
+            className="font-sans text-[11px] font-medium uppercase tracking-wider"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Why I Wrote This
+          </h3>
+          <div
+            className="text-sm leading-relaxed whitespace-pre-line"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {draft.aria_reasoning}
+          </div>
+          {draft.style_match_score !== undefined && (
+            <div className="flex items-center gap-2 text-xs pt-1 border-t"
+              style={{ color: 'var(--text-secondary)', borderColor: 'var(--border)' }}
+            >
+              <span>Written in your voice</span>
+              <span className="font-medium">{Math.round(draft.style_match_score * 100)}% style match</span>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     const competitivePositioning = draft.competitive_positioning as CompetitivePositioning | undefined;
     const contextData = draft.context as DraftContext | undefined;
     const competitor = competitivePositioning?.competitor || 'this competitor';
@@ -167,7 +195,7 @@ export function WhyIWroteThisModule({ reasoning: propReasoning }: WhyIWroteThisM
         `Purpose: ${draft.purpose}`,
         `Tone: ${draft.tone}`,
         `Recipient: ${draft.recipient_name ?? draft.recipient_email}`,
-        ...(draft.style_match_score ? [`Style match: ${draft.style_match_score}%`] : []),
+        ...(draft.style_match_score ? [`Style match: ${Math.round(draft.style_match_score * 100)}%`] : []),
         ...(draft.lead_memory_id ? ['Linked to pipeline lead'] : []),
       ],
     };

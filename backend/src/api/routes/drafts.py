@@ -211,7 +211,7 @@ async def regenerate_draft(
         # Check if this is an intelligence-generated draft first
         draft_check = (
             db.table("email_drafts")
-            .select("draft_type, competitive_positioning, context, body, aria_notes, insight_id")
+            .select("draft_type, competitive_positioning, context, body, aria_notes, insight_id, aria_reasoning")
             .eq("id", draft_id)
             .eq("user_id", current_user.id)
             .limit(1)
@@ -360,15 +360,15 @@ Write ONLY the email body. No JSON, no markdown formatting, no subject line. Jus
 
     try:
         from src.core.llm import LLMClient
-        from src.core.llm_config import TaskType
+        from src.core.task_types import TaskType
 
         llm = LLMClient()
         response = await llm.generate_response(
-            task_type=TaskType.SCRIBE_DRAFT_EMAIL,
+            task=TaskType.SCRIBE_DRAFT_EMAIL,
             messages=[{"role": "user", "content": user_prompt}],
             system_prompt=system_prompt,
         )
-        new_body = response.get("content", "") if isinstance(response, dict) else str(response)
+        new_body = str(response).strip()
         new_body = new_body.strip().strip("`").strip()
         if new_body.startswith("```") or new_body.startswith("{"):
             new_body = draft_data.get("body", "")  # fallback
@@ -386,14 +386,29 @@ Write ONLY the email body. No JSON, no markdown formatting, no subject line. Jus
     }
     db_tone = tone_map.get(tone_value, "formal")
 
-    db.table("email_drafts").update({
+    # Build update data - preserve aria_reasoning across tone changes
+    update_data: dict[str, Any] = {
         "body": new_body,
         "tone": db_tone,
-        "aria_notes": (
-            f"ARIA regenerated this email with {tone_value} tone. "
-            f"Competitive positioning for {company_name} preserved."
-        ),
-    }).eq("id", draft_id).execute()
+    }
+
+    # Append tone change info to aria_notes instead of replacing
+    existing_notes = draft_data.get("aria_notes", "") or ""
+    tone_note = f" | Regenerated with {tone_value} tone."
+    if additional_context:
+        tone_note += f" Refinement: {additional_context[:100]}"
+
+    # Only append if not already appended (idempotent)
+    if "Regenerated with" not in existing_notes:
+        update_data["aria_notes"] = existing_notes + tone_note
+    else:
+        # Replace just the regeneration suffix
+        base_notes = existing_notes.split(" | Regenerated with")[0]
+        update_data["aria_notes"] = base_notes + tone_note
+
+    # Never overwrite aria_reasoning - it's about WHY the email was written, not what tone it's in
+
+    db.table("email_drafts").update(update_data).eq("id", draft_id).execute()
 
     # Return updated draft
     updated = db.table("email_drafts").select("*").eq("id", draft_id).limit(1).execute()

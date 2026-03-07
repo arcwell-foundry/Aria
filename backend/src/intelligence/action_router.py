@@ -342,6 +342,46 @@ class ActionRouter:
                 comp_context["pricing"] = battle_card.get("pricing", {})
                 comp_context["weaknesses"] = battle_card.get("weaknesses", [])[:3]
 
+            # Generate strategic reasoning narrative
+            aria_reasoning = ""
+            try:
+                from src.intelligence.reasoning_engine import ReasoningEngine
+                reasoning_engine = ReasoningEngine(self._db)
+
+                # Get user's company name for context
+                user_company_name = "our company"
+                try:
+                    profile = (
+                        self._db.table("user_profiles")
+                        .select("company_id")
+                        .eq("id", user_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    if profile.data and profile.data[0].get("company_id"):
+                        company_result = (
+                            self._db.table("companies")
+                            .select("name")
+                            .eq("id", profile.data[0]["company_id"])
+                            .limit(1)
+                            .execute()
+                        )
+                        if company_result.data:
+                            user_company_name = company_result.data[0]["name"]
+                except Exception:
+                    pass
+
+                aria_reasoning = await reasoning_engine.generate_proposal_reasoning(
+                    user_company=user_company_name,
+                    competitor_name=company,
+                    entity_type=entity_type,
+                    signal_context=context.get("event_text", "") or content[:300],
+                    insight_content=content,
+                    competitive_positioning=comp_context,
+                )
+            except Exception as e:
+                logger.warning("[ActionRouter] Reasoning generation failed: %s", e)
+
             proposal_data: dict[str, Any] = {
                 "user_id": user_id,
                 "proposal_type": template,
@@ -355,6 +395,7 @@ class ActionRouter:
                 "status": "pending",
                 "insight_content": content[:500],
                 "competitive_context": comp_context,
+                "aria_reasoning": aria_reasoning if aria_reasoning else None,
             }
             valid_id = _valid_insight_id(insight)
             if valid_id:
@@ -388,6 +429,7 @@ class ActionRouter:
                     "status": "pending",
                     "payload": action_payload,
                     "reasoning": f"ARIA detected {classification} for {entity_type} {company}",
+                    "aria_reasoning": aria_reasoning if aria_reasoning else None,
                 }
             ).execute()
 

@@ -56,6 +56,7 @@ export interface EmailDraft {
   aria_notes?: string;
   competitive_positioning?: Record<string, unknown>;
   insight_id?: string;
+  aria_reasoning?: string;
 }
 
 export interface EmailDraftListItem {

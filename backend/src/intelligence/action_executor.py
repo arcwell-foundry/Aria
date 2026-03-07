@@ -211,6 +211,34 @@ Respond in this exact JSON format:
             competitive_context, insight_content,
         )
 
+        # 4b. Generate ARIA strategic reasoning narrative
+        aria_reasoning = ""
+        try:
+            from src.intelligence.reasoning_engine import ReasoningEngine
+            reasoning_engine = ReasoningEngine(self._db)
+
+            # Get user's active goals for context
+            goals_result = (
+                self._db.table("goals")
+                .select("title, goal_type, status")
+                .eq("user_id", user_id)
+                .in_("status", ["active", "in_progress", "plan_ready"])
+                .limit(5)
+                .execute()
+            )
+
+            aria_reasoning = await reasoning_engine.generate_email_reasoning(
+                user_company=user_company,
+                competitor_name=company_name,
+                signal_context=insight_content[:500],
+                competitive_positioning=competitive_context,
+                email_body=email_data.get("body", ""),
+                user_goals=goals_result.data if goals_result.data else [],
+                digital_twin=writing_style,
+            )
+        except Exception as e:
+            logger.warning("[ActionExecutor] Reasoning generation failed: %s", e)
+
         # 5. Save to email_drafts
         return await self._save_email_draft(
             user_id=user_id,
@@ -225,6 +253,7 @@ Respond in this exact JSON format:
             pricing=pricing,
             insight_content=insight_content,
             entity_type=payload.get("entity_type"),
+            aria_reasoning=aria_reasoning,
         )
 
     # ================================================================
@@ -457,6 +486,7 @@ Respond in this exact JSON format:
         insight_content: str,
         entity_type: Optional[str] = None,
         extra_context: Optional[dict] = None,
+        aria_reasoning: str = "",
     ) -> dict[str, Any]:
         """Save LLM-generated email to email_drafts and create notification."""
         subject = email_data.get("subject_options", ["Supply continuity discussion"])[0]
@@ -498,6 +528,7 @@ Respond in this exact JSON format:
                     "subject_alternatives": all_subjects[1:] if len(all_subjects) > 1 else [],
                 }),
                 "context": json.dumps(context_data),
+                "aria_reasoning": aria_reasoning if aria_reasoning else None,
             }
             if insight_id:
                 insert_data["insight_id"] = insight_id
