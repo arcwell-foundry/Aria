@@ -17,6 +17,9 @@ class EmailDraftPurpose(str, Enum):
     CHECK_IN = "check_in"
     REPLY = "reply"
     OTHER = "other"
+    COMPETITIVE_DISPLACEMENT = "competitive_displacement"
+    CONFERENCE_OUTREACH = "conference_outreach"
+    CLINICAL_TRIAL_OUTREACH = "clinical_trial_outreach"
 
 
 class EmailDraftTone(str, Enum):
@@ -36,6 +39,7 @@ class EmailDraftStatus(str, Enum):
     DISMISSED = "dismissed"
     SENT = "sent"
     FAILED = "failed"
+    SAVED_TO_CLIENT = "saved_to_client"
 
 
 class DraftUserAction(str, Enum):
@@ -134,6 +138,16 @@ class EmailDraftResponse(BaseModel):
     stale_reason: str | None = Field(
         None, description="Human-readable explanation of why the draft is stale"
     )
+    # Fields for competitive displacement drafts
+    competitive_positioning: dict[str, Any] | None = Field(
+        None, description="Competitive positioning context for displacement drafts"
+    )
+    draft_type: str | None = Field(
+        None, description="Type of draft: reply, competitive_displacement, etc."
+    )
+    insight_id: str | None = Field(
+        None, description="ID of the jarvis_insight that triggered this draft"
+    )
 
 
 class EmailDraftListResponse(BaseModel):
@@ -149,6 +163,13 @@ class EmailDraftListResponse(BaseModel):
     style_match_score: float | None
     confidence_tier: str | None = None
     created_at: datetime
+    # Fields for competitive displacement drafts
+    draft_type: str | None = Field(
+        None, description="Type of draft: reply, competitive_displacement, etc."
+    )
+    aria_notes: str | None = Field(
+        None, description="Brief ARIA reasoning notes for list preview"
+    )
 
 
 class EmailRegenerateRequest(BaseModel):

@@ -49,6 +49,16 @@ const PURPOSE_LABELS: Record<EmailDraftPurpose, string> = {
   check_in: 'Check-in',
   reply: 'Reply',
   other: 'Other',
+  competitive_displacement: 'Competitive Displacement',
+  conference_outreach: 'Conference Outreach',
+  clinical_trial_outreach: 'Clinical Trial Outreach',
+};
+
+// Draft type badge styles for intelligence-generated drafts
+const DRAFT_TYPE_STYLES: Record<string, { label: string; bg: string; text: string; icon?: string }> = {
+  competitive_displacement: { label: '🎯 Displacement', bg: '#7c3aed', text: 'white' },
+  conference_outreach: { label: '📢 Conference', bg: '#0891b2', text: 'white' },
+  clinical_trial_outreach: { label: '🔬 Clinical', bg: '#059669', text: 'white' },
 };
 
 // Status badge styles - covers all known statuses plus fallback for unknown
@@ -319,6 +329,19 @@ function DraftsList() {
                         }}
                       >
                         {TIER_STYLES[draft.confidence_tier].label}
+                      </span>
+                    )}
+
+                    {/* Draft type badge for intelligence-generated drafts */}
+                    {draft.draft_type && draft.draft_type !== 'reply' && DRAFT_TYPE_STYLES[draft.draft_type] && (
+                      <span
+                        className="px-2 py-0.5 rounded-full text-[10px] font-medium"
+                        style={{
+                          backgroundColor: DRAFT_TYPE_STYLES[draft.draft_type].bg,
+                          color: DRAFT_TYPE_STYLES[draft.draft_type].text,
+                        }}
+                      >
+                        {DRAFT_TYPE_STYLES[draft.draft_type].label}
                       </span>
                     )}
 

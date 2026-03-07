@@ -8,7 +8,10 @@ export type EmailDraftPurpose =
   | "thank_you"
   | "check_in"
   | "reply"
-  | "other";
+  | "other"
+  | "competitive_displacement"
+  | "conference_outreach"
+  | "clinical_trial_outreach";
 
 export type EmailDraftTone = "formal" | "friendly" | "urgent";
 
@@ -48,6 +51,11 @@ export interface EmailDraft {
   saved_to_client_at?: string;
   created_at: string;
   updated_at: string;
+  // Intelligence-generated draft fields
+  draft_type?: string;
+  aria_notes?: string;
+  competitive_positioning?: Record<string, unknown>;
+  insight_id?: string;
 }
 
 export interface EmailDraftListItem {
@@ -61,6 +69,9 @@ export interface EmailDraftListItem {
   style_match_score?: number;
   confidence_tier?: ConfidenceTier;
   created_at: string;
+  // Intelligence-generated draft fields
+  draft_type?: string;
+  aria_notes?: string;
 }
 
 // Request types
