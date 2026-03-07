@@ -324,11 +324,11 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
                       'px-3 py-1 rounded-full text-xs font-medium transition-colors',
                       draft.tone === option.value
                         ? 'bg-[var(--accent)] text-white'
-                        : 'border border-[var(--border)] hover:bg-[var(--bg-subtle)]'
+                        : 'border border-[var(--border)] hover:bg-[var(--bg-subtle)]',
+                      (isBusy || isSent) && 'opacity-50 cursor-not-allowed'
                     )}
                     style={{
                       color: draft.tone === option.value ? 'white' : 'var(--text-secondary)',
-                      opacity: isBusy || isSent ? 0.5 : 1,
                     }}
                   >
                     {option.label}
@@ -342,13 +342,13 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
           <div className="p-6 relative">
             {isRegenerating && (
               <div className="absolute inset-0 flex items-center justify-center z-10 rounded-b-lg"
-                style={{ backgroundColor: 'rgba(255,255,255,0.7)' }}
+                style={{ backgroundColor: 'rgba(255,255,255,0.8)' }}
               >
-                <div className="flex items-center gap-2 px-4 py-2 rounded-lg"
+                <div className="flex items-center gap-3 px-4 py-3 rounded-lg shadow-sm"
                   style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}
                 >
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span className="text-sm">Regenerating...</span>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="text-sm font-medium">Rewriting email...</span>
                 </div>
               </div>
             )}
