@@ -1,5 +1,6 @@
 """Drafts API routes for email draft management."""
 
+import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
 from src.core.exceptions import EmailDraftError, EmailSendError, NotFoundError
+from src.db.supabase import SupabaseClient
 from src.models.email_draft import (
     EmailDraftCreate,
     EmailDraftListResponse,
@@ -17,7 +19,6 @@ from src.models.email_draft import (
     EmailRegenerateRequest,
     EmailSendResponse,
 )
-from src.db.supabase import SupabaseClient
 from src.services.action_gatekeeper import get_action_gatekeeper
 from src.services.activity_service import ActivityService
 from src.services.draft_service import get_draft_service
@@ -205,6 +206,30 @@ async def regenerate_draft(
         HTTPException: If draft not found or regeneration fails.
     """
     try:
+        db = SupabaseClient.get_client()
+
+        # Check if this is an intelligence-generated draft first
+        draft_check = (
+            db.table("email_drafts")
+            .select("draft_type, competitive_positioning, context, body, aria_notes, insight_id")
+            .eq("id", draft_id)
+            .eq("user_id", current_user.id)
+            .limit(1)
+            .execute()
+        )
+
+        if draft_check.data and draft_check.data[0].get("draft_type") in (
+            "competitive_displacement",
+            "conference_outreach",
+            "clinical_trial_outreach",
+        ):
+            # Route to intelligence draft regeneration
+            tone = request.tone.value if request and request.tone else None
+            return await _regenerate_intelligence_draft(
+                draft_check.data[0], draft_id, tone, current_user.id, db
+            )
+
+        # Standard draft regeneration via DraftService
         service = get_draft_service()
         tone = request.tone if request else None
         additional_context = request.additional_context if request else None
@@ -220,6 +245,165 @@ async def regenerate_draft(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=e.message
         ) from e
+
+
+async def _regenerate_intelligence_draft(
+    draft_data: dict,
+    draft_id: str,
+    new_tone: str | None,
+    user_id: str,
+    db,
+) -> dict[str, Any]:
+    """Regenerate an intelligence-generated draft with a new tone.
+
+    Intelligence drafts don't have thread_id or original_email_id like reply drafts.
+    They use competitive_positioning and signal context instead.
+    """
+    # Parse stored context
+    competitive_positioning = draft_data.get("competitive_positioning", {})
+    if isinstance(competitive_positioning, str):
+        try:
+            competitive_positioning = json.loads(competitive_positioning)
+        except:  # noqa: E722
+            competitive_positioning = {}
+
+    context_data = draft_data.get("context", {})
+    if isinstance(context_data, str):
+        try:
+            context_data = json.loads(context_data)
+        except:  # noqa: E722
+            context_data = {}
+
+    company_name = competitive_positioning.get("competitor", "") or context_data.get("company_name", "")
+    differentiation = competitive_positioning.get("differentiation", [])
+    weaknesses = competitive_positioning.get("weaknesses", [])
+    pricing = competitive_positioning.get("pricing", {})
+    signal_context = context_data.get("signal_context", "") or draft_data.get("aria_notes", "")
+
+    # Get digital twin
+    twin = (
+        db.table("digital_twin_profiles")
+        .select("tone, writing_style, formality_level, vocabulary_patterns")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    writing_style = (
+        twin.data[0]
+        if twin.data
+        else {
+            "tone": "professional",
+            "writing_style": "concise and direct",
+            "formality_level": "business",
+            "vocabulary_patterns": "simple, professional",
+        }
+    )
+
+    # Get user company
+    user_company = "our company"
+    try:
+        profile = (
+            db.table("user_profiles")
+            .select("company_id")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if profile.data and profile.data[0].get("company_id"):
+            company = (
+                db.table("companies")
+                .select("name")
+                .eq("id", profile.data[0]["company_id"])
+                .limit(1)
+                .execute()
+            )
+            if company.data:
+                user_company = company.data[0]["name"]
+    except:  # noqa: E722
+        pass
+
+    tone_value = new_tone or "formal"
+
+    tone_instructions = {
+        "formal": "Write in a formal, professional business tone. Structured paragraphs, no contractions.",
+        "friendly": "Write in a warm, friendly but professional tone. Use contractions. More conversational, shorter sentences.",
+        "casual": "Write in a warm, friendly but professional tone. Use contractions. More conversational, shorter sentences.",
+        "urgent": "Write with urgency. Lead with the time-sensitive opportunity. Shorter paragraphs, direct language, imply a deadline.",
+    }
+
+    system_prompt = f"""You are writing an email for a sales professional at {user_company}.
+WRITING STYLE: {writing_style.get('writing_style', 'concise and direct')}
+TONE: {tone_instructions.get(tone_value, tone_instructions['formal'])}
+
+CRITICAL RULES:
+1. NEVER mention competitor problems (FDA, recalls, quality issues) directly
+2. Lead with VALUE and supply continuity
+3. Compliance-safe language only
+4. Low-friction call to action
+5. 4-6 short paragraphs max
+6. Use [Contact Name] as recipient placeholder"""
+
+    diff_text = (
+        "; ".join(str(d) for d in differentiation[:3])
+        if differentiation
+        else "specialized solutions"
+    )
+    user_prompt = f"""Write a competitive displacement email targeting accounts using {company_name}.
+YOUR ADVANTAGES: {diff_text}
+CONTEXT: {signal_context[:200] if signal_context else ''}
+
+Write ONLY the email body. No JSON, no markdown formatting, no subject line. Just the email text."""
+
+    try:
+        from src.core.llm import LLMClient
+        from src.core.llm_config import TaskType
+
+        llm = LLMClient()
+        response = await llm.generate_response(
+            task_type=TaskType.SCRIBE_DRAFT_EMAIL,
+            messages=[{"role": "user", "content": user_prompt}],
+            system_prompt=system_prompt,
+        )
+        new_body = response.get("content", "") if isinstance(response, dict) else str(response)
+        new_body = new_body.strip().strip("`").strip()
+        if new_body.startswith("```") or new_body.startswith("{"):
+            new_body = draft_data.get("body", "")  # fallback
+    except Exception as e:
+        logger.warning("LLM regeneration failed for intelligence draft: %s", e)
+        new_body = draft_data.get("body", "")  # keep existing on failure
+
+    # Map tone to DB enum
+    tone_map = {
+        "casual": "friendly",
+        "professional": "formal",
+        "formal": "formal",
+        "friendly": "friendly",
+        "urgent": "urgent",
+    }
+    db_tone = tone_map.get(tone_value, "formal")
+
+    db.table("email_drafts").update({
+        "body": new_body,
+        "tone": db_tone,
+        "aria_notes": (
+            f"ARIA regenerated this email with {tone_value} tone. "
+            f"Competitive positioning for {company_name} preserved."
+        ),
+    }).eq("id", draft_id).execute()
+
+    # Return updated draft
+    updated = db.table("email_drafts").select("*").eq("id", draft_id).limit(1).execute()
+    if updated.data:
+        result = updated.data[0]
+        # Parse JSONB fields for response
+        for field in ["context", "competitive_positioning"]:
+            if isinstance(result.get(field), str):
+                try:
+                    result[field] = json.loads(result[field])
+                except:  # noqa: E722
+                    pass
+        return result
+    return draft_data
 
 
 @router.post("/{draft_id}/send", response_model=EmailSendResponse)
