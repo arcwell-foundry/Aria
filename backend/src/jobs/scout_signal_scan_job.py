@@ -148,6 +148,24 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
 
                 stats["signals_detected"] += 1
 
+                # Memory compounding: write high-relevance signals to institutional memory
+                if relevance >= 0.85:
+                    try:
+                        db.table("memory_semantic").insert(
+                            {
+                                "user_id": user_id,
+                                "fact": f"[Signal] {canonical_company_name}: {headline[:200]}",
+                                "confidence": relevance,
+                                "source": "market_signal",
+                                "metadata": {
+                                    "signal_type": signal.get("signal_type", "news"),
+                                    "entities": [canonical_company_name],
+                                },
+                            }
+                        ).execute()
+                    except Exception:
+                        logger.debug("Failed to write signal memory: %s", headline[:60])
+
                 # Route through Intelligence Pulse Engine
                 try:
                     from src.services.intelligence_pulse import get_pulse_engine

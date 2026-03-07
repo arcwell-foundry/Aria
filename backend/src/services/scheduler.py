@@ -1638,6 +1638,13 @@ async def _run_battle_card_metrics_recompute() -> None:
                     "metrics_updated_at": now.isoformat(),
                 })
 
+                # Detect significant metric changes for memory compounding
+                old_analysis = card.get("analysis") or {}
+                old_threat = old_analysis.get("threat_level")
+                old_momentum = old_analysis.get("momentum")
+                threat_level_changed = old_threat is not None and old_threat != threat_level
+                momentum_changed = old_momentum is not None and old_momentum != momentum
+
                 (
                     db.table("battle_cards")
                     .update({
@@ -1647,6 +1654,47 @@ async def _run_battle_card_metrics_recompute() -> None:
                     .eq("id", card_id)
                     .execute()
                 )
+
+                # Memory compounding: write summary when metrics shift
+                if threat_level_changed or momentum_changed:
+                    try:
+                        # Find a user_id associated with this battle card's company
+                        card_company_id = card.get("company_id")
+                        if card_company_id:
+                            user_result = (
+                                db.table("user_profiles")
+                                .select("id")
+                                .eq("company_id", card_company_id)
+                                .limit(1)
+                                .execute()
+                            )
+                            if user_result.data:
+                                bc_user_id = user_result.data[0]["id"]
+                                db.table("memory_semantic").insert(
+                                    {
+                                        "user_id": bc_user_id,
+                                        "fact": (
+                                            f"[Battle Card Update] {competitor_name}: "
+                                            f"Threat level is now {threat_level}, "
+                                            f"momentum {momentum}. "
+                                            f"{count_30d} signals in 30d."
+                                        ),
+                                        "confidence": 0.9,
+                                        "source": "battle_card_recompute",
+                                        "metadata": {
+                                            "competitor_name": competitor_name,
+                                            "threat_level": threat_level,
+                                            "momentum": momentum,
+                                            "old_threat_level": old_threat,
+                                            "old_momentum": old_momentum,
+                                        },
+                                    }
+                                ).execute()
+                    except Exception:
+                        logger.debug(
+                            "Failed to write battle card memory for %s",
+                            competitor_name,
+                        )
 
                 updated += 1
 

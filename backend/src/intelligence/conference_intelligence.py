@@ -356,6 +356,39 @@ class ConferenceIntelligenceEngine:
         recommendations.sort(
             key=lambda x: x["relevance_score"], reverse=True
         )
+
+        # Memory compounding: write top recommendations to institutional memory
+        for rec in recommendations[:3]:
+            try:
+                reason_texts = [
+                    r["reason"]
+                    for r in rec.get("reasons", [])[:2]
+                    if isinstance(r, dict) and r.get("reason")
+                ]
+                self._db.table("memory_semantic").insert(
+                    {
+                        "user_id": user_id,
+                        "fact": (
+                            f"[Conference] {rec['conference_name']} "
+                            f"({rec.get('start_date', 'TBD')}): "
+                            f"Relevance score {rec['relevance_score']:.0%}. "
+                            f"{'; '.join(reason_texts)}"
+                        ),
+                        "confidence": rec["relevance_score"],
+                        "source": "conference_intelligence",
+                        "metadata": {
+                            "conference_id": str(rec["conference_id"]),
+                            "recommendation_type": rec["recommendation_type"],
+                        },
+                    }
+                ).execute()
+            except Exception as e:
+                logger.debug(
+                    "[ConferenceIntel] Failed to write memory for %s: %s",
+                    rec.get("conference_name"),
+                    e,
+                )
+
         return recommendations
 
     # ================================================================

@@ -554,6 +554,41 @@ class JarvisOrchestrator:
                 logger.debug("Failed to update combined_score for insight %s", insight.id)
         # Sort by quality score after scoring
         deduplicated.sort(key=lambda x: x.combined_score, reverse=True)
+
+        # Route top insights through the Action Router for downstream actions
+        try:
+            from src.intelligence.action_router import ActionRouter
+
+            router = ActionRouter(self._db)
+            for insight in deduplicated[:5]:
+                try:
+                    insight_dict = {
+                        "id": str(insight.id),
+                        "content": insight.content,
+                        "classification": insight.classification,
+                        "confidence": insight.confidence,
+                        "urgency": insight.urgency,
+                        "title": insight.title or insight.trigger_event or "",
+                        "recommended_actions": insight.recommended_actions or [],
+                    }
+                    actions = await router.route_insight(
+                        user_id=user_id,
+                        insight=insight_dict,
+                        context=enriched_context,
+                    )
+                    if actions:
+                        logger.info(
+                            "[Orchestrator] Action router: %d actions for insight %s",
+                            len(actions),
+                            insight.id,
+                        )
+                except Exception:
+                    logger.warning(
+                        "Action routing failed for insight %s", insight.id, exc_info=True
+                    )
+        except Exception:
+            logger.warning("Action router import/init failed", exc_info=True)
+
         return deduplicated
 
     async def get_active_insights(

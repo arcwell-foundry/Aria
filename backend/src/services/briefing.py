@@ -498,6 +498,28 @@ class BriefingService:
         )
         summary = _sanitize_text(raw_summary)
 
+        # Gather upcoming conferences in the next 30 days
+        upcoming_conferences: list[dict[str, Any]] = []
+        try:
+            today_iso = briefing_date.isoformat()
+            thirty_days_out = (briefing_date + timedelta(days=30)).isoformat()
+            conf_result = (
+                self._db.table("conferences")
+                .select("name, short_name, start_date, city")
+                .gte("start_date", today_iso)
+                .lte("start_date", thirty_days_out)
+                .order("start_date")
+                .limit(3)
+                .execute()
+            )
+            upcoming_conferences = conf_result.data or []
+        except Exception:
+            logger.debug(
+                "Failed to gather upcoming conferences for briefing",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+
         content: dict[str, Any] = {
             "summary": summary,
             "calendar": calendar_data,
@@ -508,6 +530,7 @@ class BriefingService:
             "intelligence_insights": jarvis_insights,
             "causal_actions": causal_actions,
             "queued_insights": queued_insights or [],
+            "upcoming_conferences": upcoming_conferences,
             "generated_at": datetime.now(UTC).isoformat(),
         }
 
