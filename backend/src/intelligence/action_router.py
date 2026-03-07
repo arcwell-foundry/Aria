@@ -75,6 +75,13 @@ class ActionRouter:
             memory_action = await self._write_memory(user_id, insight, context)
             if memory_action:
                 actions_taken.append(memory_action)
+            # Always check goal impact regardless of rule matching
+            try:
+                goal_result = await self._check_goal_impact(user_id, insight, context)
+                if goal_result:
+                    actions_taken.append(goal_result)
+            except Exception:
+                pass
             return actions_taken
 
         logger.info(
@@ -105,6 +112,13 @@ class ActionRouter:
             except Exception as e:
                 logger.error("[ActionRouter] Failed to execute %s: %s", action_type, e)
 
+        # Always check goal impact regardless of rule matching
+        try:
+            goal_result = await self._check_goal_impact(user_id, insight, context)
+            if goal_result:
+                actions_taken.append(goal_result)
+        except Exception:
+            pass
         return actions_taken
 
     # ================================================================
@@ -767,6 +781,57 @@ class ActionRouter:
             }
         except Exception as e:
             logger.error("[ActionRouter] Failed to check lead discovery: %s", e)
+            return None
+
+    async def _check_goal_impact(
+        self,
+        user_id: str,
+        insight: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Check if insight impacts active goals and create goal_updates."""
+        try:
+            goals = (
+                self._db.table("goals")
+                .select("id, title, goal_type, status")
+                .eq("user_id", user_id)
+                .in_("status", ["active", "in_progress", "plan_ready"])
+                .execute()
+            )
+
+            if not goals.data:
+                return None
+
+            content = (insight.get("content", "") or "").lower()
+            goals_updated: list[str] = []
+
+            for goal in goals.data:
+                title = (goal.get("title", "") or "").lower()
+                goal_keywords = {w for w in title.split() if len(w) > 3}
+                content_keywords = {w for w in content.split() if len(w) > 3}
+                overlap = goal_keywords & content_keywords
+
+                if len(overlap) >= 2:
+                    try:
+                        self._db.table("goal_updates").insert({
+                            "goal_id": goal["id"],
+                            "update_type": "intelligence",
+                            "content": (
+                                f"New {insight.get('classification', 'intelligence')}: "
+                                f"{insight.get('content', '')[:200]}"
+                            ),
+                        }).execute()
+                        goals_updated.append(goal["title"])
+                    except Exception:
+                        pass
+
+            if goals_updated:
+                return {
+                    "type": "check_goal_impact",
+                    "goals_updated": len(goals_updated),
+                }
+            return None
+        except Exception:
             return None
 
     # ================================================================
