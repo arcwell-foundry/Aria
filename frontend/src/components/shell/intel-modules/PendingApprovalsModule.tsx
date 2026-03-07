@@ -5,9 +5,9 @@
  * for initial hydration. Shows up to 3 items with approve/reject buttons.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, X, MessageSquare } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import { AgentAvatar } from '@/components/common/AgentAvatar';
 import { useActionQueueStore } from '@/stores/actionQueueStore';
 import { useActions, useApproveAction, useRejectAction } from '@/hooks/useActionQueue';
@@ -26,6 +26,9 @@ interface MergedAction {
   title: string;
   agent: string;
   riskLevel: string;
+  description: string;
+  payload: Record<string, unknown>;
+  reasoning: string;
 }
 
 export function PendingApprovalsModule() {
@@ -34,6 +37,7 @@ export function PendingApprovalsModule() {
   const { data: apiActions } = useActions('pending');
   const approveMutation = useApproveAction();
   const rejectMutation = useRejectAction();
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Merge WS-pushed items with API-fetched items (WS items take precedence, dedup by id)
   const actions = useMemo<MergedAction[]>(() => {
@@ -49,6 +53,9 @@ export function PendingApprovalsModule() {
           title: a.title,
           agent: a.agent,
           riskLevel: a.riskLevel,
+          description: (a as Record<string, unknown>).description as string ?? '',
+          payload: {},
+          reasoning: '',
         });
       }
     }
@@ -63,6 +70,9 @@ export function PendingApprovalsModule() {
             title: a.title,
             agent: a.agent,
             riskLevel: a.risk_level,
+            description: a.description ?? '',
+            payload: a.payload ?? {},
+            reasoning: a.reasoning ?? '',
           });
         }
       }
@@ -97,89 +107,138 @@ export function PendingApprovalsModule() {
           const isApproving = approveMutation.isPending && approveMutation.variables === action.id;
           const isRejecting = rejectMutation.isPending && rejectMutation.variables?.actionId === action.id;
           const isProcessing = isApproving || isRejecting;
+          const isExpanded = expandedId === action.id;
+
+          const payload = action.payload as Record<string, unknown>;
+          const competitiveContext = (payload?.competitive_context ?? {}) as Record<string, unknown>;
+          const differentiation = (competitiveContext?.differentiation ?? []) as string[];
+          const weaknesses = (competitiveContext?.weaknesses ?? []) as string[];
+          const pricing = (competitiveContext?.pricing ?? {}) as Record<string, unknown>;
+          const hasContext = differentiation.length > 0 || weaknesses.length > 0;
 
           return (
             <div
               key={action.id}
-              className="rounded-lg border px-3 py-2.5"
+              className={`rounded-lg border transition-all duration-200 cursor-pointer ${
+                isExpanded ? 'ring-1 ring-[var(--accent)]/30' : ''
+              }`}
               style={{
                 borderColor: 'var(--border)',
                 backgroundColor: 'var(--bg-subtle)',
               }}
+              onClick={() => setExpandedId(isExpanded ? null : action.id)}
             >
-              <div className="flex items-start gap-2 mb-2">
-                <AgentAvatar agentKey={action.agent} size={16} />
-                <div className="min-w-0 flex-1">
-                  <p
-                    className="font-sans text-[12px] font-medium leading-tight truncate"
-                    style={{ color: 'var(--text-primary)' }}
-                  >
-                    {action.title}
-                  </p>
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <span
-                      className={`inline-flex items-center rounded px-1 py-0.5 text-[10px] font-medium border ${riskClass}`}
+              <div className="px-3 py-2.5">
+                <div className="flex items-start gap-2 mb-2">
+                  <AgentAvatar agentKey={action.agent} size={16} />
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className="font-sans text-[12px] font-medium leading-tight"
+                      style={{ color: 'var(--text-primary)' }}
                     >
-                      {action.riskLevel}
-                    </span>
+                      {action.title}
+                    </p>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <span
+                        className={`inline-flex items-center rounded px-1 py-0.5 text-[10px] font-medium border ${riskClass}`}
+                      >
+                        {action.riskLevel}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex items-center gap-1.5 justify-end">
-                <button
-                  onClick={() => navigate(`/?discuss=action&id=${action.id}&title=${encodeURIComponent(action.title)}`)}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors"
-                  style={{
-                    color: 'var(--accent)',
-                    backgroundColor: 'transparent',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'rgba(46, 102, 255, 0.1)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }}
+                {isExpanded && (
+                  <div
+                    className="mt-2 pt-2 border-t space-y-2"
+                    style={{ borderColor: 'var(--border)' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {action.description && (
+                      <p className="text-[11px] leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+                        {action.description}
+                      </p>
+                    )}
+                    {hasContext && (
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+                          Competitive Context
+                        </p>
+                        {differentiation.length > 0 && (
+                          <div className="text-[11px] rounded p-1.5" style={{ backgroundColor: 'var(--bg-elevated)' }}>
+                            <span style={{ color: 'var(--success)' }}>Advantages: </span>
+                            <span style={{ color: 'var(--text-primary)' }}>
+                              {differentiation.map(String).join('; ')}
+                            </span>
+                          </div>
+                        )}
+                        {weaknesses.length > 0 && (
+                          <div className="text-[11px] rounded p-1.5" style={{ backgroundColor: 'var(--bg-elevated)' }}>
+                            <span style={{ color: 'var(--warning)' }}>Weaknesses: </span>
+                            <span style={{ color: 'var(--text-primary)' }}>
+                              {weaknesses.map(String).join('; ')}
+                            </span>
+                          </div>
+                        )}
+                        {pricing && (pricing.range || pricing.notes) && (
+                          <div className="text-[11px] rounded p-1.5" style={{ backgroundColor: 'var(--bg-elevated)' }}>
+                            <span style={{ color: 'var(--accent)' }}>Pricing: </span>
+                            <span style={{ color: 'var(--text-primary)' }}>
+                              {[pricing.range, pricing.notes].filter(Boolean).map(String).join(' — ')}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {action.reasoning && (
+                      <p className="text-[10px] italic" style={{ color: 'var(--text-secondary)' }}>
+                        {action.reasoning}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div
+                  className="flex items-center gap-1.5 justify-end mt-2"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <MessageSquare size={12} />
-                  Discuss
-                </button>
-                <button
-                  onClick={() => rejectMutation.mutate({ actionId: action.id })}
-                  disabled={isProcessing}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50"
-                  style={{
-                    color: 'var(--critical)',
-                    backgroundColor: 'transparent',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }}
-                >
-                  <X size={12} />
-                  Reject
-                </button>
-                <button
-                  onClick={() => approveMutation.mutate(action.id)}
-                  disabled={isProcessing}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50"
-                  style={{
-                    color: 'var(--success)',
-                    backgroundColor: 'transparent',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.1)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }}
-                >
-                  <Check size={12} />
-                  Approve
-                </button>
+                  <button
+                    onClick={() => rejectMutation.mutate({ actionId: action.id })}
+                    disabled={isProcessing}
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50"
+                    style={{
+                      color: 'var(--critical)',
+                      backgroundColor: 'transparent',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <X size={12} />
+                    Reject
+                  </button>
+                  <button
+                    onClick={() => approveMutation.mutate(action.id)}
+                    disabled={isProcessing}
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50"
+                    style={{
+                      color: 'var(--success)',
+                      backgroundColor: 'transparent',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'rgba(34, 197, 94, 0.1)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <Check size={12} />
+                    Approve
+                  </button>
+                </div>
               </div>
             </div>
           );
