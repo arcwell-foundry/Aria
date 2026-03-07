@@ -510,6 +510,8 @@ class TestDraftPersistence:
     async def test_draft_persistence_all_fields(self, engine):
         """All new fields should be saved correctly."""
         engine._db.table().insert().execute = MagicMock()
+        # Mock _find_existing_draft to return None (no existing draft)
+        engine._find_existing_draft = AsyncMock(return_value=None)
 
         draft_id = await engine._save_draft_with_metadata(
             user_id="user-123",
@@ -538,6 +540,7 @@ class TestDraftPersistence:
     async def test_draft_urgency_tone_mapping(self, engine):
         """Urgent emails should use urgent tone."""
         engine._db.table().insert().execute = MagicMock()
+        engine._find_existing_draft = AsyncMock(return_value=None)
 
         await engine._save_draft_with_metadata(
             user_id="user-123",

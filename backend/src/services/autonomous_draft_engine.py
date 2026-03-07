@@ -1413,6 +1413,79 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
     # Persistence
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _normalize_subject(subject: str) -> str:
+        """Strip leading Re:/Fwd: prefixes for dedup comparison.
+
+        Handles repeated prefixes like "Re: Re: Fwd: Subject".
+        """
+        return re.sub(r"^(Re:\s*|Fwd?:\s*)+", "", subject, flags=re.IGNORECASE).strip()
+
+    async def _find_existing_draft(
+        self,
+        user_id: str,
+        thread_id: str | None,
+        recipient_email: str,
+        subject: str,
+    ) -> dict[str, Any] | None:
+        """Find an existing active draft for this conversation.
+
+        Uses two matching strategies:
+        1. Primary: match by thread_id (most reliable)
+        2. Fallback: match by recipient_email + normalized subject
+           (catches cases where thread_id differs across scan runs)
+
+        Only matches drafts with status 'draft' or 'saved_to_client'.
+
+        Returns:
+            The existing draft row (id, recipient_name) if found, else None.
+        """
+        try:
+            # Primary match: thread_id
+            if thread_id:
+                result = (
+                    self._db.table("email_drafts")
+                    .select("id, recipient_name")
+                    .eq("user_id", user_id)
+                    .eq("thread_id", thread_id)
+                    .in_("status", ["draft", "saved_to_client"])
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if result.data:
+                    return result.data[0]
+
+            # Fallback match: recipient_email + normalized subject
+            normalized = self._normalize_subject(subject)
+            if normalized and recipient_email:
+                result = (
+                    self._db.table("email_drafts")
+                    .select("id, recipient_name, subject")
+                    .eq("user_id", user_id)
+                    .eq("recipient_email", recipient_email)
+                    .in_("status", ["draft", "saved_to_client"])
+                    .order("created_at", desc=True)
+                    .limit(20)
+                    .execute()
+                )
+                if result.data:
+                    for row in result.data:
+                        existing_normalized = self._normalize_subject(
+                            row.get("subject", "")
+                        )
+                        if existing_normalized == normalized:
+                            return row
+
+            return None
+        except Exception as e:
+            logger.warning(
+                "DRAFT_ENGINE: Failed to find existing draft for thread %s: %s",
+                thread_id,
+                e,
+            )
+            return None
+
     async def _save_draft_with_metadata(
         self,
         user_id: str,
@@ -1430,12 +1503,61 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
         learning_mode_draft: bool = False,
         processing_run_id: str | None = None,
     ) -> str:
-        """Save draft with all metadata to email_drafts table."""
-        draft_id = str(uuid4())
+        """Save draft with all metadata to email_drafts table.
 
+        Uses upsert logic: if an active draft already exists for this
+        conversation (by thread_id or recipient+subject), updates it
+        instead of creating a duplicate.
+        """
         # Safety: only reference draft_context_id if the context was actually saved
         safe_context_id = context_id if context_id else None
 
+        # Check for existing draft to avoid duplicates
+        existing = await self._find_existing_draft(
+            user_id, thread_id, recipient_email, subject
+        )
+
+        if existing:
+            existing_id = existing["id"]
+            update_data: dict[str, Any] = {
+                "body": body,
+                "subject": subject,
+                "original_email_id": original_email_id,
+                "thread_id": thread_id,
+                "draft_context_id": safe_context_id,
+                "style_match_score": style_match_score,
+                "confidence_level": confidence_level,
+                "aria_notes": aria_notes,
+                "tone": "urgent" if urgency == "URGENT" else "friendly",
+                "processing_run_id": processing_run_id,
+                "updated_at": datetime.now(UTC).isoformat(),
+            }
+            # Backfill recipient_name if missing on existing draft
+            if recipient_name and not existing.get("recipient_name"):
+                update_data["recipient_name"] = recipient_name
+
+            try:
+                self._db.table("email_drafts").update(
+                    update_data
+                ).eq("id", existing_id).execute()
+                logger.info(
+                    "[EMAIL_PIPELINE] Stage: draft_updated_existing | existing_id=%s | thread_id=%s | recipient=%s",
+                    existing_id,
+                    thread_id,
+                    recipient_email,
+                )
+            except Exception as e:
+                logger.error(
+                    "[EMAIL_PIPELINE] Stage: draft_update_failed | existing_id=%s | error=%s",
+                    existing_id,
+                    e,
+                    exc_info=True,
+                )
+                raise
+            return existing_id
+
+        # No existing draft — insert new row
+        draft_id = str(uuid4())
         insert_data = {
             "id": draft_id,
             "user_id": user_id,
