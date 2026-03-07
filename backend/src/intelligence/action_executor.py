@@ -73,25 +73,31 @@ class ActionExecutor:
             await self._create_followup(user_id, action_data, result)
 
             # Write to semantic memory
-            self._db.table("memory_semantic").insert({
-                "user_id": user_id,
-                "fact": (
-                    f"[Action Approved] {action_data.get('title', '')}: "
-                    f"User approved and ARIA executed. {result.get('summary', '')}"
-                ),
-                "confidence": 0.95,
-                "source": "action_execution",
-                "metadata": {"action_id": action_id, "action_type": action_type},
-            }).execute()
+            try:
+                self._db.table("memory_semantic").insert({
+                    "user_id": user_id,
+                    "fact": (
+                        f"[Action Approved] {action_data.get('title', '')}: "
+                        f"User approved and ARIA executed. {result.get('summary', '')}"
+                    ),
+                    "confidence": 0.95,
+                    "source": "action_execution",
+                    "metadata": {"action_id": action_id, "action_type": action_type},
+                }).execute()
+            except Exception as e:
+                logger.warning("[ActionExecutor] Failed to write semantic memory: %s", e)
 
             # Create activity log
-            self._db.table("aria_activity").insert({
-                "user_id": user_id,
-                "activity_type": "action_executed",
-                "title": f"Executed: {action_data.get('title', '')}",
-                "description": result.get("summary", "Action completed"),
-                "metadata": {"action_id": action_id, "result": result},
-            }).execute()
+            try:
+                self._db.table("aria_activity").insert({
+                    "user_id": user_id,
+                    "activity_type": "action_executed",
+                    "title": f"Executed: {action_data.get('title', '')}",
+                    "description": result.get("summary", "Action completed"),
+                    "metadata": {"action_id": action_id, "result": result},
+                }).execute()
+            except Exception as e:
+                logger.warning("[ActionExecutor] Failed to create activity log: %s", e)
 
             logger.info("[ActionExecutor] Completed: %s", action_type)
             return result
@@ -140,39 +146,28 @@ class ActionExecutor:
             f"Do NOT lead with price — lead with value and reliability."
         )
 
+        # Note: deferred_email_drafts table is for email thread deduplication
+        # (requires thread_id, latest_email_id, deferred_until, reason).
+        # For intelligence-generated content, we create a notification instead.
+        # The positioning brief is included in the notification for user review.
+
         try:
-            self._db.table("deferred_email_drafts").insert({
+            self._db.table("notifications").insert({
                 "user_id": user_id,
-                "subject": (
-                    f"Competitive opportunity: {company_name} "
-                    f"— displacement positioning ready"
+                "type": "action_completed",
+                "title": f"Displacement brief ready: {company_name}",
+                "message": (
+                    f"Competitive positioning brief for {company_name} displacement "
+                    f"outreach is ready in Communications. Review and personalize before sending."
                 ),
-                "body": positioning[:500],
-                "status": "ready",
-                "context": {
-                    "type": "displacement_outreach",
-                    "competitor": company_name,
-                    "competitive_context": competitive_context,
-                    "action_id": action.get("id"),
+                "link": "/communications",
+                "metadata": {
+                    "action_type": "displacement_outreach",
+                    "company": company_name,
                 },
             }).execute()
         except Exception as e:
-            logger.warning("[ActionExecutor] deferred_email_drafts insert failed: %s", e)
-
-        self._db.table("notifications").insert({
-            "user_id": user_id,
-            "type": "action_completed",
-            "title": f"Displacement brief ready: {company_name}",
-            "message": (
-                f"Competitive positioning brief for {company_name} displacement "
-                f"outreach is ready in Communications. Review and personalize before sending."
-            ),
-            "link": "/communications",
-            "metadata": {
-                "action_type": "displacement_outreach",
-                "company": company_name,
-            },
-        }).execute()
+            logger.warning("[ActionExecutor] Notification insert failed: %s", e)
 
         return {
             "status": "completed",
@@ -264,21 +259,18 @@ class ActionExecutor:
     ) -> None:
         """Create a prospective memory for follow-up."""
         try:
+            # Schema: task (NOT NULL), priority (text: low/medium/high/urgent), trigger_config (JSONB)
             self._db.table("prospective_memories").insert({
                 "user_id": user_id,
-                "content": (
+                "task": (
                     f"Follow up on approved action: {action.get('title', '')}. "
-                    f"Check if user took next steps. "
-                    f"Result: {result.get('summary', '')}"
+                    f"Check if user took next steps."
                 ),
+                "description": result.get("summary", ""),
                 "trigger_type": "time",
-                "trigger_config": json.dumps({"days_from_now": 3}),
+                "trigger_config": {"days_from_now": 3},
                 "status": "pending",
-                "importance": 0.8,
-                "metadata": json.dumps({
-                    "action_id": action.get("id"),
-                    "action_type": action.get("action_type"),
-                }),
+                "priority": "high",  # importance 0.8 -> high
             }).execute()
         except Exception as e:
             logger.warning("[ActionExecutor] Failed to create follow-up: %s", e)

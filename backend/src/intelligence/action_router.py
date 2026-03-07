@@ -550,11 +550,11 @@ class ActionRouter:
         context: dict[str, Any],
         action_def: dict[str, Any],
     ) -> Optional[dict[str, Any]]:
-        """Queue competitive positioning as a deferred email draft.
+        """Queue competitive positioning for the briefing queue.
 
-        Uses the deferred_email_drafts table since we don't yet have a
-        recipient — this is positioning intelligence for when the user
-        decides to send an outreach.
+        Note: deferred_email_drafts is for email thread deduplication (requires
+        thread_id, latest_email_id, deferred_until, reason). Instead, we queue
+        this intelligence for the next daily briefing where it can be actioned.
         """
         try:
             company = context.get("company_name", "")
@@ -575,34 +575,23 @@ class ActionRouter:
             pricing = battle_card.get("pricing", {})
             pricing_intel = pricing.get("notes", "") if isinstance(pricing, dict) else ""
 
-            objection_handlers = battle_card.get("objection_handlers", [])
-            objection_text = ""
-            if objection_handlers and isinstance(objection_handlers, list):
-                for oh in objection_handlers[:2]:
-                    if isinstance(oh, dict):
-                        objection_text += (
-                            f"\nObjection: {oh.get('objection', '')}\n"
-                            f"Response: {oh.get('response', '')[:200]}\n"
-                        )
-
             positioning = (
                 f"COMPETITIVE POSITIONING (from {company} battle card):\n"
                 f"- Your differentiation: {diff_text}\n"
                 f"- Their pricing intel: {pricing_intel[:200] if pricing_intel else 'Not available'}\n"
-                f"- Signal context: {insight.get('content', '')[:200]}\n"
-                f"{objection_text}"
+                f"- Signal context: {insight.get('content', '')[:200]}"
             )
 
-            # Store as deferred draft with competitive context
+            # Queue for briefing instead of deferred_email_drafts
             result = (
-                self._db.table("deferred_email_drafts")
+                self._db.table("briefing_queue")
                 .insert(
                     {
                         "user_id": user_id,
-                        "status": "proposed",
-                        "subject": f"RE: {company} competitive intelligence — action recommended",
-                        "body": positioning,
-                        "context": {
+                        "title": f"Competitive positioning ready: {company}",
+                        "message": positioning[:500],
+                        "category": "competitive_intelligence",
+                        "metadata": {
                             "insight_id": str(insight.get("id", "")),
                             "classification": classification,
                             "company": company,
@@ -613,11 +602,11 @@ class ActionRouter:
                 .execute()
             )
 
-            draft_id = result.data[0]["id"] if result.data else None
-            logger.info("[ActionRouter] Drafted competitive email re: %s", company)
-            return {"type": "draft_email", "draft_id": draft_id, "company": company}
+            item_id = result.data[0]["id"] if result.data else None
+            logger.info("[ActionRouter] Queued competitive positioning for briefing: %s", company)
+            return {"type": "update_briefing", "item_id": item_id, "company": company}
         except Exception as e:
-            logger.error("[ActionRouter] Failed to draft email: %s", e)
+            logger.error("[ActionRouter] Failed to queue competitive positioning: %s", e)
             return None
 
     async def _update_briefing(
@@ -820,6 +809,7 @@ class ActionRouter:
                                 f"New {insight.get('classification', 'intelligence')}: "
                                 f"{insight.get('content', '')[:200]}"
                             ),
+                            "created_by": "aria_intelligence",  # NOT NULL field
                         }).execute()
                         goals_updated.append(goal["title"])
                     except Exception:
