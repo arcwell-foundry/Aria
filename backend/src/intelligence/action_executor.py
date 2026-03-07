@@ -729,11 +729,17 @@ Respond in this exact JSON format:
                     logger.warning("[ActionExecutor] Unsupported email client: %s", email_client)
                     return False
 
+                # Convert plain text body to HTML for proper formatting in email clients
+                from src.utils.email_formatting import plain_text_to_email_html
+
+                html_body = plain_text_to_email_html(draft_data.get("body", ""))
+
                 composio.execute_action(
                     action=action_name,
                     params={
                         "subject": draft_data.get("subject", ""),
-                        "body": draft_data.get("body", ""),
+                        "body": html_body,
+                        "bodyContentType": "HTML",
                         "to": to_list,
                     },
                     connected_account_id=integration.data[0].get("composio_connection_id"),

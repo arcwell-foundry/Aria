@@ -14,6 +14,7 @@ from src.integrations.domain import IntegrationType
 from src.integrations.oauth import get_oauth_client
 from src.integrations.service import IntegrationService
 from src.services.activity_service import ActivityService
+from src.utils.email_formatting import plain_text_to_email_html
 
 logger = logging.getLogger(__name__)
 
@@ -199,10 +200,13 @@ class EmailClientWriter:
         Returns:
             Result from Composio with draft ID
         """
+        # Convert plain text body to HTML for proper formatting
+        html_body = plain_text_to_email_html(draft.get("body", ""))
+
         params: dict[str, Any] = {
             "recipient_email": draft.get("recipient_email", ""),
             "subject": draft.get("subject", ""),
-            "body": draft.get("body", ""),
+            "body": html_body,
             "is_html": True,
         }
 
@@ -262,9 +266,13 @@ class EmailClientWriter:
             Result from Composio with draft ID
         """
         recipient_email = draft.get("recipient_email", "")
+
+        # Convert plain text body to HTML for proper formatting
+        html_body = plain_text_to_email_html(draft.get("body", ""))
+
         params: dict[str, Any] = {
             "subject": draft.get("subject", ""),
-            "body": draft.get("body", ""),
+            "body": html_body,
             "is_html": True,
             "to_recipients": [recipient_email] if recipient_email else [],
         }
