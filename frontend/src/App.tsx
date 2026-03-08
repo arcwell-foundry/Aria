@@ -10,6 +10,7 @@ import { OfflineBanner } from "@/components/OfflineBanner";
 import { ServiceHealthBanner } from "@/components/ServiceHealthBanner";
 import { IntegrationReconnectBanner } from "@/components/IntegrationReconnectBanner";
 import { ErrorToaster } from "@/components/ErrorToaster";
+import { Toaster } from "sonner";
 import { useServiceHealth } from "@/hooks/useServiceHealth";
 import { CommandPalette } from "@/components/common/CommandPalette";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -93,6 +94,7 @@ function AppContent() {
         recentItems={recentItems}
         searchResults={searchResults}
       />
+      <Toaster position="top-right" richColors />
     </>
   );
 }

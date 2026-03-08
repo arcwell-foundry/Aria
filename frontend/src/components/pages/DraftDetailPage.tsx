@@ -22,6 +22,7 @@ import {
   Mail,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { toast } from 'sonner';
 import { useDraft, useUpdateDraft, useSendDraft, useRegenerateDraft, useSaveDraftToClient } from '@/hooks/useDrafts';
 import { DraftIntelligenceContext } from '@/components/communications/DraftIntelligenceContext';
 import { LearningModeBanner } from '@/components/communications/LearningModeBanner';
@@ -89,8 +90,13 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
 
   const handleSend = async () => {
     if (!draft) return;
-    await sendDraft.mutateAsync(draftId);
-    navigate('/communications');
+    try {
+      await sendDraft.mutateAsync(draftId);
+      toast.success(`Email sent to ${draft.recipient_name || draft.recipient_email}`);
+      navigate('/communications');
+    } catch {
+      toast.error('Failed to send email. Please try again.');
+    }
   };
 
   const handleRegenerate = async (tone?: EmailDraftTone, additionalContext?: string) => {

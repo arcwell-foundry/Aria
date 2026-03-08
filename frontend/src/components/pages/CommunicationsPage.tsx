@@ -16,7 +16,7 @@
 
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Search, Filter, Mail, Clock, ArrowRight } from 'lucide-react';
+import { Search, Filter, Mail, Clock, ArrowRight, CircleAlert } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useDrafts } from '@/hooks/useDrafts';
 import { EmptyState } from '@/components/common/EmptyState';
@@ -284,15 +284,33 @@ function DraftsList() {
         </div>
       ) : !hasDrafts ? (
         <EmptyState
-          title="No drafts yet."
+          title={
+            statusFilter === 'sent'
+              ? 'No emails sent yet.'
+              : statusFilter === 'failed'
+              ? 'No failed emails.'
+              : 'No drafts yet.'
+          }
           description={
-            searchQuery || statusFilter !== 'all'
+            statusFilter === 'sent'
+              ? 'When you send emails through ARIA, they will appear here.'
+              : statusFilter === 'failed'
+              ? 'Failed email sends will appear here for review.'
+              : searchQuery || statusFilter !== 'all'
               ? 'No drafts match your current filters. Try adjusting your search criteria.'
               : 'Ask ARIA to draft an email to get started.'
           }
-          suggestion="Start a conversation"
-          onSuggestion={() => navigate('/')}
-          icon={<Mail className="w-8 h-8" />}
+          suggestion={statusFilter === 'all' ? 'Start a conversation' : undefined}
+          onSuggestion={statusFilter === 'all' ? () => navigate('/') : undefined}
+          icon={
+            statusFilter === 'sent' ? (
+              <Mail className="w-8 h-8" />
+            ) : statusFilter === 'failed' ? (
+              <CircleAlert className="w-8 h-8" />
+            ) : (
+              <Mail className="w-8 h-8" />
+            )
+          }
         />
       ) : (
         <div className="space-y-3">
