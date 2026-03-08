@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
+import { isPlaceholderDraft } from "@/utils/isPlaceholderDraft";
 
 // ---------------------------------------------------------------------------
 // Utility: relative time formatting
@@ -209,6 +210,12 @@ export function useIntelDrafts() {
     queryKey: intelKeys.drafts(),
     queryFn: () => listDrafts(undefined, 20),
     staleTime: 1000 * 60 * 2,
+    select: (drafts) =>
+      drafts.slice().sort((a, b) => {
+        const aP = isPlaceholderDraft(a) ? 1 : 0;
+        const bP = isPlaceholderDraft(b) ? 1 : 0;
+        return aP - bP;
+      }),
   });
 }
 
