@@ -15,12 +15,14 @@ from src.integrations.oauth import get_oauth_client
 from src.memory.digital_twin import DigitalTwin
 from src.models.email_draft import EmailDraftPurpose, EmailDraftTone
 from src.onboarding.personality_calibrator import PersonalityCalibrator
+from src.prompts.email_writing_framework import ELITE_EMAIL_FRAMEWORK
 from src.services import notification_integration
 from src.services.activity_service import ActivityService
 
 logger = logging.getLogger(__name__)
 
-EMAIL_GENERATION_PROMPT = """You are ARIA, an AI assistant helping a sales professional draft emails.
+EMAIL_GENERATION_PROMPT = ELITE_EMAIL_FRAMEWORK + """
+You are ARIA, an AI assistant helping a sales professional draft emails.
 Generate a professional email based on the following parameters.
 
 IMPORTANT: Your response MUST be valid JSON with exactly two fields:
@@ -32,7 +34,8 @@ IMPORTANT: Your response MUST be valid JSON with exactly two fields:
 Do not include any text outside the JSON object.
 """
 
-EMAIL_REGENERATION_PROMPT = """You are ARIA, an AI assistant helping a sales professional draft emails.
+EMAIL_REGENERATION_PROMPT = ELITE_EMAIL_FRAMEWORK + """
+You are ARIA, an AI assistant helping a sales professional draft emails.
 Rewrite the email draft based on the parameters below.
 
 IMPORTANT: Write ONLY the email body text. Do NOT wrap your response in JSON, code blocks,

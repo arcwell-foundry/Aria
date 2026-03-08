@@ -14,6 +14,7 @@ from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import SkillAwareAgent
 from src.core.config import settings
 from src.core.task_types import TaskType
+from src.prompts.email_writing_framework import ELITE_EMAIL_FRAMEWORK
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -587,6 +588,7 @@ class ScribeAgent(SkillAwareAgent):
             recipient_name=recipient_name if recipient_name != "there" else None,
             account_name=recipient_company or None,
         ) or hardcoded_prompt
+        system_prompt = ELITE_EMAIL_FRAMEWORK + "\n\n" + system_prompt
 
         try:
             response = await self.llm.generate_response(

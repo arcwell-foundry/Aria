@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from src.core.llm import LLMClient
 from src.core.task_types import TaskType
+from src.prompts.email_writing_framework import ELITE_EMAIL_FRAMEWORK
 from src.db.supabase import SupabaseClient
 from src.memory.digital_twin import DigitalTwin
 from src.onboarding.personality_calibrator import PersonalityCalibrator
@@ -374,8 +375,8 @@ Return ONLY the email body as HTML. Do not include subject line, headers, or JSO
 Keep it concise (3-6 sentences). Be natural and human-sounding."""
 
         try:
-            system_prompt = (
-                "You are ARIA, an AI assistant drafting emails on behalf of a user. "
+            system_prompt = ELITE_EMAIL_FRAMEWORK + (
+                "\n\nYou are ARIA, an AI assistant drafting emails on behalf of a user. "
                 "Match their writing style. Output HTML email body only."
             )
             try:
@@ -389,7 +390,7 @@ Keep it concise (3-6 sentences). Be natural and human-sounding."""
                     task_description=f"Follow up with {sender_name or sender_email} re: {commitment_task}",
                     output_format="html",
                 ))
-                system_prompt = persona_ctx.to_system_prompt()
+                system_prompt = ELITE_EMAIL_FRAMEWORK + "\n\n" + persona_ctx.to_system_prompt()
             except Exception as e:
                 logger.warning("PROACTIVE_FOLLOWUP: PersonaBuilder unavailable: %s", e)
 

@@ -33,6 +33,7 @@ from src.services.email_context_gatherer import (
     DraftContext,
     EmailContextGatherer,
 )
+from src.prompts.email_writing_framework import ELITE_EMAIL_FRAMEWORK
 from src.services.activity_service import ActivityService
 from src.services.learning_mode_service import get_learning_mode_service
 from src.utils.email_formatting import resolve_recipient_name
@@ -115,7 +116,8 @@ class AutonomousDraftEngine:
     8. Tracks processing run in email_processing_runs table
     """
 
-    _FALLBACK_REPLY_PROMPT = """You are ARIA, an AI assistant drafting an email reply."""
+    _FALLBACK_REPLY_PROMPT = ELITE_EMAIL_FRAMEWORK + """
+You are ARIA, an AI assistant drafting an email reply."""
 
     _SCHEDULING_KEYWORDS = [
         "availability",
@@ -1130,7 +1132,7 @@ Do not include any text outside the JSON object."""
                 task_description=f"Reply to email from {email.sender_email} re: {email.subject}",
                 output_format="json",
             ))
-            system_prompt = ctx.to_system_prompt() + "\n\n" + self._REPLY_TASK_INSTRUCTIONS
+            system_prompt = ELITE_EMAIL_FRAMEWORK + "\n\n" + ctx.to_system_prompt() + "\n\n" + self._REPLY_TASK_INSTRUCTIONS
         except Exception as e:
             logger.warning("PersonaBuilder unavailable, using fallback: %s", e)
 
