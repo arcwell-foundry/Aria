@@ -6,7 +6,7 @@
  */
 
 import { useState, useMemo } from 'react';
-import { Search, Filter, Mail, Clock, FileText, Eye } from 'lucide-react';
+import { Search, Filter, Mail, Clock, FileText, Eye, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useEmailDecisions } from '@/hooks/useEmailDecisions';
 import { EmptyState } from '@/components/common/EmptyState';
@@ -90,10 +90,15 @@ function DecisionsSkeleton() {
   );
 }
 
+function isRepliedEmail(decision: ScanDecisionInfo): boolean {
+  return decision.reason.toLowerCase().includes('already replied');
+}
+
 function DecisionRow({ decision }: { decision: ScanDecisionInfo }) {
   const [expanded, setExpanded] = useState(false);
   const categoryStyle = CATEGORY_STYLES[decision.category];
   const urgencyStyle = URGENCY_STYLES[decision.urgency];
+  const replied = isRepliedEmail(decision);
 
   return (
     <button
@@ -159,6 +164,16 @@ function DecisionRow({ decision }: { decision: ScanDecisionInfo }) {
             >
               {categoryStyle.label}
             </span>
+            {/* Replied badge */}
+            {replied && (
+              <span
+                className="px-2 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-wide flex items-center gap-1"
+                style={{ backgroundColor: 'var(--success)', color: 'white' }}
+              >
+                <CheckCircle2 className="w-3 h-3" />
+                Replied
+              </span>
+            )}
             {/* Urgency badge (only show non-normal) */}
             {decision.urgency !== 'NORMAL' && (
               <span

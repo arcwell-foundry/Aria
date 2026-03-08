@@ -23,6 +23,11 @@ from src.core.llm import LLMClient
 from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.services.email_intelligence import EmailIntelligenceService
+from src.utils.reply_detector import (
+    get_user_emails,
+    has_user_replied,
+    update_replied_emails,
+)
 from src.utils.sender_context import (
     SenderContext,
     format_context_for_prompt,
@@ -291,7 +296,26 @@ class EmailAnalyzer:
                     newest_email_id,
                 )
 
-            # 5. Extract intelligence from classified emails
+            # 5. Re-check stale NEEDS_REPLY emails in case user replied since last scan
+            try:
+                reclassified = await update_replied_emails(
+                    db=self._db, user_id=user_id
+                )
+                if reclassified > 0:
+                    logger.info(
+                        "EMAIL_ANALYZER: Reclassified %d stale NEEDS_REPLY emails "
+                        "to FYI for user %s (user already replied)",
+                        reclassified,
+                        user_id,
+                    )
+            except Exception as reply_e:
+                logger.warning(
+                    "EMAIL_ANALYZER: Stale reply check failed for user %s: %s",
+                    user_id,
+                    reply_e,
+                )
+
+            # 6. Extract intelligence from classified emails
             # Only process NEEDS_REPLY and FYI emails (skip SKIP)
             emails_for_intelligence = result.needs_reply + result.fyi
             if emails_for_intelligence:
@@ -567,6 +591,40 @@ class EmailAnalyzer:
         topic_summary = classification.get("topic_summary", subject)
         needs_draft = classification.get("needs_draft", False)
         reason = classification.get("reason", "LLM classification")
+
+        # Reply detection: if classified as NEEDS_REPLY, check if user already replied
+        if category == "NEEDS_REPLY" and thread_id:
+            try:
+                # Get all user email addresses for thorough reply matching
+                reply_user_emails = await get_user_emails(self._db, user_id)
+                if user_email and user_email.lower() not in reply_user_emails:
+                    reply_user_emails.add(user_email.lower())
+
+                email_date = email.get("date") or email.get("receivedDateTime")
+                replied = await has_user_replied(
+                    db=self._db,
+                    user_id=user_id,
+                    thread_id=thread_id,
+                    email_timestamp=email_date,
+                    user_emails=reply_user_emails,
+                )
+                if replied:
+                    logger.info(
+                        "EMAIL_ANALYZER: Overriding NEEDS_REPLY to FYI — "
+                        "user already replied to thread %s (email %s)",
+                        thread_id,
+                        email_id,
+                    )
+                    category = "FYI"
+                    urgency_from_llm = "LOW"
+                    needs_draft = False
+                    reason = "User has already replied to this thread"
+            except Exception as reply_e:
+                logger.warning(
+                    "EMAIL_ANALYZER: Reply detection failed for thread %s: %s",
+                    thread_id,
+                    reply_e,
+                )
 
         # Override urgency with signal-based detection
         urgency = await self.detect_urgency(email, user_id)
