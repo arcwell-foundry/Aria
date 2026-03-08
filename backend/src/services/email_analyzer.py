@@ -561,6 +561,9 @@ class EmailAnalyzer:
         if urgency_rank.get(urgency, 0) < urgency_rank.get(urgency_from_llm, 0):
             urgency = urgency_from_llm
 
+        # Enforce category-urgency consistency rules
+        category, urgency = self._validate_category_urgency(category, urgency)
+
         return EmailCategory(
             email_id=email_id,
             thread_id=thread_id,
@@ -576,6 +579,38 @@ class EmailAnalyzer:
             needs_draft=needs_draft,
             reason=reason,
         )
+
+    @staticmethod
+    def _validate_category_urgency(category: str, urgency: str) -> tuple[str, str]:
+        """Validate and correct category-urgency contradictions.
+
+        Enforces consistency rules:
+        - SKIP emails cannot be urgent (not actionable = lowest priority)
+        - NEEDS_REPLY emails cannot be LOW (needs response = at least normal)
+
+        Args:
+            category: The email category (NEEDS_REPLY, FYI, SKIP)
+            urgency: The urgency level (URGENT, NORMAL, LOW)
+
+        Returns:
+            Tuple of (category, urgency) with urgency corrected if needed.
+        """
+        if category == "SKIP":
+            # Skip = not actionable = cannot be urgent
+            if urgency != "LOW":
+                logger.info(
+                    "EMAIL_ANALYZER: Correcting urgency %s to LOW for SKIP category",
+                    urgency,
+                )
+                return category, "LOW"
+        elif category == "NEEDS_REPLY":
+            # Needs reply = at least normal priority
+            if urgency == "LOW":
+                logger.info(
+                    "EMAIL_ANALYZER: Upgrading urgency LOW to NORMAL for NEEDS_REPLY category"
+                )
+                return category, "NORMAL"
+        return category, urgency
 
     async def detect_urgency(
         self,
