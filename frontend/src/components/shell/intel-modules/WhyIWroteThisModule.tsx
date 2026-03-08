@@ -1,5 +1,14 @@
-import { Brain } from 'lucide-react';
-import { useIntelDraft, useIntelDrafts, useRouteContext } from '@/hooks/useIntelPanelData';
+import { Brain, Mail, Clock } from 'lucide-react';
+import { useIntelDraft, useIntelDrafts, useRouteContext, formatRelativeTime } from '@/hooks/useIntelPanelData';
+
+interface OriginalEmail {
+  from: string;
+  sender_name?: string;
+  sender_email: string;
+  date: string;
+  subject: string;
+  snippet: string;
+}
 
 interface Reasoning {
   summary: string;
@@ -199,6 +208,182 @@ export function WhyIWroteThisModule({ reasoning: propReasoning }: WhyIWroteThisM
         {/* Style match */}
         {draft.style_match_score !== undefined && (
           <div className="flex items-center gap-2 text-xs text-slate-500 pt-1 border-t border-slate-200">
+            <span>Written in your voice</span>
+            <span className="font-medium">{Math.round(draft.style_match_score * 100)}% style match</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Reply draft handling - show the original email being replied to
+  if (isDraftDetail && draft && draft.purpose === 'reply') {
+    const originalEmail = draft.original_email as OriginalEmail | undefined;
+    const ctx = draft.context as Record<string, string> | undefined;
+
+    return (
+      <div data-aria-id="intel-why-wrote" className="space-y-3">
+        <h3
+          className="font-sans text-[11px] font-medium uppercase tracking-wider"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          Why I Wrote This
+        </h3>
+
+        {/* REPLYING TO block - show the original incoming email */}
+        {originalEmail ? (
+          <div
+            className="rounded-lg border p-3"
+            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
+          >
+            <div className="flex items-center gap-1.5 mb-2">
+              <Mail size={12} style={{ color: 'var(--accent)' }} />
+              <span
+                className="font-sans text-[10px] font-medium uppercase tracking-wider"
+                style={{ color: 'var(--accent)' }}
+              >
+                Replying To
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-start gap-2">
+                <span
+                  className="font-sans text-[11px] font-medium flex-shrink-0"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  From:
+                </span>
+                <span
+                  className="font-sans text-[12px]"
+                  style={{ color: 'var(--text-primary)' }}
+                >
+                  {originalEmail.from}
+                </span>
+              </div>
+              {originalEmail.date && (
+                <div className="flex items-start gap-2">
+                  <Clock size={10} className="mt-1 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />
+                  <span
+                    className="font-sans text-[11px]"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    {formatRelativeTime(originalEmail.date)}
+                  </span>
+                </div>
+              )}
+              {originalEmail.subject && (
+                <div className="flex items-start gap-2">
+                  <span
+                    className="font-sans text-[11px] font-medium flex-shrink-0"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    Subject:
+                  </span>
+                  <span
+                    className="font-sans text-[12px]"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    {originalEmail.subject}
+                  </span>
+                </div>
+              )}
+              {originalEmail.snippet && (
+                <div className="mt-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+                  <p
+                    className="font-sans text-[12px] leading-[1.5] line-clamp-3"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    {originalEmail.snippet}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div
+            className="rounded-lg border p-3"
+            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
+          >
+            <div className="flex items-center gap-1.5 mb-1">
+              <Mail size={12} style={{ color: 'var(--text-secondary)' }} />
+              <span
+                className="font-sans text-[10px] font-medium uppercase tracking-wider"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                Replying To
+              </span>
+            </div>
+            <p className="font-sans text-[12px] italic" style={{ color: 'var(--text-secondary)' }}>
+              Original email not available
+            </p>
+          </div>
+        )}
+
+        {/* ARIA's reasoning for this reply */}
+        <div
+          className="rounded-lg border p-3"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
+        >
+          <div className="flex items-start gap-2">
+            <Brain size={14} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--accent)' }} />
+            <div className="space-y-1">
+              <p className="font-sans text-[13px] leading-[1.6]" style={{ color: 'var(--text-primary)' }}>
+                {ctx?.user_context ?? `This reply to ${draft.recipient_name ?? draft.recipient_email} was crafted based on your communication history and relationship context.`}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Context factors */}
+        <div className="space-y-1.5 pl-1">
+          <div className="flex items-start gap-2">
+            <div
+              className="w-1 h-1 rounded-full mt-2 flex-shrink-0"
+              style={{ backgroundColor: 'var(--accent)' }}
+            />
+            <p className="font-sans text-[12px] leading-[1.5]" style={{ color: 'var(--text-secondary)' }}>
+              Purpose: {draft.purpose}
+            </p>
+          </div>
+          <div className="flex items-start gap-2">
+            <div
+              className="w-1 h-1 rounded-full mt-2 flex-shrink-0"
+              style={{ backgroundColor: 'var(--accent)' }}
+            />
+            <p className="font-sans text-[12px] leading-[1.5]" style={{ color: 'var(--text-secondary)' }}>
+              Tone: {draft.tone}
+            </p>
+          </div>
+          {draft.style_match_score && (
+            <div className="flex items-start gap-2">
+              <div
+                className="w-1 h-1 rounded-full mt-2 flex-shrink-0"
+                style={{ backgroundColor: 'var(--accent)' }}
+              />
+              <p className="font-sans text-[12px] leading-[1.5]" style={{ color: 'var(--text-secondary)' }}>
+                Style match: {Math.round(draft.style_match_score * 100)}%
+              </p>
+            </div>
+          )}
+          {draft.lead_memory_id && (
+            <div className="flex items-start gap-2">
+              <div
+                className="w-1 h-1 rounded-full mt-2 flex-shrink-0"
+                style={{ backgroundColor: 'var(--accent)' }}
+              />
+              <p className="font-sans text-[12px] leading-[1.5]" style={{ color: 'var(--text-secondary)' }}>
+                Linked to pipeline lead
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Style match footer */}
+        {draft.style_match_score !== undefined && (
+          <div
+            className="flex items-center gap-2 text-xs pt-1 border-t"
+            style={{ color: 'var(--text-secondary)', borderColor: 'var(--border)' }}
+          >
             <span>Written in your voice</span>
             <span className="font-medium">{Math.round(draft.style_match_score * 100)}% style match</span>
           </div>

@@ -27,6 +27,15 @@ export type EmailDraftStatus =
 // Response types
 export type ConfidenceTier = "HIGH" | "MEDIUM" | "LOW" | "MINIMAL";
 
+export interface OriginalEmail {
+  from: string;
+  sender_name?: string;
+  sender_email: string;
+  date: string;
+  subject: string;
+  snippet: string;
+}
+
 export interface EmailDraft {
   id: string;
   user_id: string;
@@ -57,6 +66,8 @@ export interface EmailDraft {
   competitive_positioning?: Record<string, unknown>;
   insight_id?: string;
   aria_reasoning?: string;
+  // Original email for reply drafts
+  original_email?: OriginalEmail;
 }
 
 export interface EmailDraftListItem {

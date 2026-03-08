@@ -113,12 +113,15 @@ async def list_drafts(
 async def get_draft(current_user: CurrentUser, draft_id: str) -> dict[str, Any]:
     """Get a specific email draft.
 
+    For reply drafts, enriches the response with the original incoming email
+    from email_scan_log so users can see what they're replying to.
+
     Args:
         current_user: The authenticated user.
         draft_id: The ID of the draft to retrieve.
 
     Returns:
-        The email draft.
+        The email draft, optionally with original_email field for replies.
 
     Raises:
         HTTPException: If draft not found.
@@ -129,7 +132,134 @@ async def get_draft(current_user: CurrentUser, draft_id: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Draft {draft_id} not found"
         )
+
+    # For reply drafts, enrich with the original incoming email
+    if draft.get("purpose") == "reply":
+        original_email = await _get_original_email_for_draft(draft, current_user.id)
+        if original_email:
+            draft["original_email"] = original_email
+
     return draft
+
+
+async def _get_original_email_for_draft(
+    draft: dict[str, Any], user_id: str
+) -> dict[str, Any] | None:
+    """Fetch the original incoming email for a reply draft.
+
+    Tries multiple strategies to find the original email:
+    1. Look up by original_email_id in email_scan_log
+    2. Look up by thread_id for the most recent incoming email
+    3. Look up by in_reply_to (Message-ID header)
+
+    Args:
+        draft: The draft data dictionary.
+        user_id: The user ID for security filtering.
+
+    Returns:
+        Dictionary with original email data, or None if not found.
+    """
+    db = SupabaseClient.get_client()
+
+    original_email_id = draft.get("original_email_id")
+    thread_id = draft.get("thread_id")
+    in_reply_to = draft.get("in_reply_to")
+
+    # Strategy 1: Direct lookup by original_email_id (most reliable)
+    if original_email_id:
+        result = (
+            db.table("email_scan_log")
+            .select("sender_email, sender_name, subject, snippet, scanned_at")
+            .eq("user_id", user_id)
+            .eq("email_id", original_email_id)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            logger.debug(
+                "Found original email by original_email_id",
+                extra={"draft_id": draft.get("id"), "email_id": original_email_id},
+            )
+            return _format_original_email(result.data[0])
+
+    # Strategy 2: Find by thread_id - get the most recent incoming email
+    if thread_id:
+        result = (
+            db.table("email_scan_log")
+            .select("sender_email, sender_name, subject, snippet, scanned_at, email_id")
+            .eq("user_id", user_id)
+            .eq("thread_id", thread_id)
+            .eq("category", "NEEDS_REPLY")  # Only emails that needed a reply
+            .order("scanned_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            logger.debug(
+                "Found original email by thread_id",
+                extra={"draft_id": draft.get("id"), "thread_id": thread_id},
+            )
+            return _format_original_email(result.data[0])
+
+    # Strategy 3: Try to match by recipient_email being the sender
+    # (the draft recipient is who sent the original email)
+    recipient_email = draft.get("recipient_email")
+    if recipient_email:
+        # Look for recent emails from this sender that needed a reply
+        result = (
+            db.table("email_scan_log")
+            .select("sender_email, sender_name, subject, snippet, scanned_at")
+            .eq("user_id", user_id)
+            .eq("sender_email", recipient_email)
+            .eq("category", "NEEDS_REPLY")
+            .order("scanned_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            logger.debug(
+                "Found original email by sender_email fallback",
+                extra={"draft_id": draft.get("id"), "sender_email": recipient_email},
+            )
+            return _format_original_email(result.data[0])
+
+    logger.debug(
+        "No original email found for reply draft",
+        extra={
+            "draft_id": draft.get("id"),
+            "original_email_id": original_email_id,
+            "thread_id": thread_id,
+        },
+    )
+    return None
+
+
+def _format_original_email(scan_log_entry: dict[str, Any]) -> dict[str, Any]:
+    """Format an email_scan_log entry for the original_email response.
+
+    Args:
+        scan_log_entry: A row from email_scan_log.
+
+    Returns:
+        Formatted dictionary with from, date, subject, snippet.
+    """
+    sender_name = scan_log_entry.get("sender_name")
+    sender_email = scan_log_entry.get("sender_email", "")
+
+    # Format "from" as "Name <email>" or just "email"
+    if sender_name:
+        from_field = f"{sender_name} <{sender_email}>"
+    else:
+        from_field = sender_email
+
+    return {
+        "from": from_field,
+        "sender_name": sender_name,
+        "sender_email": sender_email,
+        "date": scan_log_entry.get("scanned_at"),
+        "subject": scan_log_entry.get("subject", ""),
+        "snippet": scan_log_entry.get("snippet", ""),
+    }
 
 
 @router.put("/{draft_id}", response_model=EmailDraftResponse)
