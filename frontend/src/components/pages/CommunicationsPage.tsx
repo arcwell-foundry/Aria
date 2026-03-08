@@ -147,6 +147,13 @@ function generateBodyPreview(body: string | undefined, maxLength = 100): string 
   return text || null;
 }
 
+// Priority border accent color based on score
+function getPriorityBorderColor(score: number | undefined): string | undefined {
+  if (!score || score < 30) return undefined;
+  if (score > 60) return '#ef4444'; // red-500
+  return '#eab308'; // yellow-500
+}
+
 // Check if a draft can be selected for batch actions
 const NON_ACTIONABLE_STATUSES: Set<EmailDraftStatus> = new Set([
   'sent', 'failed', 'dismissed', 'approved', 'saved_to_client',
@@ -280,13 +287,15 @@ function DraftsList() {
     );
   });
 
-  // Sort placeholder drafts after real drafts
+  // Backend returns drafts sorted by priority_score DESC, created_at DESC.
+  // Frontend preserves that order but ensures placeholders stay at bottom.
   const sortedDrafts = filteredDrafts?.slice().sort((a, b) => {
     const aIsPlaceholder = isPlaceholderDraft(a);
     const bIsPlaceholder = isPlaceholderDraft(b);
     // Non-placeholders come first
     if (aIsPlaceholder && !bIsPlaceholder) return 1;
     if (!aIsPlaceholder && bIsPlaceholder) return -1;
+    // Within non-placeholders, preserve backend priority order
     return 0;
   });
 
@@ -479,6 +488,7 @@ function DraftsList() {
             const statusStyle = STATUS_STYLES[draft.status] || DEFAULT_STATUS_STYLE;
             const selectable = isDraftSelectable(draft);
             const isSelected = selectedIds.has(draft.id);
+            const priorityColor = getPriorityBorderColor(draft.priority_score);
             return (
               <div
                 key={draft.id}
@@ -491,6 +501,8 @@ function DraftsList() {
                 style={{
                   borderColor: isSelected ? 'var(--accent)' : 'var(--border)',
                   backgroundColor: 'var(--bg-elevated)',
+                  borderLeftWidth: priorityColor ? '3px' : undefined,
+                  borderLeftColor: priorityColor || undefined,
                 }}
               >
                 {/* Checkbox */}

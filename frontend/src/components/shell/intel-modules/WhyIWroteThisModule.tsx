@@ -1,5 +1,8 @@
-import { Brain, Mail, Clock } from 'lucide-react';
+import { useState } from 'react';
+import DOMPurify from 'dompurify';
+import { Brain, Mail, Clock, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { useIntelDraft, useIntelDrafts, useRouteContext, formatRelativeTime } from '@/hooks/useIntelPanelData';
+import { getOriginalEmail } from '@/api/drafts';
 
 interface OriginalEmail {
   from: string;
@@ -43,6 +46,206 @@ function WhyIWroteThisSkeleton() {
     </div>
   );
 }
+
+/**
+ * Expandable block showing the original email being replied to.
+ * Shows snippet by default, with a "Show full email" toggle that
+ * fetches the complete body from the email provider on demand.
+ */
+function ReplyingToBlock({
+  draftId,
+  originalEmail,
+}: {
+  draftId: string;
+  originalEmail: OriginalEmail | undefined;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [fullBody, setFullBody] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
+
+  const handleToggle = async () => {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+
+    // If we already fetched the full body, just expand
+    if (fullBody !== null) {
+      setExpanded(true);
+      return;
+    }
+
+    // Fetch from backend
+    setLoading(true);
+    setFetchError(false);
+    try {
+      const result = await getOriginalEmail(draftId, true);
+      if (result.has_full_body && result.full_body) {
+        setFullBody(result.full_body);
+      } else {
+        // No full body available — show snippet expanded (untruncated)
+        setFullBody(null);
+        setFetchError(true);
+      }
+      setExpanded(true);
+    } catch {
+      setFetchError(true);
+      setExpanded(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!originalEmail) {
+    return (
+      <div
+        className="rounded-lg border p-3"
+        style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
+      >
+        <div className="flex items-center gap-1.5 mb-1">
+          <Mail size={12} style={{ color: 'var(--text-secondary)' }} />
+          <span
+            className="font-sans text-[10px] font-medium uppercase tracking-wider"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Replying To
+          </span>
+        </div>
+        <p className="font-sans text-[12px] italic" style={{ color: 'var(--text-secondary)' }}>
+          Original email not available
+        </p>
+      </div>
+    );
+  }
+
+  const sanitizedBody = fullBody
+    ? DOMPurify.sanitize(fullBody, {
+        ALLOWED_TAGS: [
+          'p', 'br', 'div', 'span', 'a', 'b', 'strong', 'i', 'em', 'u',
+          'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+          'table', 'thead', 'tbody', 'tr', 'td', 'th', 'blockquote', 'hr', 'img',
+        ],
+        ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'width', 'height', 'style'],
+      })
+    : '';
+
+  return (
+    <div
+      className="rounded-lg border p-3"
+      style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
+    >
+      <div className="flex items-center gap-1.5 mb-2">
+        <Mail size={12} style={{ color: 'var(--accent)' }} />
+        <span
+          className="font-sans text-[10px] font-medium uppercase tracking-wider"
+          style={{ color: 'var(--accent)' }}
+        >
+          Replying To
+        </span>
+      </div>
+      <div className="space-y-1.5">
+        <div className="flex items-start gap-2">
+          <span
+            className="font-sans text-[11px] font-medium flex-shrink-0"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            From:
+          </span>
+          <span
+            className="font-sans text-[12px]"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {originalEmail.from}
+          </span>
+        </div>
+        {originalEmail.date && (
+          <div className="flex items-start gap-2">
+            <Clock size={10} className="mt-1 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />
+            <span
+              className="font-sans text-[11px]"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              {formatRelativeTime(originalEmail.date)}
+            </span>
+          </div>
+        )}
+        {originalEmail.subject && (
+          <div className="flex items-start gap-2">
+            <span
+              className="font-sans text-[11px] font-medium flex-shrink-0"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              Subject:
+            </span>
+            <span
+              className="font-sans text-[12px]"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {originalEmail.subject}
+            </span>
+          </div>
+        )}
+
+        {/* Email body: snippet or full */}
+        {originalEmail.snippet && (
+          <div className="mt-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+            {expanded && fullBody ? (
+              <div
+                className="font-sans text-[12px] leading-[1.5] max-h-[400px] overflow-y-auto prose prose-sm prose-slate"
+                style={{ color: 'var(--text-primary)' }}
+                dangerouslySetInnerHTML={{ __html: sanitizedBody }}
+              />
+            ) : (
+              <p
+                className={`font-sans text-[12px] leading-[1.5] ${expanded ? '' : 'line-clamp-3'}`}
+                style={{ color: 'var(--text-primary)' }}
+              >
+                {originalEmail.snippet}
+              </p>
+            )}
+
+            {/* Toggle link */}
+            <button
+              type="button"
+              onClick={handleToggle}
+              disabled={loading}
+              className="mt-2 flex items-center gap-1 font-sans text-[11px] font-medium hover:underline disabled:opacity-50"
+              style={{ color: 'var(--accent)' }}
+            >
+              {loading ? (
+                <>
+                  <Loader2 size={10} className="animate-spin" />
+                  Loading full email...
+                </>
+              ) : expanded ? (
+                <>
+                  <ChevronUp size={10} />
+                  Collapse
+                </>
+              ) : (
+                <>
+                  <ChevronDown size={10} />
+                  Show full email
+                </>
+              )}
+            </button>
+
+            {expanded && fetchError && !fullBody && (
+              <p
+                className="mt-1 font-sans text-[11px] italic"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                Full email content is not available. Showing snippet only.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 // Intelligence draft types that have competitive positioning data
 const INTELLIGENCE_DRAFT_TYPES = [
@@ -231,93 +434,7 @@ export function WhyIWroteThisModule({ reasoning: propReasoning }: WhyIWroteThisM
         </h3>
 
         {/* REPLYING TO block - show the original incoming email */}
-        {originalEmail ? (
-          <div
-            className="rounded-lg border p-3"
-            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
-          >
-            <div className="flex items-center gap-1.5 mb-2">
-              <Mail size={12} style={{ color: 'var(--accent)' }} />
-              <span
-                className="font-sans text-[10px] font-medium uppercase tracking-wider"
-                style={{ color: 'var(--accent)' }}
-              >
-                Replying To
-              </span>
-            </div>
-            <div className="space-y-1.5">
-              <div className="flex items-start gap-2">
-                <span
-                  className="font-sans text-[11px] font-medium flex-shrink-0"
-                  style={{ color: 'var(--text-secondary)' }}
-                >
-                  From:
-                </span>
-                <span
-                  className="font-sans text-[12px]"
-                  style={{ color: 'var(--text-primary)' }}
-                >
-                  {originalEmail.from}
-                </span>
-              </div>
-              {originalEmail.date && (
-                <div className="flex items-start gap-2">
-                  <Clock size={10} className="mt-1 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />
-                  <span
-                    className="font-sans text-[11px]"
-                    style={{ color: 'var(--text-secondary)' }}
-                  >
-                    {formatRelativeTime(originalEmail.date)}
-                  </span>
-                </div>
-              )}
-              {originalEmail.subject && (
-                <div className="flex items-start gap-2">
-                  <span
-                    className="font-sans text-[11px] font-medium flex-shrink-0"
-                    style={{ color: 'var(--text-secondary)' }}
-                  >
-                    Subject:
-                  </span>
-                  <span
-                    className="font-sans text-[12px]"
-                    style={{ color: 'var(--text-primary)' }}
-                  >
-                    {originalEmail.subject}
-                  </span>
-                </div>
-              )}
-              {originalEmail.snippet && (
-                <div className="mt-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
-                  <p
-                    className="font-sans text-[12px] leading-[1.5] line-clamp-3"
-                    style={{ color: 'var(--text-primary)' }}
-                  >
-                    {originalEmail.snippet}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div
-            className="rounded-lg border p-3"
-            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-subtle)' }}
-          >
-            <div className="flex items-center gap-1.5 mb-1">
-              <Mail size={12} style={{ color: 'var(--text-secondary)' }} />
-              <span
-                className="font-sans text-[10px] font-medium uppercase tracking-wider"
-                style={{ color: 'var(--text-secondary)' }}
-              >
-                Replying To
-              </span>
-            </div>
-            <p className="font-sans text-[12px] italic" style={{ color: 'var(--text-secondary)' }}>
-              Original email not available
-            </p>
-          </div>
-        )}
+        <ReplyingToBlock draftId={draftId} originalEmail={originalEmail} />
 
         {/* ARIA's reasoning for this reply */}
         <div
