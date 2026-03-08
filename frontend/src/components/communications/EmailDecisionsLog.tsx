@@ -388,6 +388,14 @@ export function EmailDecisionsLog() {
           {filteredDecisions.map((decision) => (
             <DecisionRow key={decision.email_id} decision={decision} />
           ))}
+          {filteredDecisions.length < 5 && !searchQuery && categoryFilter === 'all' && draftedFilter === 'all' && (
+            <p
+              className="text-xs text-center py-4"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              ARIA is learning your email patterns. Coverage increases as more emails are processed.
+            </p>
+          )}
         </div>
       )}
     </div>

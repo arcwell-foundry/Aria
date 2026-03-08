@@ -116,8 +116,9 @@ function generateBodyPreview(body: string | undefined, maxLength = 100): string 
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'");
 
-  // Remove common greeting patterns
-  text = text.replace(/^(Hi\s*,?\s*|Hello\s*,?\s*|Dear\s+[^,]+,?\s*)/i, '');
+  // Remove common greeting patterns (including first-name-only greetings like "Keith," or "Ries,")
+  text = text.replace(/^(Hi\s+[A-Za-z]+\s*,?\s*|Hi\s*,?\s*|Hello\s+[A-Za-z]+\s*,?\s*|Hello\s*,?\s*|Dear\s+[^,]+,?\s*)/i, '');
+  text = text.replace(/^[A-Z][a-z]+\s*,\s*/, '');
 
   // Remove common signature patterns (everything after common sign-offs)
   const signOffPatterns = [

@@ -26,6 +26,7 @@ import {
 import { cn } from '@/utils/cn';
 import { toast } from 'sonner';
 import { useDraft, useUpdateDraft, useSendDraft, useRegenerateDraft, useSaveDraftToClient } from '@/hooks/useDrafts';
+import { useEmailIntelligenceSettings } from '@/hooks/useEmailIntelligenceSettings';
 import { isPlaceholderDraft } from '@/utils/isPlaceholderDraft';
 import { DraftIntelligenceContext } from '@/components/communications/DraftIntelligenceContext';
 import { LearningModeBanner } from '@/components/communications/LearningModeBanner';
@@ -59,10 +60,15 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
 
   // Queries and mutations
   const { data: draft, isLoading, error } = useDraft(draftId);
+  const { data: emailSettings } = useEmailIntelligenceSettings();
   const updateDraft = useUpdateDraft();
   const sendDraft = useSendDraft();
   const regenerateDraft = useRegenerateDraft();
   const saveDraftToClient = useSaveDraftToClient();
+
+  // Resolve email client name from draft or user's connected provider
+  const provider = draft?.client_provider || emailSettings?.email_provider;
+  const emailClientName = provider === 'outlook' ? 'Outlook' : provider === 'gmail' ? 'Gmail' : 'Email Client';
 
   const isSaving = updateDraft.isPending;
   const isSending = sendDraft.isPending;
@@ -522,11 +528,7 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
                   }}
                 >
                   <CheckCircle className="w-4 h-4" />
-                  {draft.client_provider === 'outlook'
-                    ? 'Saved to Outlook'
-                    : draft.client_provider === 'gmail'
-                      ? 'Saved to Gmail'
-                      : 'Saved to Drafts'}
+                  Saved to {emailClientName}
                 </button>
               ) : (
                 <div className="flex flex-col items-end gap-1">
@@ -548,7 +550,7 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
                     ) : (
                       <Mail className="w-4 h-4" />
                     )}
-                    Save to {draft.client_provider === 'outlook' ? 'Outlook' : draft.client_provider === 'gmail' ? 'Gmail' : 'Email Client'}
+                    Save to {emailClientName}
                   </button>
                   {saveToClientError && (
                     <span className="text-xs" style={{ color: 'var(--critical)' }}>
