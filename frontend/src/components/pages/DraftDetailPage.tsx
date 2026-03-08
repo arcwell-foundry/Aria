@@ -185,10 +185,7 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
         <LearningModeBanner />
 
         {/* Intelligence Context */}
-        <DraftIntelligenceContext
-          leadId={draft.lead_memory_id}
-          companyName={draft.recipient_name?.split(' ').pop()}
-        />
+        <DraftIntelligenceContext draftId={draftId} />
 
         {/* Header */}
         <div className="flex items-start justify-between gap-4 mb-6">

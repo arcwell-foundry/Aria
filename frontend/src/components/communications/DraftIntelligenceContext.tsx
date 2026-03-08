@@ -2,6 +2,12 @@
  * DraftIntelligenceContext - Collapsible panel showing intelligence insights
  * and market signals relevant to an email draft's recipient.
  *
+ * Uses relevance-based matching via backend endpoint:
+ * 1. RECIPIENT MATCH: Domain matches monitored_entity's domains
+ * 2. SUBJECT MATCH: Keywords from subject line match signal headlines
+ * 3. RELATIONSHIP CONTEXT: Email interaction history fallback
+ * 4. EMPTY STATE: Clean message if nothing relevant
+ *
  * Follows ARIA Design System v1.0:
  * - LIGHT THEME (Communications is a content page)
  * - CSS variables for all colors
@@ -9,85 +15,90 @@
  * - Collapsible panel, collapsed by default
  */
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import {
   Zap,
   ChevronDown,
   ChevronRight,
-  TrendingUp,
-  Shield,
-  Clock,
+  Users,
+  Mail,
+  Inbox,
 } from 'lucide-react';
-import { useIntelligenceInsights, useSignals } from '@/hooks/useIntelPanelData';
-import type { IntelligenceInsight } from '@/api/intelligence';
-import type { Signal } from '@/api/signals';
+import { useDraftIntelligenceContext, formatRelativeTime } from '@/hooks/useIntelPanelData';
 
 interface DraftIntelligenceContextProps {
-  leadId?: string;
-  companyName?: string;
+  draftId: string;
 }
 
 // Classification to border color mapping
-const CLASSIFICATION_BORDER: Record<string, string> = {
+const CLASSIFICATION_COLORS: Record<string, string> = {
   opportunity: 'var(--success)',
   threat: 'var(--critical)',
   neutral: 'var(--text-secondary)',
+  // Signal types
+  funding: 'var(--accent)',
+  hiring: 'var(--success)',
+  leadership: 'var(--accent)',
+  product: 'var(--success)',
+  partnership: 'var(--accent)',
+  regulatory: 'var(--critical)',
+  earnings: 'var(--text-secondary)',
+  clinical_trial: 'var(--success)',
+  fda_approval: 'var(--success)',
+  patent: 'var(--text-secondary)',
 };
 
-// Classification to icon mapping
-const CLASSIFICATION_ICON: Record<string, typeof TrendingUp> = {
-  opportunity: TrendingUp,
-  threat: Shield,
-  neutral: Clock,
-};
-
-// Time horizon display labels
-const TIME_HORIZON_LABELS: Record<string, string> = {
-  immediate: 'Immediate',
-  short_term: 'Short-term',
-  medium_term: 'Medium-term',
-  long_term: 'Long-term',
+// Signal type to display label mapping
+const SIGNAL_TYPE_LABELS: Record<string, string> = {
+  funding: 'Funding',
+  hiring: 'Hiring',
+  leadership: 'Leadership',
+  product: 'Product',
+  partnership: 'Partnership',
+  regulatory: 'Regulatory',
+  earnings: 'Earnings',
+  clinical_trial: 'Clinical Trial',
+  fda_approval: 'FDA Approval',
+  patent: 'Patent',
 };
 
 export function DraftIntelligenceContext({
-  leadId,
-  companyName,
+  draftId,
 }: DraftIntelligenceContextProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const { data: context, isLoading, error } = useDraftIntelligenceContext(draftId);
 
-  const { data: allInsights } = useIntelligenceInsights({ limit: 5 });
-  const { data: allSignals } = useSignals({ company: companyName, limit: 5 });
+  // Loading state
+  if (isLoading) {
+    return (
+      <div
+        className="mb-6 rounded-lg border animate-pulse"
+        style={{
+          borderColor: 'var(--border)',
+          backgroundColor: 'var(--bg-elevated)',
+        }}
+      >
+        <div className="px-4 py-3 flex items-center gap-2">
+          <div className="w-4 h-4 rounded bg-[var(--border)]" />
+          <div className="w-32 h-4 rounded bg-[var(--border)]" />
+        </div>
+      </div>
+    );
+  }
 
-  // Filter insights relevant to this draft's lead/company
-  const relevantInsights = useMemo(() => {
-    if (!allInsights) return [];
-    const lowerCompany = companyName?.toLowerCase() ?? '';
+  // Error or no data - don't render
+  if (error || !context) {
+    return null;
+  }
 
-    return allInsights
-      .filter((insight: IntelligenceInsight) => {
-        const matchesLead = leadId && insight.affected_goals.length > 0;
-        const matchesCompany =
-          lowerCompany &&
-          insight.trigger_event?.toLowerCase().includes(lowerCompany);
-        return matchesLead || matchesCompany;
-      })
-      .slice(0, 3);
-  }, [allInsights, leadId, companyName]);
-
-  // Filter signals: exclude dismissed ones
-  const relevantSignals = useMemo(() => {
-    if (!allSignals) return [];
-    return allSignals
-      .filter((signal: Signal) => !signal.dismissed_at)
-      .slice(0, 3);
-  }, [allSignals]);
-
-  const totalItems = relevantInsights.length + relevantSignals.length;
-
-  // Don't render if there's no relevant content
-  if (totalItems === 0) return null;
+  // Empty state - show clean message
+  const hasContent = context.has_signals || context.relationship_context;
+  if (!hasContent && context.match_type === 'empty') {
+    return null; // Don't show anything if no relevant context
+  }
 
   const ChevronIcon = isExpanded ? ChevronDown : ChevronRight;
+  const totalItems = context.signals.length + (context.relationship_context ? 1 : 0);
 
   return (
     <div
@@ -118,15 +129,17 @@ export function DraftIntelligenceContext({
         >
           Intelligence Context
         </span>
-        <span
-          className="ml-auto px-2 py-0.5 rounded-full text-xs font-mono"
-          style={{
-            backgroundColor: 'var(--bg-subtle)',
-            color: 'var(--text-secondary)',
-          }}
-        >
-          {totalItems}
-        </span>
+        {totalItems > 0 && (
+          <span
+            className="ml-auto px-2 py-0.5 rounded-full text-xs font-mono"
+            style={{
+              backgroundColor: 'var(--bg-subtle)',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            {totalItems}
+          </span>
+        )}
       </button>
 
       {/* Expanded content */}
@@ -135,26 +148,24 @@ export function DraftIntelligenceContext({
           className="border-t px-4 pb-4"
           style={{ borderColor: 'var(--border)' }}
         >
-          {/* Intelligence Insights sub-section */}
-          {relevantInsights.length > 0 && (
+          {/* Market Signals */}
+          {context.has_signals && context.signals.length > 0 && (
             <div className="mt-4">
               <h4
                 className="text-xs font-medium uppercase tracking-wider mb-3"
                 style={{ color: 'var(--text-secondary)' }}
               >
-                Intelligence Insights
+                Market Signals
               </h4>
               <div className="space-y-3">
-                {relevantInsights.map((insight: IntelligenceInsight) => {
+                {context.signals.map((signal) => {
                   const borderColor =
-                    CLASSIFICATION_BORDER[insight.classification] ??
-                    'var(--text-secondary)';
-                  const IconComponent =
-                    CLASSIFICATION_ICON[insight.classification] ?? Clock;
+                    CLASSIFICATION_COLORS[signal.signal_type] ??
+                    'var(--accent)';
 
                   return (
                     <div
-                      key={insight.id}
+                      key={signal.id}
                       className="pl-3 py-2 rounded-r"
                       style={{
                         borderLeft: `3px solid ${borderColor}`,
@@ -162,23 +173,33 @@ export function DraftIntelligenceContext({
                       }}
                     >
                       <div className="flex items-center gap-2 mb-1">
-                        <IconComponent
-                          className="w-3.5 h-3.5 flex-shrink-0"
-                          style={{ color: borderColor }}
-                        />
                         <span
                           className="text-xs font-medium uppercase"
                           style={{ color: borderColor }}
                         >
-                          {insight.classification}
+                          {SIGNAL_TYPE_LABELS[signal.signal_type] ??
+                            signal.signal_type.replace(/_/g, ' ')}
                         </span>
-                        {insight.time_horizon && (
+                        {signal.relevance_source === 'domain' && (
                           <span
-                            className="text-xs font-mono ml-auto"
-                            style={{ color: 'var(--text-secondary)' }}
+                            className="text-xs px-1.5 py-0.5 rounded"
+                            style={{
+                              backgroundColor: 'var(--accent)',
+                              color: 'white',
+                            }}
                           >
-                            {TIME_HORIZON_LABELS[insight.time_horizon] ??
-                              insight.time_horizon}
+                            Domain Match
+                          </span>
+                        )}
+                        {signal.relevance_source === 'subject' && (
+                          <span
+                            className="text-xs px-1.5 py-0.5 rounded"
+                            style={{
+                              backgroundColor: 'var(--text-secondary)',
+                              color: 'white',
+                            }}
+                          >
+                            Topic Match
                           </span>
                         )}
                       </div>
@@ -192,14 +213,20 @@ export function DraftIntelligenceContext({
                           overflow: 'hidden',
                         }}
                       >
-                        {insight.content}
+                        {signal.content}
                       </p>
                       <div className="flex items-center gap-3 mt-1.5">
                         <span
                           className="text-xs font-mono"
                           style={{ color: 'var(--text-secondary)' }}
                         >
-                          Confidence: {Math.round(insight.confidence * 100)}%
+                          {signal.company_name}
+                        </span>
+                        <span
+                          className="text-xs"
+                          style={{ color: 'var(--text-secondary)' }}
+                        >
+                          {formatRelativeTime(signal.created_at)}
                         </span>
                       </div>
                     </div>
@@ -209,48 +236,77 @@ export function DraftIntelligenceContext({
             </div>
           )}
 
-          {/* Market Signals sub-section */}
-          {relevantSignals.length > 0 && (
-            <div className={relevantInsights.length > 0 ? 'mt-4' : 'mt-4'}>
+          {/* Relationship Context (fallback) */}
+          {!context.has_signals && context.relationship_context && (
+            <div className="mt-4">
               <h4
                 className="text-xs font-medium uppercase tracking-wider mb-3"
                 style={{ color: 'var(--text-secondary)' }}
               >
-                Market Signals
+                Relationship Context
               </h4>
-              <div className="space-y-3">
-                {relevantSignals.map((signal: Signal) => (
-                  <div
-                    key={signal.id}
-                    className="pl-3 py-2 rounded-r"
-                    style={{
-                      borderLeft: '3px solid var(--accent)',
-                      backgroundColor: 'var(--bg-subtle)',
-                    }}
+              <div
+                className="pl-3 py-2 rounded-r"
+                style={{
+                  borderLeft: '3px solid var(--text-secondary)',
+                  backgroundColor: 'var(--bg-subtle)',
+                }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Users
+                    className="w-3.5 h-3.5"
+                    style={{ color: 'var(--text-secondary)' }}
+                  />
+                  <span
+                    className="text-sm"
+                    style={{ color: 'var(--text-primary)' }}
                   >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span
-                        className="text-xs font-medium uppercase"
-                        style={{ color: 'var(--accent)' }}
-                      >
-                        {signal.signal_type.replace(/_/g, ' ')}
-                      </span>
-                    </div>
-                    <p
-                      className="text-sm leading-snug"
-                      style={{
-                        color: 'var(--text-primary)',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                        overflow: 'hidden',
-                      }}
+                    {context.relationship_context.relationship_summary}
+                  </span>
+                </div>
+                {context.relationship_context.last_interaction_date && (
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <Mail
+                      className="w-3 h-3"
+                      style={{ color: 'var(--text-secondary)' }}
+                    />
+                    <span
+                      className="text-xs"
+                      style={{ color: 'var(--text-secondary)' }}
                     >
-                      {signal.content}
-                    </p>
+                      Last contact:{' '}
+                      {formatRelativeTime(
+                        context.relationship_context.last_interaction_date
+                      )}
+                    </span>
                   </div>
-                ))}
+                )}
               </div>
+              <p
+                className="mt-2 text-xs italic"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                No specific market intelligence for this contact
+              </p>
+            </div>
+          )}
+
+          {/* Empty State */}
+          {!context.has_signals && !context.relationship_context && (
+            <div
+              className="mt-4 flex items-center gap-3 py-3 px-3 rounded-lg"
+              style={{ backgroundColor: 'var(--bg-subtle)' }}
+            >
+              <Inbox
+                className="w-5 h-5 flex-shrink-0"
+                style={{ color: 'var(--text-secondary)' }}
+              />
+              <p
+                className="text-sm"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                No intelligence context available for this conversation.
+              </p>
             </div>
           )}
         </div>

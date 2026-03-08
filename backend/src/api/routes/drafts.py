@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,6 +24,7 @@ from src.services.action_gatekeeper import get_action_gatekeeper
 from src.services.activity_service import ActivityService
 from src.services.draft_service import get_draft_service
 from src.services.email_client_writer import DraftSaveError, get_email_client_writer
+from src.utils.company_aliases import normalize_company_name
 
 logger = logging.getLogger(__name__)
 
@@ -767,3 +769,296 @@ async def dismiss_draft(
         logger.warning("Failed to log draft dismissal activity: %s", e)
 
     return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# Draft Intelligence Context - Relevance-based signal matching
+# ---------------------------------------------------------------------------
+
+
+class MarketSignalItem(BaseModel):
+    """A relevant market signal for the draft context."""
+
+    id: str
+    signal_type: str
+    company_name: str
+    content: str
+    source: str | None = None
+    created_at: str
+    relevance_source: str = Field(
+        ..., description="How this signal was matched: 'domain', 'subject', or 'fallback'"
+    )
+
+
+class RelationshipContext(BaseModel):
+    """Relationship context when no signals match."""
+
+    recipient_email: str
+    last_interaction_date: str | None = None
+    interaction_count: int = 0
+    relationship_summary: str = "No specific market intelligence for this contact."
+
+
+class DraftIntelligenceContextResponse(BaseModel):
+    """Response model for draft intelligence context."""
+
+    has_signals: bool = Field(..., description="Whether relevant signals were found")
+    signals: list[MarketSignalItem] = Field(default_factory=list)
+    relationship_context: RelationshipContext | None = None
+    match_type: str = Field(
+        ..., description="Type of match: 'domain', 'subject', 'relationship', or 'empty'"
+    )
+
+
+@router.get("/{draft_id}/intelligence-context", response_model=DraftIntelligenceContextResponse)
+async def get_draft_intelligence_context(
+    current_user: CurrentUser,
+    draft_id: str,
+) -> dict[str, Any]:
+    """Get relevance-matched intelligence context for a draft.
+
+    Priority cascade:
+    1. RECIPIENT MATCH: Check if recipient email domain matches any monitored_entity's domains
+    2. SUBJECT MATCH: Extract keywords from subject line and find matching signals
+    3. RELATIONSHIP CONTEXT: Show email interaction history as fallback
+    4. EMPTY STATE: Return clean empty state if nothing relevant
+
+    Args:
+        current_user: The authenticated user.
+        draft_id: The ID of the draft.
+
+    Returns:
+        Intelligence context with relevant signals or relationship context.
+
+    Raises:
+        HTTPException: If draft not found.
+    """
+    db = SupabaseClient.get_client()
+
+    # Get the draft
+    draft_result = (
+        db.table("email_drafts")
+        .select("id, user_id, recipient_email, subject")
+        .eq("id", draft_id)
+        .eq("user_id", current_user.id)
+        .limit(1)
+        .execute()
+    )
+
+    if not draft_result.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Draft {draft_id} not found",
+        )
+
+    draft = draft_result.data[0]
+    recipient_email = draft.get("recipient_email", "")
+    subject = draft.get("subject", "")
+
+    # Extract domain from recipient email
+    recipient_domain = ""
+    if recipient_email and "@" in recipient_email:
+        recipient_domain = recipient_email.split("@")[-1].lower()
+
+    # PRIORITY 1: Check monitored_entities for domain match
+    matched_entity = None
+    if recipient_domain:
+        entity_result = (
+            db.table("monitored_entities")
+            .select("id, entity_name, entity_type, domains")
+            .eq("user_id", current_user.id)
+            .eq("is_active", True)
+            .execute()
+        )
+
+        for entity in entity_result.data or []:
+            entity_domains = entity.get("domains") or []
+            if recipient_domain in [d.lower() for d in entity_domains]:
+                matched_entity = entity
+                break
+
+    # If domain matched, get signals for that entity
+    if matched_entity:
+        entity_name = matched_entity.get("entity_name", "")
+        normalized_name = normalize_company_name(entity_name, supabase_client=db)
+
+        signals_result = (
+            db.table("market_signals")
+            .select("id, signal_type, company_name, headline, source_name, detected_at")
+            .eq("user_id", current_user.id)
+            .is_("dismissed_at", "null")
+            .ilike("company_name", f"%{normalized_name}%")
+            .order("detected_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+
+        if signals_result.data:
+            signals = [
+                {
+                    "id": s["id"],
+                    "signal_type": s["signal_type"],
+                    "company_name": s["company_name"],
+                    "content": s["headline"],
+                    "source": s.get("source_name"),
+                    "created_at": s["detected_at"],
+                    "relevance_source": "domain",
+                }
+                for s in signals_result.data
+            ]
+            logger.info(
+                "Draft intelligence context: domain match",
+                extra={
+                    "user_id": current_user.id,
+                    "draft_id": draft_id,
+                    "domain": recipient_domain,
+                    "entity": entity_name,
+                    "signal_count": len(signals),
+                },
+            )
+            return {
+                "has_signals": True,
+                "signals": signals,
+                "relationship_context": None,
+                "match_type": "domain",
+            }
+
+    # PRIORITY 2: Subject line keyword matching
+    keywords = _extract_subject_keywords(subject)
+    if keywords:
+        # Build OR query for keywords in headline
+        keyword_filters = " | ".join(keywords[:3])  # Limit to top 3 keywords
+
+        signals_result = (
+            db.table("market_signals")
+            .select("id, signal_type, company_name, headline, source_name, detected_at")
+            .eq("user_id", current_user.id)
+            .is_("dismissed_at", "null")
+            .or_(f"headline.ilike.%{keyword_filters}%,company_name.ilike.%{keyword_filters}%")
+            .order("detected_at", desc=True)
+            .limit(3)
+            .execute()
+        )
+
+        if signals_result.data:
+            signals = [
+                {
+                    "id": s["id"],
+                    "signal_type": s["signal_type"],
+                    "company_name": s["company_name"],
+                    "content": s["headline"],
+                    "source": s.get("source_name"),
+                    "created_at": s["detected_at"],
+                    "relevance_source": "subject",
+                }
+                for s in signals_result.data
+            ]
+            logger.info(
+                "Draft intelligence context: subject match",
+                extra={
+                    "user_id": current_user.id,
+                    "draft_id": draft_id,
+                    "keywords": keywords,
+                    "signal_count": len(signals),
+                },
+            )
+            return {
+                "has_signals": True,
+                "signals": signals,
+                "relationship_context": None,
+                "match_type": "subject",
+            }
+
+    # PRIORITY 3: Relationship context fallback
+    if recipient_email:
+        interaction_result = (
+            db.table("email_scan_log")
+            .select("scanned_at, category")
+            .eq("user_id", current_user.id)
+            .eq("sender_email", recipient_email)
+            .order("scanned_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+
+        interactions = interaction_result.data or []
+        interaction_count = len(interactions)
+        last_interaction = interactions[0]["scanned_at"] if interactions else None
+
+        if interaction_count > 0:
+            relationship_summary = f"{interaction_count} prior email exchange"
+            if interaction_count > 1:
+                relationship_summary = f"{interaction_count} prior email exchanges"
+
+            logger.info(
+                "Draft intelligence context: relationship fallback",
+                extra={
+                    "user_id": current_user.id,
+                    "draft_id": draft_id,
+                    "recipient_email": recipient_email,
+                    "interaction_count": interaction_count,
+                },
+            )
+            return {
+                "has_signals": False,
+                "signals": [],
+                "relationship_context": {
+                    "recipient_email": recipient_email,
+                    "last_interaction_date": last_interaction,
+                    "interaction_count": interaction_count,
+                    "relationship_summary": relationship_summary,
+                },
+                "match_type": "relationship",
+            }
+
+    # PRIORITY 4: Empty state
+    logger.info(
+        "Draft intelligence context: empty state",
+        extra={
+            "user_id": current_user.id,
+            "draft_id": draft_id,
+            "recipient_email": recipient_email,
+        },
+    )
+    return {
+        "has_signals": False,
+        "signals": [],
+        "relationship_context": None,
+        "match_type": "empty",
+    }
+
+
+def _extract_subject_keywords(subject: str) -> list[str]:
+    """Extract meaningful keywords from email subject.
+
+    Strips Re:, Fwd:, and common noise words.
+    Returns list of meaningful keywords.
+    """
+    if not subject:
+        return []
+
+    # Strip prefixes
+    cleaned = re.sub(r"^(Re|Fwd|Fw|Aw|Sv|Antw):\s*", "", subject, flags=re.IGNORECASE)
+
+    # Common noise words to filter out
+    noise_words = {
+        "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
+        "of", "with", "by", "from", "is", "it", "this", "that", "be", "are",
+        "was", "were", "been", "being", "have", "has", "had", "do", "does",
+        "did", "will", "would", "could", "should", "may", "might", "must",
+        "meeting", "call", "update", "follow", "up", "regarding", "about",
+        "question", "quick", "hello", "hi", "thanks", "thank", "you", "your",
+    }
+
+    # Extract words (alphanumeric, 3+ chars)
+    words = re.findall(r"\b[a-zA-Z]{3,}\b", cleaned.lower())
+
+    # Filter noise and dedupe
+    keywords = []
+    seen = set()
+    for word in words:
+        if word not in noise_words and word not in seen:
+            keywords.append(word)
+            seen.add(word)
+
+    return keywords[:5]  # Return top 5 keywords

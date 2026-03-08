@@ -208,3 +208,40 @@ export async function dismissDraft(
   );
   return response.data;
 }
+
+// ---------------------------------------------------------------------------
+// Draft Intelligence Context - Relevance-based signal matching
+// ---------------------------------------------------------------------------
+
+export interface MarketSignalItem {
+  id: string;
+  signal_type: string;
+  company_name: string;
+  content: string;
+  source: string | null;
+  created_at: string;
+  relevance_source: "domain" | "subject" | "fallback";
+}
+
+export interface RelationshipContext {
+  recipient_email: string;
+  last_interaction_date: string | null;
+  interaction_count: number;
+  relationship_summary: string;
+}
+
+export interface DraftIntelligenceContextResponse {
+  has_signals: boolean;
+  signals: MarketSignalItem[];
+  relationship_context: RelationshipContext | null;
+  match_type: "domain" | "subject" | "relationship" | "empty";
+}
+
+export async function getDraftIntelligenceContext(
+  draftId: string
+): Promise<DraftIntelligenceContextResponse> {
+  const response = await apiClient.get<DraftIntelligenceContextResponse>(
+    `/drafts/${draftId}/intelligence-context`
+  );
+  return response.data;
+}

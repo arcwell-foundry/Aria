@@ -53,7 +53,7 @@ import {
 } from "@/api/intelligence";
 import { listBattleCards } from "@/api/battleCards";
 import { listLeads, getLead, getLeadInsights } from "@/api/leads";
-import { getDraft, listDrafts } from "@/api/drafts";
+import { getDraft, listDrafts, getDraftIntelligenceContext, type DraftIntelligenceContextResponse } from "@/api/drafts";
 import { listGoals, getDashboard, type GoalStatus } from "@/api/goals";
 import { getSyncStatus } from "@/api/deepSync";
 
@@ -70,6 +70,7 @@ export const intelKeys = {
   leadInsights: (id: string) => [...intelKeys.all, "leadInsights", id] as const,
   draft: (id: string) => [...intelKeys.all, "draft", id] as const,
   drafts: () => [...intelKeys.all, "drafts"] as const,
+  draftIntelligenceContext: (id: string) => [...intelKeys.all, "draftIntelligenceContext", id] as const,
   goals: (status?: GoalStatus) => [...intelKeys.all, "goals", status] as const,
   goalsDashboard: () => [...intelKeys.all, "goalsDashboard"] as const,
   syncStatus: () => [...intelKeys.all, "syncStatus"] as const,
@@ -208,6 +209,18 @@ export function useIntelDrafts() {
     queryKey: intelKeys.drafts(),
     queryFn: () => listDrafts(undefined, 20),
     staleTime: 1000 * 60 * 2,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Draft Intelligence Context hook (relevance-based signal matching)
+// ---------------------------------------------------------------------------
+export function useDraftIntelligenceContext(draftId: string) {
+  return useQuery<DraftIntelligenceContextResponse>({
+    queryKey: intelKeys.draftIntelligenceContext(draftId),
+    queryFn: () => getDraftIntelligenceContext(draftId),
+    enabled: !!draftId,
+    staleTime: 1000 * 60 * 2, // 2 minutes
   });
 }
 
