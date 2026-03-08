@@ -166,6 +166,10 @@ class EmailDraftResponse(BaseModel):
     aria_reasoning: str | None = Field(
         None, description="LLM-generated strategic reasoning narrative explaining ARIA's decisions"
     )
+    # Enriched field for reply drafts - original incoming email context
+    original_email: dict[str, Any] | None = Field(
+        None, description="Original incoming email this draft replies to (from, sender_name, sender_email, date, subject, snippet)"
+    )
 
     # Validators for JSON string fields from Supabase
     _parse_context = field_validator("context", mode="before")(_parse_json_string)
