@@ -250,19 +250,31 @@ class DraftService:
         status: str | None = None,
         include_dismissed: bool = False,
     ) -> list[dict[str, Any]]:
-        """List user's drafts.
+        """List user's drafts, grouped by thread.
+
+        When multiple drafts exist for the same thread (e.g., regenerated drafts),
+        only the most recent draft is returned as the primary entry, with a count
+        of older versions in `previous_versions_count`.
+
+        Grouping is only applied for drafts with status='draft' or 'pending_review'.
+        Sent, failed, and other statuses are not grouped.
 
         Args:
             user_id: The ID of the user whose drafts to list.
-            limit: Maximum number of drafts to return.
+            limit: Maximum number of drafts to return (after grouping).
             status: Optional status filter.
             include_dismissed: If True, include dismissed drafts (default: False).
 
         Returns:
-            List of draft data dictionaries.
+            List of draft data dictionaries with previous_versions_count field.
         """
         try:
             client = SupabaseClient.get_client()
+
+            # Fetch more drafts than needed to account for grouping
+            # We fetch 3x the limit to ensure we have enough after grouping
+            fetch_limit = min(limit * 3, 300)
+
             query = client.table("email_drafts").select("*").eq("user_id", user_id)
 
             if status:
@@ -272,12 +284,127 @@ class DraftService:
                 for excluded_status in self._EXCLUDED_STATUSES:
                     query = query.neq("status", excluded_status)
 
-            result = query.order("created_at", desc=True).limit(limit).execute()
+            result = query.order("created_at", desc=True).limit(fetch_limit).execute()
 
-            return cast(list[dict[str, Any]], result.data) if result.data else []
+            if not result.data:
+                return []
+
+            drafts = cast(list[dict[str, Any]], result.data)
+
+            # Group drafts by thread for status='draft' and 'pending_review' only
+            # Statuses that should be grouped (actionable drafts that can be regenerated)
+            groupable_statuses = {"draft", "pending_review"}
+
+            # Track which drafts we've seen (by thread grouping key)
+            seen_groups: dict[str, list[dict[str, Any]]] = {}
+
+            for draft in drafts:
+                draft_status = draft.get("status", "")
+
+                # Only group drafts with groupable statuses
+                if draft_status not in groupable_statuses:
+                    # Non-groupable drafts get count of 0 and are included directly
+                    draft["previous_versions_count"] = 0
+                    continue
+
+                # Build grouping key: thread_id is primary, fallback to recipient+normalized_subject
+                thread_id = draft.get("thread_id")
+                recipient_email = draft.get("recipient_email", "").lower()
+                subject = draft.get("subject", "")
+
+                # Normalize subject for grouping (remove Re:, Fwd:, etc.)
+                normalized_subject = self._normalize_subject_for_grouping(subject)
+
+                if thread_id:
+                    group_key = f"thread:{thread_id}"
+                elif recipient_email and normalized_subject:
+                    # Fallback grouping by recipient + normalized subject
+                    group_key = f"recipient:{recipient_email}:{normalized_subject}"
+                else:
+                    # No grouping key available - treat as unique (count = 0)
+                    draft["previous_versions_count"] = 0
+                    continue
+
+                if group_key not in seen_groups:
+                    seen_groups[group_key] = []
+                seen_groups[group_key].append(draft)
+
+            # Build the final list with grouping applied
+            grouped_results: list[dict[str, Any]] = []
+            drafts_to_skip: set[str] = set()  # Track draft IDs that are older versions
+
+            for group_key, group_drafts in seen_groups.items():
+                if len(group_drafts) > 1:
+                    # Multiple drafts for this thread - keep only the most recent
+                    # Drafts are already sorted by created_at desc, so first is most recent
+                    most_recent = group_drafts[0]
+                    older_count = len(group_drafts) - 1
+
+                    # Mark older drafts to skip
+                    for older_draft in group_drafts[1:]:
+                        drafts_to_skip.add(older_draft["id"])
+
+                    # Add count to most recent draft
+                    most_recent["previous_versions_count"] = older_count
+                else:
+                    # Single draft - ensure count is 0
+                    group_drafts[0]["previous_versions_count"] = 0
+
+            # Build final list: include non-grouped drafts and grouped representatives
+            for draft in drafts:
+                # Skip older versions that were grouped
+                if draft["id"] in drafts_to_skip:
+                    continue
+
+                # Ensure previous_versions_count is set for non-grouped drafts
+                if "previous_versions_count" not in draft:
+                    draft["previous_versions_count"] = 0
+
+                grouped_results.append(draft)
+
+                # Respect the original limit
+                if len(grouped_results) >= limit:
+                    break
+
+            return grouped_results
         except Exception:
             logger.exception("Failed to list drafts")
             return []
+
+    def _normalize_subject_for_grouping(self, subject: str) -> str:
+        """Normalize email subject for grouping comparisons.
+
+        Removes common prefixes like Re:, Fwd:, etc. and lowercases.
+
+        Args:
+            subject: The email subject line.
+
+        Returns:
+            Normalized subject string.
+        """
+        import re
+
+        if not subject:
+            return ""
+
+        # Remove Re:, Fwd:, Fw:, etc. prefixes (can be nested)
+        normalized = re.sub(
+            r"^(Re|Fwd|Fw|Aw|Sv|Antw):\s*",
+            "",
+            subject,
+            flags=re.IGNORECASE
+        )
+        # Remove again in case of nested prefixes (Re: Re:)
+        while normalized != subject:
+            subject = normalized
+            normalized = re.sub(
+                r"^(Re|Fwd|Fw|Aw|Sv|Antw):\s*",
+                "",
+                subject,
+                flags=re.IGNORECASE
+            )
+
+        return normalized.lower().strip()
 
     async def update_draft(
         self,

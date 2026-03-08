@@ -201,6 +201,13 @@ class EmailDraftListResponse(BaseModel):
     aria_notes: str | None = Field(
         None, description="Brief ARIA reasoning notes for list preview"
     )
+    # Fields for draft grouping by thread
+    thread_id: str | None = Field(
+        None, description="Email thread ID for grouping regenerated drafts"
+    )
+    previous_versions_count: int = Field(
+        0, description="Number of older draft versions for the same thread (0 = no older versions)"
+    )
 
 
 class EmailRegenerateRequest(BaseModel):

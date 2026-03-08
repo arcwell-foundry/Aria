@@ -85,6 +85,9 @@ export interface EmailDraftListItem {
   // Intelligence-generated draft fields
   draft_type?: string;
   aria_notes?: string;
+  // Draft grouping by thread
+  thread_id?: string;
+  previous_versions_count?: number; // Number of older draft versions for the same thread
 }
 
 // Request types
