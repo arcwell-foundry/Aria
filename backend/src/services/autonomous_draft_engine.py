@@ -35,6 +35,7 @@ from src.services.email_context_gatherer import (
 )
 from src.services.activity_service import ActivityService
 from src.services.learning_mode_service import get_learning_mode_service
+from src.utils.email_formatting import resolve_recipient_name
 
 logger = logging.getLogger(__name__)
 
@@ -645,11 +646,17 @@ Do not include any text outside the JSON object."""
                 email, context, style_score, confidence, is_learning_mode
             )
 
+            # g.5 Resolve recipient name with fallback cascade
+            resolved_name = await self._resolve_recipient_name(
+                sender_name=email.sender_name,
+                recipient_email=email.sender_email,
+            )
+
             # h. Save draft with all metadata
             draft_id = await self._save_draft_with_metadata(
                 user_id=user_id,
                 recipient_email=email.sender_email,
-                recipient_name=email.sender_name,
+                recipient_name=resolved_name,
                 subject=draft_content.subject,
                 body=draft_content.body,
                 original_email_id=email.email_id,
@@ -707,7 +714,7 @@ Do not include any text outside the JSON object."""
                     user_id=user_id,
                     agent="scribe",
                     activity_type="email_drafted",
-                    title=f"Drafted reply to {email.sender_name or email.sender_email}",
+                    title=f"Drafted reply to {resolved_name or email.sender_email}",
                     description=f"Re: {draft_content.subject} - {confidence_label} confidence, {style_score:.0%} style match",
                     reasoning=aria_notes,
                     confidence=confidence,
@@ -730,7 +737,7 @@ Do not include any text outside the JSON object."""
             return DraftResult(
                 draft_id=draft_id,
                 recipient_email=email.sender_email,
-                recipient_name=email.sender_name,
+                recipient_name=resolved_name,
                 subject=draft_content.subject,
                 body=draft_content.body,
                 style_match_score=style_score,
@@ -1597,6 +1604,14 @@ Respond with JSON: {{"subject": "...", "body": "..."}}""")
             raise
 
         return draft_id
+
+    async def _resolve_recipient_name(
+        self,
+        sender_name: str | None,
+        recipient_email: str,
+    ) -> str | None:
+        """Resolve recipient name via shared utility with DB fallback cascade."""
+        return await resolve_recipient_name(self._db, sender_name, recipient_email)
 
     async def _get_user_name(self, user_id: str) -> str:
         """Get user's full name from profile."""

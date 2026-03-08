@@ -23,6 +23,7 @@ from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.core.ws import ws_manager
 from src.models.ws_events import ActionPendingEvent
 from src.services.email_context_gatherer import DraftContext, EmailContextGatherer
+from src.utils.email_formatting import resolve_recipient_name
 
 logger = logging.getLogger(__name__)
 
@@ -209,13 +210,18 @@ class ProactiveFollowupEngine:
             f"{'Sender' if who == 'sender' else 'You'} committed to this action."
         )
 
+        # Resolve recipient name with fallback cascade
+        resolved_name = await resolve_recipient_name(
+            self._db, sender_name, sender_email,
+        )
+
         # Save draft
         draft_id = str(uuid4())
         insert_data: dict[str, Any] = {
             "id": draft_id,
             "user_id": user_id,
             "recipient_email": sender_email,
-            "recipient_name": sender_name or None,
+            "recipient_name": resolved_name,
             "subject": subject,
             "body": draft_body,
             "purpose": "follow_up",
@@ -256,12 +262,12 @@ class ProactiveFollowupEngine:
                     title="Email Draft Review",
                     agent="scribe",
                     risk_level="HIGH",
-                    description=f"Follow-up draft to {sender_name or sender_email}: {subject}",
+                    description=f"Follow-up draft to {resolved_name or sender_email}: {subject}",
                     payload={
                         "action_type": "email_draft_review",
                         "draft_id": draft_id,
                         "subject": subject,
-                        "recipient_name": sender_name or None,
+                        "recipient_name": resolved_name,
                         "recipient_email": sender_email,
                         "confidence": confidence_level,
                         "style_match": 0.0,
@@ -279,7 +285,7 @@ class ProactiveFollowupEngine:
 
         logger.info(
             "PROACTIVE_FOLLOWUP: Drafted follow-up to %s for overdue commitment: %s",
-            sender_name or sender_email,
+            resolved_name or sender_email,
             commitment_task[:80],
         )
 
