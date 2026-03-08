@@ -333,3 +333,29 @@ export async function getDraftIntelligenceContext(
   );
   return response.data;
 }
+
+// ---------------------------------------------------------------------------
+// Stale Threads - Follow-up tracking for sent emails
+// ---------------------------------------------------------------------------
+
+export interface StaleThread {
+  draft_id: string;
+  recipient_name?: string;
+  recipient_email: string;
+  subject: string;
+  sent_at: string;
+  days_since_sent: number;
+  urgency: "URGENT" | "NORMAL" | "LOW";
+  thread_id?: string;
+  suggested_action: string;
+}
+
+export interface StaleThreadsResponse {
+  threads: StaleThread[];
+  total: number;
+}
+
+export async function getStaleThreads(): Promise<StaleThreadsResponse> {
+  const response = await apiClient.get<StaleThreadsResponse>("/drafts/stale-threads");
+  return response.data;
+}

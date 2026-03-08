@@ -10,6 +10,7 @@ import {
   saveDraftToClient,
   batchDraftAction,
   getDraftCounts,
+  getStaleThreads,
   type CreateEmailDraftRequest,
   type UpdateEmailDraftRequest,
   type RegenerateDraftRequest,
@@ -149,5 +150,14 @@ export function useBatchDraftAction() {
       queryClient.invalidateQueries({ queryKey: draftKeys.lists() });
       queryClient.invalidateQueries({ queryKey: draftKeys.counts() });
     },
+  });
+}
+
+// Stale threads - follow-up tracking for sent emails
+export function useStaleThreads() {
+  return useQuery({
+    queryKey: ["stale-threads"],
+    queryFn: getStaleThreads,
+    staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }

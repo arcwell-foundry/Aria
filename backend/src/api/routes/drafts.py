@@ -25,6 +25,7 @@ from src.services.action_gatekeeper import get_action_gatekeeper
 from src.services.activity_service import ActivityService
 from src.services.draft_service import get_draft_service
 from src.services.email_client_writer import DraftSaveError, get_email_client_writer
+from src.services.followup_tracker import get_followup_tracker
 from src.utils.company_aliases import normalize_company_name
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,27 @@ class DraftCountsResponse(BaseModel):
     pending_review: int = Field(..., description="Drafts awaiting user review")
     draft: int = Field(..., description="Drafts in initial draft state")
     total_actionable: int = Field(..., description="Total actionable drafts (pending_review + draft)")
+
+
+class StaleThreadResponse(BaseModel):
+    """A stale thread that needs follow-up."""
+
+    draft_id: str = Field(..., description="ID of the sent draft")
+    recipient_name: str | None = Field(None, description="Recipient name")
+    recipient_email: str = Field(..., description="Recipient email")
+    subject: str = Field(..., description="Email subject")
+    sent_at: str = Field(..., description="When the email was sent")
+    days_since_sent: int = Field(..., description="Days since the email was sent")
+    urgency: str = Field(..., description="Original email urgency (URGENT, NORMAL, LOW)")
+    thread_id: str | None = Field(None, description="Thread ID for context")
+    suggested_action: str = Field(..., description="Human-readable follow-up suggestion")
+
+
+class StaleThreadsResponse(BaseModel):
+    """Response for stale threads endpoint."""
+
+    threads: list[StaleThreadResponse] = Field(default_factory=list)
+    total: int = Field(..., description="Total number of stale threads")
 
 
 @router.get("/counts", response_model=DraftCountsResponse)
@@ -1944,3 +1966,30 @@ def _extract_subject_keywords(subject: str) -> list[str]:
             seen.add(word)
 
     return keywords[:5]  # Return top 5 keywords
+
+
+# ---------------------------------------------------------------------------
+# Stale Threads - Follow-up tracking for sent emails
+# ---------------------------------------------------------------------------
+
+
+@router.get("/stale-threads", response_model=StaleThreadsResponse)
+async def get_stale_threads(current_user: CurrentUser) -> dict[str, Any]:
+    """Get stale threads that need follow-up.
+
+    Finds sent emails where the recipient hasn't replied within the
+    configurable threshold (3 days for urgent, 5 days for normal).
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        List of stale threads sorted by days_since_sent DESC.
+    """
+    tracker = get_followup_tracker()
+    threads = await tracker.get_stale_threads(current_user.id)
+
+    return {
+        "threads": [t.to_dict() for t in threads],
+        "total": len(threads),
+    }

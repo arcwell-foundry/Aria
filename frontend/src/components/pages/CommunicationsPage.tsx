@@ -24,6 +24,7 @@ import { EmptyState } from '@/components/common/EmptyState';
 import { DraftDetailPage } from './DraftDetailPage';
 import { EmailDecisionsLog } from '@/components/communications/EmailDecisionsLog';
 import { LearningModeBanner } from '@/components/communications/LearningModeBanner';
+import { ContactHistoryView } from '@/components/communications/ContactHistoryView';
 import type { EmailDraftStatus, EmailDraftPurpose, ConfidenceTier, EmailDraftListItem } from '@/api/drafts';
 
 type CommunicationsView = 'drafts' | 'decisions';
@@ -262,7 +263,7 @@ function BatchConfirmDialog({
 }
 
 // Drafts List View
-function DraftsList() {
+function DraftsList({ onContactClick }: { onContactClick: (email: string) => void }) {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<EmailDraftStatus | 'all'>('all');
@@ -544,9 +545,14 @@ function DraftsList() {
                       {/* Content */}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-0.5">
-                          <span
+                          {/* Recipient name - clickable to view contact history */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onContactClick(draft.recipient_email);
+                            }}
                             className={cn(
-                              "text-sm truncate",
+                              "text-sm truncate hover:underline",
                               isPlaceholderDraft(draft)
                                 ? "font-normal italic"
                                 : "font-medium"
@@ -556,7 +562,7 @@ function DraftsList() {
                             {isPlaceholderDraft(draft)
                               ? 'Outreach Opportunity'
                               : draft.recipient_name || draft.recipient_email}
-                          </span>
+                          </button>
                           <span
                             className="font-mono text-xs"
                             style={{ color: 'var(--text-secondary)' }}
@@ -746,10 +752,26 @@ function DraftsList() {
 export function CommunicationsPage() {
   const { draftId } = useParams<{ draftId: string }>();
   const [activeView, setActiveView] = useState<CommunicationsView>('drafts');
+  const [selectedContactEmail, setSelectedContactEmail] = useState<string | null>(null);
 
   // Show detail view if draftId is present
   if (draftId) {
     return <DraftDetailPage draftId={draftId} />;
+  }
+
+  // Show contact history view if a contact is selected
+  if (selectedContactEmail) {
+    return (
+      <div
+        className="flex-1 flex flex-col h-full"
+        style={{ backgroundColor: 'var(--bg-primary)' }}
+      >
+        <ContactHistoryView
+          contactEmail={selectedContactEmail}
+          onBack={() => setSelectedContactEmail(null)}
+        />
+      </div>
+    );
   }
 
   // Show list view with toggle
@@ -781,7 +803,11 @@ export function CommunicationsPage() {
         </nav>
       </div>
 
-      {activeView === 'drafts' ? <DraftsList /> : <EmailDecisionsLog />}
+      {activeView === 'drafts' ? (
+        <DraftsList onContactClick={setSelectedContactEmail} />
+      ) : (
+        <EmailDecisionsLog onContactClick={setSelectedContactEmail} />
+      )}
     </div>
   );
 }
