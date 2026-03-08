@@ -23,6 +23,11 @@ from src.core.llm import LLMClient
 from src.core.task_types import TaskType
 from src.db.supabase import SupabaseClient
 from src.services.email_intelligence import EmailIntelligenceService
+from src.utils.sender_context import (
+    SenderContext,
+    format_context_for_prompt,
+    get_sender_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +51,7 @@ class EmailCategory(BaseModel):
     urgency: str  # URGENT, NORMAL, LOW
     topic_summary: str
     sender_relationship: dict[str, Any] | None = None  # from memory_semantic
+    sender_context: SenderContext | None = None  # strategic relationship context
     needs_draft: bool = False
     reason: str  # why this categorization
 
@@ -539,6 +545,13 @@ class EmailAnalyzer:
             user_id, sender_email
         )
 
+        # Get strategic relationship context for this sender
+        sender_context = await get_sender_context(
+            db=self._db,
+            user_id=user_id,
+            sender_email=sender_email,
+        )
+
         classification = await self._llm_classify(
             email=email,
             sender_email=sender_email,
@@ -546,6 +559,7 @@ class EmailAnalyzer:
             subject=subject,
             body=body,
             sender_relationship=sender_relationship,
+            sender_context=sender_context,
         )
 
         category = classification.get("category", "FYI")
@@ -562,7 +576,9 @@ class EmailAnalyzer:
             urgency = urgency_from_llm
 
         # Enforce category-urgency consistency rules
-        category, urgency = self._validate_category_urgency(category, urgency)
+        category, urgency = self._validate_category_urgency(
+            category, urgency, sender_context=sender_context
+        )
 
         return EmailCategory(
             email_id=email_id,
@@ -576,25 +592,59 @@ class EmailAnalyzer:
             urgency=urgency,
             topic_summary=topic_summary,
             sender_relationship=sender_relationship,
+            sender_context=sender_context,
             needs_draft=needs_draft,
             reason=reason,
         )
 
     @staticmethod
-    def _validate_category_urgency(category: str, urgency: str) -> tuple[str, str]:
+    def _validate_category_urgency(
+        category: str,
+        urgency: str,
+        sender_context: SenderContext | None = None,
+    ) -> tuple[str, str]:
         """Validate and correct category-urgency contradictions.
 
         Enforces consistency rules:
         - SKIP emails cannot be urgent (not actionable = lowest priority)
         - NEEDS_REPLY emails cannot be LOW (needs response = at least normal)
+        - Strategic contacts: SKIP → FYI (never silently skip important contacts)
+        - Strategic contacts: FYI + LOW → NORMAL (elevate visibility)
 
         Args:
             category: The email category (NEEDS_REPLY, FYI, SKIP)
             urgency: The urgency level (URGENT, NORMAL, LOW)
+            sender_context: Optional strategic relationship context
 
         Returns:
-            Tuple of (category, urgency) with urgency corrected if needed.
+            Tuple of (category, urgency) with corrections applied if needed.
         """
+        is_strategic = sender_context is not None and sender_context.is_strategic
+
+        # Strategic contact guardrails (safety net, not primary mechanism)
+        if is_strategic:
+            if category == "SKIP":
+                # Strategic contacts should never be silently skipped
+                logger.info(
+                    "EMAIL_ANALYZER: Overriding SKIP to FYI for strategic contact "
+                    "(%s - %s)",
+                    sender_context.entity_name,
+                    sender_context.relationship_type,
+                )
+                category = "FYI"
+                urgency = "NORMAL"  # Upgrade urgency too
+
+            elif category == "FYI" and urgency == "LOW":
+                # Elevate visibility for strategic contacts
+                logger.info(
+                    "EMAIL_ANALYZER: Upgrading urgency LOW to NORMAL for strategic contact "
+                    "(%s - %s)",
+                    sender_context.entity_name,
+                    sender_context.relationship_type,
+                )
+                urgency = "NORMAL"
+
+        # Standard category-urgency consistency rules
         if category == "SKIP":
             # Skip = not actionable = cannot be urgent
             if urgency != "LOW":
@@ -1717,6 +1767,7 @@ class EmailAnalyzer:
         subject: str,
         body: str,
         sender_relationship: dict[str, Any] | None,
+        sender_context: SenderContext | None = None,
     ) -> dict[str, Any]:
         """Use LLM to classify an email.
 
@@ -1727,6 +1778,7 @@ class EmailAnalyzer:
             subject: Email subject.
             body: Email body text.
             sender_relationship: Known relationship context (or None).
+            sender_context: Strategic relationship context from monitored_entities.
 
         Returns:
             Dict with category, urgency, topic_summary, needs_draft, reason.
@@ -1744,6 +1796,13 @@ class EmailAnalyzer:
                 f"{interactions} prior interactions."
             )
 
+        # Add strategic sender context if available
+        strategic_context = ""
+        if sender_context and sender_context.is_strategic:
+            strategic_context = format_context_for_prompt(
+                sender_context, sender_name, sender_email
+            )
+
         # Check if user is in To or CC
         to_list = email.get("to", [])
         cc_list = email.get("cc", [])
@@ -1754,7 +1813,7 @@ class EmailAnalyzer:
             f"From: {sender_name} <{sender_email}>\n"
             f"Subject: {subject}\n"
             f"Recipients: {recipient_context}\n"
-            f"{relationship_context}\n\n"
+            f"{relationship_context}{strategic_context}\n\n"
             f"Body:\n{body_truncated}\n\n"
             "Classify as exactly one JSON object with these fields:\n"
             "{\n"

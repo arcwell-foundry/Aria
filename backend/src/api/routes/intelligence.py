@@ -2474,3 +2474,478 @@ async def get_conference_detail(
             status_code=500,
             detail="Failed to retrieve conference details.",
         ) from e
+
+
+# ==============================================================================
+# INTELLIGENCE PAGE V2 ENDPOINTS
+# ==============================================================================
+
+
+class WatchTopicRequest(BaseModel):
+    """Request model for adding a watch topic."""
+
+    topic_type: str = Field(default="keyword", description="Type: keyword, company, or therapeutic_area")
+    topic_value: str = Field(..., min_length=1, max_length=500, description="The topic to watch")
+    description: str | None = Field(default=None, description="Optional description")
+
+
+class WatchTopicResponse(BaseModel):
+    """Response model for a watch topic."""
+
+    id: str
+    topic_type: str
+    topic_value: str
+    description: str | None
+    signal_count: int
+    is_active: bool
+    created_at: str
+    last_matched_at: str | None
+
+
+class WatchTopicsListResponse(BaseModel):
+    """Response model for listing watch topics."""
+
+    topics: list[WatchTopicResponse]
+    count: int
+
+
+class CompetitorActivityItem(BaseModel):
+    """Model for a single competitor's activity."""
+
+    competitor: str
+    signal_count: int
+    signals: list[dict[str, Any]]
+
+
+class CompetitorActivityResponse(BaseModel):
+    """Response model for competitor activity timeline."""
+
+    activity: list[CompetitorActivityItem]
+    days: int
+
+
+class CRMStatusResponse(BaseModel):
+    """Response model for CRM connection status."""
+
+    connected: bool
+    type: str | None = None
+
+
+class PrioritySignalResponse(BaseModel):
+    """Response model for priority signals."""
+
+    id: str
+    headline: str
+    company_name: str
+    signal_type: str
+    relevance_score: float
+    detected_at: str
+    linked_insight_id: str | None
+    linked_action_summary: str | None
+
+
+class PrioritySignalsResponse(BaseModel):
+    """Response model for priority signals list."""
+
+    signals: list[PrioritySignalResponse]
+    hours: int
+
+
+# --- Watch Topics ---
+
+
+@router.post("/watch-topics", response_model=WatchTopicResponse)
+async def add_watch_topic(
+    current_user: CurrentUser,
+    request: WatchTopicRequest,
+) -> WatchTopicResponse:
+    """Add a custom watch topic for the user."""
+    try:
+        from src.intelligence.watch_topics_service import WatchTopicsService
+
+        db = get_supabase_client()
+        service = WatchTopicsService(db)
+        result = await service.add_topic(
+            user_id=str(current_user.id),
+            topic_type=request.topic_type,
+            topic_value=request.topic_value,
+            description=request.description,
+        )
+
+        topic = result.get("topic", {})
+        return WatchTopicResponse(
+            id=str(topic.get("id", "")),
+            topic_type=topic.get("topic_type", "keyword"),
+            topic_value=topic.get("topic_value", ""),
+            description=topic.get("description"),
+            signal_count=topic.get("signal_count", 0),
+            is_active=topic.get("is_active", True),
+            created_at=topic.get("created_at", ""),
+            last_matched_at=topic.get("last_matched_at"),
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Failed to add watch topic",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to add watch topic.",
+        ) from e
+
+
+@router.get("/watch-topics", response_model=WatchTopicsListResponse)
+async def get_watch_topics(
+    current_user: CurrentUser,
+) -> WatchTopicsListResponse:
+    """Get user's watch topics."""
+    try:
+        db = get_supabase_client()
+        result = (
+            db.table("watch_topics")
+            .select("*")
+            .eq("user_id", str(current_user.id))
+            .eq("is_active", True)
+            .order("created_at", desc=True)
+            .execute()
+        )
+
+        topics = [
+            WatchTopicResponse(
+                id=str(t["id"]),
+                topic_type=t.get("topic_type", "keyword"),
+                topic_value=t.get("topic_value", ""),
+                description=t.get("description"),
+                signal_count=t.get("signal_count", 0),
+                is_active=t.get("is_active", True),
+                created_at=t.get("created_at", ""),
+                last_matched_at=t.get("last_matched_at"),
+            )
+            for t in (result.data or [])
+        ]
+
+        return WatchTopicsListResponse(topics=topics, count=len(topics))
+
+    except Exception as e:
+        logger.exception(
+            "Failed to get watch topics",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve watch topics.",
+        ) from e
+
+
+@router.delete("/watch-topics/{topic_id}", status_code=204)
+async def delete_watch_topic(
+    topic_id: str,
+    current_user: CurrentUser,
+) -> None:
+    """Remove a watch topic (soft delete)."""
+    try:
+        db = get_supabase_client()
+        db.table("watch_topics").update({"is_active": False}).eq(
+            "id", topic_id
+        ).eq("user_id", str(current_user.id)).execute()
+
+    except Exception as e:
+        logger.exception(
+            "Failed to delete watch topic",
+            extra={"user_id": current_user.id, "topic_id": topic_id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete watch topic.",
+        ) from e
+
+
+# --- Competitor Activity Timeline ---
+
+
+@router.get("/competitor-activity", response_model=CompetitorActivityResponse)
+async def get_competitor_activity(
+    current_user: CurrentUser,
+    days: int = Query(30, ge=1, le=90, description="Days to look back"),
+) -> CompetitorActivityResponse:
+    """Get competitor signal activity timeline."""
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        db = get_supabase_client()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        # Get competitor names from battle cards
+        cards = db.table("battle_cards").select("competitor_name").execute()
+        competitors = [c["competitor_name"] for c in (cards.data or [])]
+
+        activity: list[CompetitorActivityItem] = []
+        for comp in competitors:
+            signals = (
+                db.table("market_signals")
+                .select("id, headline, signal_type, detected_at, is_cluster_primary")
+                .ilike("company_name", f"%{comp}%")
+                .gte("detected_at", cutoff)
+                .order("detected_at", desc=True)
+                .execute()
+            )
+
+            # Only primary signals (deduped)
+            primary_signals = [
+                s for s in (signals.data or []) if s.get("is_cluster_primary", True)
+            ]
+
+            activity.append(
+                CompetitorActivityItem(
+                    competitor=comp,
+                    signal_count=len(primary_signals),
+                    signals=[
+                        {
+                            "headline": s["headline"][:120],
+                            "signal_type": s["signal_type"],
+                            "detected_at": s["detected_at"],
+                        }
+                        for s in primary_signals[:5]  # Top 5 most recent
+                    ],
+                )
+            )
+
+        # Sort by signal count descending
+        activity.sort(key=lambda x: x.signal_count, reverse=True)
+
+        return CompetitorActivityResponse(activity=activity, days=days)
+
+    except Exception as e:
+        logger.exception(
+            "Failed to get competitor activity",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve competitor activity.",
+        ) from e
+
+
+# --- CRM Status ---
+
+
+@router.get("/crm-status", response_model=CRMStatusResponse)
+async def get_crm_status(
+    current_user: CurrentUser,
+) -> CRMStatusResponse:
+    """Check if user has CRM connected."""
+    try:
+        db = get_supabase_client()
+        integration = (
+            db.table("user_integrations")
+            .select("integration_type, status")
+            .eq("user_id", str(current_user.id))
+            .in_("integration_type", ["salesforce", "hubspot", "dynamics"])
+            .eq("status", "active")
+            .limit(1)
+            .execute()
+        )
+
+        return CRMStatusResponse(
+            connected=bool(integration.data),
+            type=integration.data[0]["integration_type"] if integration.data else None,
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Failed to get CRM status",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve CRM status.",
+        ) from e
+
+
+# --- Battle Card Detail (V2) ---
+
+
+@router.get("/battle-cards/{card_id}")
+async def get_battle_card_detail_v2(
+    card_id: str,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Get full battle card with recent signals and insights."""
+    try:
+        db = get_supabase_client()
+
+        card = (
+            db.table("battle_cards")
+            .select("*")
+            .eq("id", card_id)
+            .limit(1)
+            .execute()
+        )
+        if not card.data:
+            raise HTTPException(status_code=404, detail="Battle card not found")
+
+        competitor_name = card.data[0]["competitor_name"]
+
+        # Recent signals for this competitor
+        signals = (
+            db.table("market_signals")
+            .select("id, headline, signal_type, detected_at")
+            .ilike("company_name", f"%{competitor_name}%")
+            .order("detected_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+
+        # Insights about this competitor
+        insights = (
+            db.table("jarvis_insights")
+            .select("id, classification, content, confidence, priority_label")
+            .eq("user_id", str(current_user.id))
+            .ilike("content", f"%{competitor_name}%")
+            .order("created_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+
+        return {
+            "card": card.data[0],
+            "signals": signals.data or [],
+            "insights": insights.data or [],
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(
+            "Failed to get battle card detail",
+            extra={"user_id": current_user.id, "card_id": card_id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve battle card details.",
+        ) from e
+
+
+# --- Priority Signals ---
+
+
+@router.get("/signals/priority", response_model=PrioritySignalsResponse)
+async def get_priority_signals(
+    current_user: CurrentUser,
+    hours: int = Query(48, ge=1, le=168, description="Hours to look back"),
+    limit: int = Query(3, ge=1, le=10, description="Maximum signals to return"),
+) -> PrioritySignalsResponse:
+    """Get top priority signals from the last N hours."""
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        db = get_supabase_client()
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+        result = (
+            db.table("market_signals")
+            .select(
+                "id, headline, company_name, signal_type, relevance_score, detected_at, "
+                "linked_insight_id, linked_action_summary, is_cluster_primary"
+            )
+            .eq("user_id", str(current_user.id))
+            .gte("detected_at", cutoff)
+            .eq("is_cluster_primary", True)
+            .order("relevance_score", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        signals = [
+            PrioritySignalResponse(
+                id=str(s["id"]),
+                headline=s["headline"],
+                company_name=s.get("company_name", ""),
+                signal_type=s.get("signal_type", "news"),
+                relevance_score=s.get("relevance_score", 0.5),
+                detected_at=s["detected_at"],
+                linked_insight_id=s.get("linked_insight_id"),
+                linked_action_summary=s.get("linked_action_summary"),
+            )
+            for s in (result.data or [])
+        ]
+
+        return PrioritySignalsResponse(signals=signals, hours=hours)
+
+    except Exception as e:
+        logger.exception(
+            "Failed to get priority signals",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve priority signals.",
+        ) from e
+
+
+# --- Therapeutic Trends with Narratives (V2) ---
+
+
+@router.get("/therapeutic-trends-v2")
+async def get_therapeutic_trends_with_narratives(
+    current_user: CurrentUser,
+    days: int = Query(30, ge=1, le=90, description="Days to look back"),
+) -> dict[str, Any]:
+    """Get therapeutic/manufacturing trends with strategic narratives and goal alignment."""
+    try:
+        db = get_supabase_client()
+
+        # Get user's active goals for context
+        goals_result = (
+            db.table("goals")
+            .select("id, title")
+            .eq("user_id", str(current_user.id))
+            .in_("status", ["active", "in_progress"])
+            .execute()
+        )
+        goals = goals_result.data or []
+
+        # Get therapeutic trends
+        from src.intelligence.therapeutic_area_intelligence import (
+            detect_therapeutic_trends,
+            generate_trend_narrative,
+        )
+
+        trends = await detect_therapeutic_trends(
+            supabase_client=db,
+            user_id=str(current_user.id),
+            days=days,
+            min_signals=3,
+        )
+
+        # Generate narratives for top trends and check goal alignment
+        for trend in trends[:7]:  # Top 7
+            try:
+                narrative = await generate_trend_narrative(trend, goals)
+                trend["narrative"] = narrative
+            except Exception:
+                trend["narrative"] = ""
+
+            # Check goal alignment
+            if goals:
+                for goal in goals:
+                    goal_words = set(goal.get("title", "").lower().split())
+                    trend_words = set(
+                        trend.get("name", "").lower().replace("_", " ").split()
+                    )
+                    if len(goal_words & trend_words) >= 1:
+                        trend["aligned_goal"] = goal["title"]
+                        break
+
+        return {"trends": trends, "goals_count": len(goals)}
+
+    except Exception as e:
+        logger.exception(
+            "Failed to get therapeutic trends with narratives",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve therapeutic trends.",
+        ) from e
