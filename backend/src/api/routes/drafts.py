@@ -61,6 +61,51 @@ class BatchActionResponse(BaseModel):
     failed: int
 
 
+class DraftCountsResponse(BaseModel):
+    """Response model for draft counts."""
+
+    pending_review: int = Field(..., description="Drafts awaiting user review")
+    draft: int = Field(..., description="Drafts in initial draft state")
+    total_actionable: int = Field(..., description="Total actionable drafts (pending_review + draft)")
+
+
+@router.get("/counts", response_model=DraftCountsResponse)
+async def get_draft_counts(current_user: CurrentUser) -> dict[str, int]:
+    """Get counts of actionable drafts for the current user.
+
+    Returns counts of drafts in 'pending_review' and 'draft' status,
+    used for sidebar badge display.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        Draft counts by status.
+    """
+    db = SupabaseClient.get_client()
+    result = (
+        db.table("email_drafts")
+        .select("status")
+        .eq("user_id", current_user.id)
+        .in_("status", ["pending_review", "draft"])
+        .execute()
+    )
+
+    pending_review = 0
+    draft_count = 0
+    for row in result.data or []:
+        if row["status"] == "pending_review":
+            pending_review += 1
+        elif row["status"] == "draft":
+            draft_count += 1
+
+    return {
+        "pending_review": pending_review,
+        "draft": draft_count,
+        "total_actionable": pending_review + draft_count,
+    }
+
+
 @router.post("/email", response_model=EmailDraftResponse, status_code=status.HTTP_201_CREATED)
 async def create_email_draft(
     current_user: CurrentUser, request: EmailDraftCreate
@@ -284,6 +329,253 @@ def _format_original_email(scan_log_entry: dict[str, Any]) -> dict[str, Any]:
         "subject": scan_log_entry.get("subject", ""),
         "snippet": scan_log_entry.get("snippet", ""),
     }
+
+
+class OriginalEmailResponse(BaseModel):
+    """Response model for fetching the original email of a reply draft."""
+
+    snippet: str = Field("", description="Short preview of the email body")
+    full_body: str | None = Field(None, description="Full email body HTML/text, only when requested")
+    has_full_body: bool = Field(False, description="Whether full_body was fetched")
+    subject: str = Field("", description="Original email subject")
+    from_field: str = Field("", description="Sender display string", alias="from")
+    sender_email: str = Field("", description="Sender email address")
+    date: str | None = Field(None, description="When the email was received/scanned")
+
+    model_config = {"populate_by_name": True}
+
+
+@router.get("/{draft_id}/original-email", response_model=OriginalEmailResponse)
+async def get_original_email(
+    current_user: CurrentUser,
+    draft_id: str,
+    full: bool = Query(False, description="Fetch full email body from email provider"),
+) -> dict[str, Any]:
+    """Get the original email for a reply draft.
+
+    By default returns just the snippet from email_scan_log.
+    Pass ?full=true to fetch the complete email body from the user's
+    email provider via Composio (on-demand, not cached).
+
+    Args:
+        current_user: The authenticated user.
+        draft_id: The ID of the reply draft.
+        full: Whether to fetch the full email body.
+
+    Returns:
+        Original email data with snippet and optionally full body.
+
+    Raises:
+        HTTPException: If draft not found or not a reply draft.
+    """
+    db = SupabaseClient.get_client()
+
+    # Get the draft
+    draft_result = (
+        db.table("email_drafts")
+        .select("id, user_id, purpose, original_email_id, thread_id, in_reply_to, recipient_email")
+        .eq("id", draft_id)
+        .eq("user_id", current_user.id)
+        .limit(1)
+        .execute()
+    )
+
+    if not draft_result.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Draft {draft_id} not found",
+        )
+
+    draft = draft_result.data[0]
+
+    if draft.get("purpose") != "reply":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This endpoint is only for reply drafts",
+        )
+
+    # Find the original email in email_scan_log
+    scan_log_entry = await _find_scan_log_entry(draft, current_user.id)
+
+    if not scan_log_entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Original email not found in scan log",
+        )
+
+    # Format base response from scan log
+    sender_name = scan_log_entry.get("sender_name")
+    sender_email_addr = scan_log_entry.get("sender_email", "")
+    from_field = f"{sender_name} <{sender_email_addr}>" if sender_name else sender_email_addr
+
+    response: dict[str, Any] = {
+        "snippet": scan_log_entry.get("snippet", ""),
+        "full_body": None,
+        "has_full_body": False,
+        "subject": scan_log_entry.get("subject", ""),
+        "from": from_field,
+        "sender_email": sender_email_addr,
+        "date": scan_log_entry.get("scanned_at"),
+    }
+
+    # If full body requested, fetch from email provider via Composio
+    if full:
+        email_id = scan_log_entry.get("email_id")
+        if email_id:
+            full_body = await _fetch_full_email_body(current_user.id, email_id)
+            if full_body:
+                response["full_body"] = full_body
+                response["has_full_body"] = True
+            else:
+                logger.warning(
+                    "Could not fetch full email body",
+                    extra={"user_id": current_user.id, "email_id": email_id},
+                )
+
+    return response
+
+
+async def _find_scan_log_entry(
+    draft: dict[str, Any], user_id: str
+) -> dict[str, Any] | None:
+    """Find the email_scan_log entry for a reply draft.
+
+    Uses the same lookup strategies as _get_original_email_for_draft
+    but also returns email_id for full body fetching.
+    """
+    db = SupabaseClient.get_client()
+    select_fields = "email_id, sender_email, sender_name, subject, snippet, scanned_at"
+
+    original_email_id = draft.get("original_email_id")
+    thread_id = draft.get("thread_id")
+    recipient_email = draft.get("recipient_email")
+
+    # Strategy 1: Direct lookup by original_email_id
+    if original_email_id:
+        result = (
+            db.table("email_scan_log")
+            .select(select_fields)
+            .eq("user_id", user_id)
+            .eq("email_id", original_email_id)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            return result.data[0]
+
+    # Strategy 2: Find by thread_id
+    if thread_id:
+        result = (
+            db.table("email_scan_log")
+            .select(select_fields)
+            .eq("user_id", user_id)
+            .eq("thread_id", thread_id)
+            .eq("category", "NEEDS_REPLY")
+            .order("scanned_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            return result.data[0]
+
+    # Strategy 3: Match by recipient_email being the sender
+    if recipient_email:
+        result = (
+            db.table("email_scan_log")
+            .select(select_fields)
+            .eq("user_id", user_id)
+            .eq("sender_email", recipient_email)
+            .eq("category", "NEEDS_REPLY")
+            .order("scanned_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            return result.data[0]
+
+    return None
+
+
+async def _fetch_full_email_body(user_id: str, email_id: str) -> str | None:
+    """Fetch the full email body from the user's email provider via Composio.
+
+    Args:
+        user_id: The user ID.
+        email_id: The message ID from the email provider.
+
+    Returns:
+        Full email body as HTML/text string, or None on failure.
+    """
+    try:
+        db = SupabaseClient.get_client()
+
+        # Get user's email integration (prefer Outlook, fall back to Gmail)
+        integration = (
+            db.table("user_integrations")
+            .select("integration_type, composio_connection_id")
+            .eq("user_id", user_id)
+            .eq("integration_type", "outlook")
+            .eq("status", "active")
+            .limit(1)
+            .execute()
+        )
+
+        if not integration.data:
+            integration = (
+                db.table("user_integrations")
+                .select("integration_type, composio_connection_id")
+                .eq("user_id", user_id)
+                .eq("integration_type", "gmail")
+                .eq("status", "active")
+                .limit(1)
+                .execute()
+            )
+
+        if not integration.data:
+            logger.warning("No active email integration for user %s", user_id)
+            return None
+
+        provider = integration.data[0]["integration_type"]
+        connection_id = integration.data[0]["composio_connection_id"]
+
+        from src.integrations.oauth import get_oauth_client
+
+        oauth_client = get_oauth_client()
+
+        if provider == "outlook":
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
+                action="OUTLOOK_GET_MESSAGE",
+                params={"message_id": email_id},
+                user_id=user_id,
+            )
+            if response.get("successful") and response.get("data"):
+                body_data = response["data"].get("body", {})
+                return body_data.get("content", "")
+        else:
+            response = oauth_client.execute_action_sync(
+                connection_id=connection_id,
+                action="GMAIL_GET_MESSAGE",
+                params={"message_id": email_id},
+                user_id=user_id,
+            )
+            if response.get("successful") and response.get("data"):
+                msg = response["data"]
+                return msg.get("body", msg.get("textBody", msg.get("snippet", "")))
+
+        logger.warning(
+            "Failed to fetch email from provider",
+            extra={"user_id": user_id, "email_id": email_id, "provider": provider},
+        )
+        return None
+
+    except Exception as e:
+        logger.exception(
+            "Error fetching full email body: %s",
+            e,
+            extra={"user_id": user_id, "email_id": email_id},
+        )
+        return None
 
 
 @router.put("/{draft_id}", response_model=EmailDraftResponse)

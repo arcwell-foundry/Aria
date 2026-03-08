@@ -208,6 +208,10 @@ class EmailDraftListResponse(BaseModel):
     previous_versions_count: int = Field(
         0, description="Number of older draft versions for the same thread (0 = no older versions)"
     )
+    # Priority scoring for strategic sorting
+    priority_score: int | None = Field(
+        None, description="Computed priority score for sorting (higher = more important)"
+    )
 
 
 class EmailRegenerateRequest(BaseModel):

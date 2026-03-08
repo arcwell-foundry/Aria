@@ -9,6 +9,7 @@ import {
   sendDraft,
   saveDraftToClient,
   batchDraftAction,
+  getDraftCounts,
   type CreateEmailDraftRequest,
   type UpdateEmailDraftRequest,
   type RegenerateDraftRequest,
@@ -19,11 +20,23 @@ import {
 // Query keys factory
 export const draftKeys = {
   all: ["drafts"] as const,
+  counts: () => [...draftKeys.all, "counts"] as const,
   lists: () => [...draftKeys.all, "list"] as const,
   list: (status?: EmailDraftStatus) => [...draftKeys.lists(), { status }] as const,
   details: () => [...draftKeys.all, "detail"] as const,
   detail: (id: string) => [...draftKeys.details(), id] as const,
 };
+
+// Pending draft count for sidebar badge (polls every 60s)
+export function usePendingDraftCount() {
+  return useQuery({
+    queryKey: draftKeys.counts(),
+    queryFn: getDraftCounts,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 30_000,
+  });
+}
 
 // List drafts
 export function useDrafts(status?: EmailDraftStatus) {
@@ -50,6 +63,7 @@ export function useCreateDraft() {
     mutationFn: (data: CreateEmailDraftRequest) => createDraft(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: draftKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: draftKeys.counts() });
     },
   });
 }
@@ -78,6 +92,7 @@ export function useDeleteDraft() {
     mutationFn: (draftId: string) => deleteDraft(draftId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: draftKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: draftKeys.counts() });
     },
   });
 }
@@ -107,6 +122,7 @@ export function useSendDraft() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: draftKeys.lists() });
       queryClient.invalidateQueries({ queryKey: draftKeys.detail(result.id) });
+      queryClient.invalidateQueries({ queryKey: draftKeys.counts() });
     },
   });
 }
@@ -131,6 +147,7 @@ export function useBatchDraftAction() {
     mutationFn: (data: BatchActionRequest) => batchDraftAction(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: draftKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: draftKeys.counts() });
     },
   });
 }

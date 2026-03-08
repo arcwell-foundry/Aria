@@ -35,6 +35,7 @@ import { wsManager } from '@/core/WebSocketManager';
 import { useAutonomyStore } from '@/stores/autonomyStore';
 import { useActionQueueStore } from '@/stores/actionQueueStore';
 import { useConversationStore } from '@/stores/conversationStore';
+import { usePendingDraftCount } from '@/hooks/useDrafts';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -234,15 +235,21 @@ export function Sidebar({ badges = {}, isARIAActive }: SidebarProps) {
   // Read WS-pushed pending action count for immediate badge updates
   const wsPendingCount = useActionQueueStore((s) => s.pendingActions.length);
 
-  // Merge prop badges with event-driven badges and WS pending count
+  // Pending draft count for Communications badge
+  const { data: draftCounts } = usePendingDraftCount();
+  const pendingDraftCount = draftCounts?.total_actionable ?? 0;
+
+  // Merge prop badges with event-driven badges, WS pending count, and draft count
   const mergedBadges = useMemo<Partial<Record<SidebarItem, number>>>(
     () => ({
       ...badges,
       ...eventBadges,
       // WS pending count overrides polling-based count when > 0
       ...(wsPendingCount > 0 ? { actions: wsPendingCount } : {}),
+      // Pending draft count for Communications badge
+      ...(pendingDraftCount > 0 ? { communications: pendingDraftCount } : {}),
     }),
-    [badges, eventBadges, wsPendingCount],
+    [badges, eventBadges, wsPendingCount, pendingDraftCount],
   );
 
   // ---------------------------------------------------------------------------

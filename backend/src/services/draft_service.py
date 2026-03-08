@@ -18,6 +18,7 @@ from src.onboarding.personality_calibrator import PersonalityCalibrator
 from src.prompts.email_writing_framework import ELITE_EMAIL_FRAMEWORK
 from src.services import notification_integration
 from src.services.activity_service import ActivityService
+from src.utils.sender_context import SenderContext, get_sender_context
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +244,124 @@ class DraftService:
     # These are "terminal" states that users don't need to see in their active drafts
     _EXCLUDED_STATUSES = ("dismissed",)
 
+    # Relationship type → priority score mapping
+    _RELATIONSHIP_SCORES: dict[str, int] = {
+        "investor": 50,
+        "board_member": 50,
+        "partner": 30,
+        "customer": 30,
+        "advisor": 30,
+        "known_contact": 10,
+    }
+
+    async def _compute_priority_scores(
+        self,
+        drafts: list[dict[str, Any]],
+        user_id: str,
+    ) -> None:
+        """Compute priority scores for drafts in-place.
+
+        Scoring factors:
+        - Sender relationship: investor/board +50, partner/customer +30, known +10
+        - Email urgency from scan log: URGENT +40, NORMAL +10
+        - Age penalty (older drafts need attention): >3d +20, >1d +10
+        - Draft origin type: NEEDS_REPLY +15, competitive_displacement +5
+        """
+        if not drafts:
+            return
+
+        try:
+            client = SupabaseClient.get_client()
+            sender_cache: dict[tuple[str, str], SenderContext] = {}
+
+            # Batch-fetch urgency data from email_scan_log for all drafts with original_email_id
+            original_ids = [
+                d.get("original_email_id")
+                for d in drafts
+                if d.get("original_email_id")
+            ]
+            urgency_map: dict[str, str] = {}
+            if original_ids:
+                try:
+                    result = (
+                        client.table("email_scan_log")
+                        .select("email_id, urgency")
+                        .eq("user_id", user_id)
+                        .in_("email_id", original_ids)
+                        .execute()
+                    )
+                    if result.data:
+                        for row in result.data:
+                            if isinstance(row, dict):
+                                eid = row.get("email_id", "")
+                                urg = row.get("urgency", "NORMAL")
+                                urgency_map[eid] = str(urg)
+                except Exception:
+                    logger.debug("Priority scoring: urgency lookup failed, skipping")
+
+            now = datetime.now(UTC)
+
+            for draft in drafts:
+                score = 0
+
+                # a. Sender relationship scoring
+                recipient_email = draft.get("recipient_email", "")
+                if recipient_email:
+                    try:
+                        ctx = await get_sender_context(
+                            client, user_id, recipient_email, cache=sender_cache
+                        )
+                        if ctx:
+                            score += self._RELATIONSHIP_SCORES.get(
+                                ctx.relationship_type, 0
+                            )
+                    except Exception:
+                        pass  # Non-critical, skip
+
+                # b. Urgency from original email
+                original_eid = draft.get("original_email_id")
+                if original_eid:
+                    urgency = urgency_map.get(original_eid, "NORMAL")
+                    if urgency == "URGENT":
+                        score += 40
+                    elif urgency == "NORMAL":
+                        score += 10
+
+                # c. Age penalty (older drafts need attention)
+                created_str = draft.get("created_at")
+                if created_str:
+                    try:
+                        if isinstance(created_str, str):
+                            created_at = datetime.fromisoformat(
+                                created_str.replace("Z", "+00:00")
+                            )
+                        else:
+                            created_at = created_str
+                        age_days = (now - created_at).total_seconds() / 86400
+                        if age_days > 3:
+                            score += 20
+                        elif age_days > 1:
+                            score += 10
+                    except (ValueError, TypeError):
+                        pass
+
+                # d. Draft type scoring
+                draft_type = draft.get("draft_type", "")
+                if draft_type == "reply":
+                    # Reply drafts originate from NEEDS_REPLY classification
+                    score += 15
+                elif draft_type == "competitive_displacement":
+                    score += 5
+
+                draft["priority_score"] = score
+
+        except Exception:
+            logger.exception("Failed to compute priority scores")
+            # Ensure all drafts still get a default score
+            for draft in drafts:
+                if "priority_score" not in draft:
+                    draft["priority_score"] = 0
+
     async def list_drafts(
         self,
         user_id: str,
@@ -362,11 +481,28 @@ class DraftService:
 
                 grouped_results.append(draft)
 
-                # Respect the original limit
-                if len(grouped_results) >= limit:
-                    break
+            # Compute priority scores for all grouped results
+            await self._compute_priority_scores(grouped_results, user_id)
 
-            return grouped_results
+            # Sort by priority_score DESC, then created_at DESC as tiebreaker
+            # Placeholder drafts (pending_review with placeholder emails) stay at bottom
+            def _sort_key(d: dict[str, Any]) -> tuple[int, int, str]:
+                # Placeholder detection: pending_review with placeholder-like emails
+                recipient = d.get("recipient_email", "")
+                is_placeholder = (
+                    d.get("status") == "pending_review"
+                    and "placeholder" in recipient.lower()
+                )
+                return (
+                    0 if is_placeholder else 1,  # non-placeholders first
+                    d.get("priority_score", 0),   # higher score first
+                    d.get("created_at", ""),       # newer first (ISO string sort)
+                )
+
+            grouped_results.sort(key=_sort_key, reverse=True)
+
+            # Apply limit after sorting
+            return grouped_results[:limit]
         except Exception:
             logger.exception("Failed to list drafts")
             return []

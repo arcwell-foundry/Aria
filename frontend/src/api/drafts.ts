@@ -88,6 +88,8 @@ export interface EmailDraftListItem {
   // Draft grouping by thread
   thread_id?: string;
   previous_versions_count?: number; // Number of older draft versions for the same thread
+  // Priority scoring
+  priority_score?: number;
 }
 
 // Request types
@@ -119,6 +121,18 @@ export interface SendDraftResponse {
   status: EmailDraftStatus;
   sent_at?: string;
   error_message?: string;
+}
+
+// Draft counts for sidebar badge
+export interface DraftCounts {
+  pending_review: number;
+  draft: number;
+  total_actionable: number;
+}
+
+export async function getDraftCounts(): Promise<DraftCounts> {
+  const response = await apiClient.get<DraftCounts>("/drafts/counts");
+  return response.data;
 }
 
 // API functions
@@ -254,6 +268,31 @@ export async function batchDraftAction(
   const response = await apiClient.post<BatchActionResponse>(
     "/drafts/batch-action",
     data
+  );
+  return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// Original Email - Full body fetch for reply drafts
+// ---------------------------------------------------------------------------
+
+export interface OriginalEmailFullResponse {
+  snippet: string;
+  full_body: string | null;
+  has_full_body: boolean;
+  subject: string;
+  from: string;
+  sender_email: string;
+  date: string | null;
+}
+
+export async function getOriginalEmail(
+  draftId: string,
+  full = false
+): Promise<OriginalEmailFullResponse> {
+  const params = full ? "?full=true" : "";
+  const response = await apiClient.get<OriginalEmailFullResponse>(
+    `/drafts/${draftId}/original-email${params}`
   );
   return response.data;
 }
