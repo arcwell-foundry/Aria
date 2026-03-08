@@ -75,6 +75,7 @@ export interface EmailDraftListItem {
   recipient_email: string;
   recipient_name?: string;
   subject: string;
+  body?: string;
   purpose: EmailDraftPurpose;
   tone: EmailDraftTone;
   status: EmailDraftStatus;

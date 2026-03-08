@@ -187,6 +187,7 @@ class EmailDraftListResponse(BaseModel):
     recipient_email: str
     recipient_name: str | None
     subject: str
+    body: str | None = Field(None, description="Full email body (used to generate preview)")
     purpose: EmailDraftPurpose
     tone: EmailDraftTone
     status: EmailDraftStatus

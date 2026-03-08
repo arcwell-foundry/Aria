@@ -99,6 +99,52 @@ function formatRelativeTime(dateString: string): string {
   return date.toLocaleDateString();
 }
 
+// Generate a clean preview from email body
+function generateBodyPreview(body: string | undefined, maxLength = 100): string | null {
+  if (!body) return null;
+
+  // Strip HTML tags
+  let text = body.replace(/<[^>]*>/g, ' ');
+
+  // Decode common HTML entities
+  text = text
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+  // Remove common greeting patterns
+  text = text.replace(/^(Hi\s*,?\s*|Hello\s*,?\s*|Dear\s+[^,]+,?\s*)/i, '');
+
+  // Remove common signature patterns (everything after common sign-offs)
+  const signOffPatterns = [
+    /\s*(Thanks?\s*,?\s*|Best\s*(regards?)?,?\s*|Regards,?\s*|Sincerely,?\s*|Cheers,?\s*|Warmly,?\s*).*/is,
+    /\s*--\s*$/m,
+  ];
+
+  for (const pattern of signOffPatterns) {
+    const match = text.match(pattern);
+    if (match && match.index !== undefined && match.index < text.length * 0.6) {
+      // Only trim if sign-off is in the latter half
+      text = text.substring(0, match.index);
+    }
+  }
+
+  // Normalize whitespace and trim
+  text = text.replace(/\s+/g, ' ').trim();
+
+  if (!text) return null;
+
+  // Truncate to max length
+  if (text.length > maxLength) {
+    return text.substring(0, maxLength).trim() + '...';
+  }
+
+  return text || null;
+}
+
 // Skeleton for loading state
 function DraftsSkeleton() {
   return (
@@ -301,6 +347,14 @@ function DraftsList() {
                       >
                         {draft.subject}
                       </p>
+                      {generateBodyPreview(draft.body) && (
+                        <p
+                          className="text-xs truncate mt-0.5"
+                          style={{ color: 'var(--text-tertiary, var(--text-secondary))', opacity: 0.7 }}
+                        >
+                          {generateBodyPreview(draft.body)}
+                        </p>
+                      )}
                     </div>
                   </div>
 
