@@ -346,12 +346,12 @@ function DraftsList() {
                         style={{ color: 'var(--text-secondary)' }}
                       >
                         {draft.subject}
-                        {draft.previous_versions_count && draft.previous_versions_count > 0 && (
+                        {(draft.previous_versions_count ?? 0) > 0 && (
                           <span
                             className="ml-2 text-xs"
                             style={{ color: 'var(--text-tertiary, var(--text-secondary))', opacity: 0.7 }}
                           >
-                            ({draft.previous_versions_count} previous version{draft.previous_versions_count > 1 ? 's' : ''})
+                            ({draft.previous_versions_count!} previous version{draft.previous_versions_count! > 1 ? 's' : ''})
                           </span>
                         )}
                       </p>
