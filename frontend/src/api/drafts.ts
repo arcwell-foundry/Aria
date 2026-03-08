@@ -32,8 +32,8 @@ export interface OriginalEmail {
   sender_name?: string;
   sender_email: string;
   date: string;
-  subject: string;
-  snippet: string;
+  subject: string | null;
+  snippet: string | null;
 }
 
 export interface EmailDraft {
@@ -277,10 +277,10 @@ export async function batchDraftAction(
 // ---------------------------------------------------------------------------
 
 export interface OriginalEmailFullResponse {
-  snippet: string;
+  snippet: string | null;
   full_body: string | null;
   has_full_body: boolean;
-  subject: string;
+  subject: string | null;
   from: string;
   sender_email: string;
   date: string | null;

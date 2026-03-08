@@ -333,7 +333,7 @@ def _format_original_email(scan_log_entry: dict[str, Any]) -> dict[str, Any]:
         Formatted dictionary with from, date, subject, snippet.
     """
     sender_name = scan_log_entry.get("sender_name")
-    sender_email = scan_log_entry.get("sender_email", "")
+    sender_email = scan_log_entry.get("sender_email") or ""
 
     # Format "from" as "Name <email>" or just "email"
     if sender_name:
@@ -346,18 +346,18 @@ def _format_original_email(scan_log_entry: dict[str, Any]) -> dict[str, Any]:
         "sender_name": sender_name,
         "sender_email": sender_email,
         "date": scan_log_entry.get("scanned_at"),
-        "subject": scan_log_entry.get("subject", ""),
-        "snippet": scan_log_entry.get("snippet", ""),
+        "subject": scan_log_entry.get("subject"),
+        "snippet": scan_log_entry.get("snippet"),
     }
 
 
 class OriginalEmailResponse(BaseModel):
     """Response model for fetching the original email of a reply draft."""
 
-    snippet: str = Field("", description="Short preview of the email body")
+    snippet: str | None = Field(None, description="Short preview of the email body")
     full_body: str | None = Field(None, description="Full email body HTML/text, only when requested")
     has_full_body: bool = Field(False, description="Whether full_body was fetched")
-    subject: str = Field("", description="Original email subject")
+    subject: str | None = Field(None, description="Original email subject")
     from_field: str = Field("", description="Sender display string", alias="from")
     sender_email: str = Field("", description="Sender email address")
     date: str | None = Field(None, description="When the email was received/scanned")
@@ -425,14 +425,14 @@ async def get_original_email(
 
     # Format base response from scan log
     sender_name = scan_log_entry.get("sender_name")
-    sender_email_addr = scan_log_entry.get("sender_email", "")
+    sender_email_addr = scan_log_entry.get("sender_email") or ""
     from_field = f"{sender_name} <{sender_email_addr}>" if sender_name else sender_email_addr
 
     response: dict[str, Any] = {
-        "snippet": scan_log_entry.get("snippet", ""),
+        "snippet": scan_log_entry.get("snippet"),
         "full_body": None,
         "has_full_body": False,
-        "subject": scan_log_entry.get("subject", ""),
+        "subject": scan_log_entry.get("subject"),
         "from": from_field,
         "sender_email": sender_email_addr,
         "date": scan_log_entry.get("scanned_at"),

@@ -28,9 +28,9 @@ interface OriginalEmail {
   from: string;
   sender_name?: string;
   sender_email: string;
-  date: string;
-  subject: string;
-  snippet: string;
+  date: string | null;
+  subject: string | null;
+  snippet: string | null;
 }
 
 interface Reasoning {
@@ -285,14 +285,14 @@ function ReplyingToBlock({
                   className="font-sans text-[12px] leading-[1.5] whitespace-pre-wrap"
                   style={{ color: 'var(--text-primary)' }}
                 >
-                  {formatEmailThread(originalEmail.snippet)}
+                  {formatEmailThread(originalEmail.snippet ?? '')}
                 </p>
               ) : (
                 <p
                   className="font-sans text-[12px] leading-[1.5] line-clamp-3"
                   style={{ color: 'var(--text-primary)' }}
                 >
-                  {decodeHtmlEntities(originalEmail.snippet)}
+                  {decodeHtmlEntities(originalEmail.snippet ?? '')}
                 </p>
               )}
 
