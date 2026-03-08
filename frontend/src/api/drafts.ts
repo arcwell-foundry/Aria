@@ -225,6 +225,40 @@ export async function dismissDraft(
 }
 
 // ---------------------------------------------------------------------------
+// Batch Actions
+// ---------------------------------------------------------------------------
+
+export type BatchDraftAction = "approve" | "dismiss";
+
+export interface BatchActionRequest {
+  draft_ids: string[];
+  action: BatchDraftAction;
+}
+
+export interface BatchActionResultItem {
+  draft_id: string;
+  success: boolean;
+  error?: string | null;
+}
+
+export interface BatchActionResponse {
+  results: BatchActionResultItem[];
+  total: number;
+  succeeded: number;
+  failed: number;
+}
+
+export async function batchDraftAction(
+  data: BatchActionRequest
+): Promise<BatchActionResponse> {
+  const response = await apiClient.post<BatchActionResponse>(
+    "/drafts/batch-action",
+    data
+  );
+  return response.data;
+}
+
+// ---------------------------------------------------------------------------
 // Draft Intelligence Context - Relevance-based signal matching
 // ---------------------------------------------------------------------------
 

@@ -37,6 +37,30 @@ class MessageResponse(BaseModel):
     message: str = Field(..., min_length=1, max_length=500)
 
 
+class BatchActionRequest(BaseModel):
+    """Request body for batch draft actions."""
+
+    draft_ids: list[str] = Field(..., min_length=1, max_length=50, description="List of draft IDs to act on")
+    action: str = Field(..., pattern="^(approve|dismiss)$", description="Action to perform: 'approve' or 'dismiss'")
+
+
+class BatchActionResultItem(BaseModel):
+    """Result for a single draft in a batch action."""
+
+    draft_id: str
+    success: bool
+    error: str | None = None
+
+
+class BatchActionResponse(BaseModel):
+    """Response for batch draft actions."""
+
+    results: list[BatchActionResultItem]
+    total: int
+    succeeded: int
+    failed: int
+
+
 @router.post("/email", response_model=EmailDraftResponse, status_code=status.HTTP_201_CREATED)
 async def create_email_draft(
     current_user: CurrentUser, request: EmailDraftCreate
@@ -555,6 +579,160 @@ Write ONLY the email body. No JSON, no markdown formatting, no subject line. Jus
                     pass
         return result
     return draft_data
+
+
+@router.post("/batch-action", response_model=BatchActionResponse)
+async def batch_draft_action(
+    current_user: CurrentUser,
+    request: BatchActionRequest,
+) -> dict[str, Any]:
+    """Perform a batch action on multiple drafts.
+
+    Supports 'approve' (approve + save to email client) and 'dismiss' actions.
+    Only acts on drafts with status 'pending_review' or 'draft'.
+    Skips drafts that are already sent, failed, or dismissed.
+
+    Args:
+        current_user: The authenticated user.
+        request: Batch action parameters with draft IDs and action type.
+
+    Returns:
+        Per-draft results with overall counts.
+    """
+    db = SupabaseClient.get_client()
+    results: list[dict[str, Any]] = []
+
+    for draft_id in request.draft_ids:
+        try:
+            # Verify draft belongs to user and is in actionable state
+            result = (
+                db.table("email_drafts")
+                .select("id, status, user_id, recipient_name, subject, body")
+                .eq("id", draft_id)
+                .eq("user_id", current_user.id)
+                .limit(1)
+                .execute()
+            )
+
+            record = result.data[0] if result and result.data else None
+            if not record:
+                results.append({"draft_id": draft_id, "success": False, "error": "Draft not found"})
+                continue
+
+            draft_status = record["status"]
+            if draft_status in ("sent", "failed", "dismissed", "approved", "saved_to_client"):
+                results.append({
+                    "draft_id": draft_id,
+                    "success": False,
+                    "error": f"Draft status '{draft_status}' is not actionable",
+                })
+                continue
+
+            if request.action == "approve":
+                # Must be pending_review for approval
+                if draft_status != "pending_review":
+                    results.append({
+                        "draft_id": draft_id,
+                        "success": False,
+                        "error": f"Draft status is '{draft_status}', expected 'pending_review'",
+                    })
+                    continue
+
+                # Approve: update status + save to email client
+                now = datetime.now(UTC).isoformat()
+                db.table("email_drafts").update({
+                    "status": "approved",
+                    "user_action": "approved",
+                    "edit_distance": 0.0,
+                    "action_detected_at": now,
+                }).eq("id", draft_id).execute()
+
+                try:
+                    client_writer = get_email_client_writer()
+                    await client_writer.save_draft_to_client(
+                        user_id=current_user.id,
+                        draft_id=draft_id,
+                    )
+                except Exception as save_err:
+                    # Revert on client save failure
+                    db.table("email_drafts").update(
+                        {"status": "pending_review"}
+                    ).eq("id", draft_id).execute()
+                    results.append({
+                        "draft_id": draft_id,
+                        "success": False,
+                        "error": f"Failed to save to email client: {save_err}",
+                    })
+                    continue
+
+                # Log activity (non-blocking)
+                try:
+                    activity_service = ActivityService()
+                    await activity_service.record(
+                        user_id=current_user.id,
+                        agent="scribe",
+                        activity_type="draft_saved_to_client",
+                        title="Draft saved to Outlook (batch)",
+                        description=f"Reply to {record.get('recipient_name', 'Unknown')}: {record.get('subject', 'No subject')}",
+                        confidence=1.0,
+                        related_entity_type="email_draft",
+                        related_entity_id=draft_id,
+                    )
+                except Exception as e:
+                    logger.warning("Failed to log batch approval activity: %s", e)
+
+                results.append({"draft_id": draft_id, "success": True, "error": None})
+
+            elif request.action == "dismiss":
+                # Dismiss: update status
+                db.table("email_drafts").update({
+                    "status": "dismissed",
+                    "user_action": "rejected",
+                    "action_detected_at": datetime.now(UTC).isoformat(),
+                }).eq("id", draft_id).execute()
+
+                # Log activity (non-blocking)
+                try:
+                    activity_service = ActivityService()
+                    await activity_service.record(
+                        user_id=current_user.id,
+                        agent="scribe",
+                        activity_type="draft_dismissed",
+                        title=f"Draft dismissed (batch): {record.get('subject', 'No subject')}",
+                        description=f"User dismissed draft to {record.get('recipient_name', 'Unknown')}",
+                        confidence=1.0,
+                        related_entity_type="email_draft",
+                        related_entity_id=draft_id,
+                    )
+                except Exception as e:
+                    logger.warning("Failed to log batch dismissal activity: %s", e)
+
+                results.append({"draft_id": draft_id, "success": True, "error": None})
+
+        except Exception as e:
+            logger.exception("Batch action failed for draft %s", draft_id)
+            results.append({"draft_id": draft_id, "success": False, "error": str(e)})
+
+    succeeded = sum(1 for r in results if r["success"])
+    failed = len(results) - succeeded
+
+    logger.info(
+        "Batch draft action completed",
+        extra={
+            "user_id": current_user.id,
+            "action": request.action,
+            "total": len(results),
+            "succeeded": succeeded,
+            "failed": failed,
+        },
+    )
+
+    return {
+        "results": results,
+        "total": len(results),
+        "succeeded": succeeded,
+        "failed": failed,
+    }
 
 
 @router.post("/{draft_id}/send", response_model=EmailSendResponse)

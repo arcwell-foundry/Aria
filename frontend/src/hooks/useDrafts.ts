@@ -8,10 +8,12 @@ import {
   regenerateDraft,
   sendDraft,
   saveDraftToClient,
+  batchDraftAction,
   type CreateEmailDraftRequest,
   type UpdateEmailDraftRequest,
   type RegenerateDraftRequest,
   type EmailDraftStatus,
+  type BatchActionRequest,
 } from "@/api/drafts";
 
 // Query keys factory
@@ -117,6 +119,18 @@ export function useSaveDraftToClient() {
     mutationFn: (draftId: string) => saveDraftToClient(draftId),
     onSuccess: (_result, draftId) => {
       queryClient.invalidateQueries({ queryKey: draftKeys.detail(draftId) });
+    },
+  });
+}
+
+// Batch draft action mutation (approve/dismiss multiple drafts)
+export function useBatchDraftAction() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: BatchActionRequest) => batchDraftAction(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: draftKeys.lists() });
     },
   });
 }

@@ -14,17 +14,17 @@
  * - /communications/drafts/:draftId -> DraftDetailPage
  */
 
-import { useState } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Search, Filter, Mail, Clock, ArrowRight, CircleAlert } from 'lucide-react';
+import { Search, Filter, Mail, Clock, ArrowRight, CircleAlert, Check, X, CheckSquare, Square } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { isPlaceholderDraft } from '@/utils/isPlaceholderDraft';
-import { useDrafts } from '@/hooks/useDrafts';
+import { useDrafts, useBatchDraftAction } from '@/hooks/useDrafts';
 import { EmptyState } from '@/components/common/EmptyState';
 import { DraftDetailPage } from './DraftDetailPage';
 import { EmailDecisionsLog } from '@/components/communications/EmailDecisionsLog';
 import { LearningModeBanner } from '@/components/communications/LearningModeBanner';
-import type { EmailDraftStatus, EmailDraftPurpose, ConfidenceTier } from '@/api/drafts';
+import type { EmailDraftStatus, EmailDraftPurpose, ConfidenceTier, EmailDraftListItem } from '@/api/drafts';
 
 type CommunicationsView = 'drafts' | 'decisions';
 
@@ -147,6 +147,17 @@ function generateBodyPreview(body: string | undefined, maxLength = 100): string 
   return text || null;
 }
 
+// Check if a draft can be selected for batch actions
+const NON_ACTIONABLE_STATUSES: Set<EmailDraftStatus> = new Set([
+  'sent', 'failed', 'dismissed', 'approved', 'saved_to_client',
+]);
+
+function isDraftSelectable(draft: EmailDraftListItem): boolean {
+  if (isPlaceholderDraft(draft)) return false;
+  if (NON_ACTIONABLE_STATUSES.has(draft.status)) return false;
+  return true;
+}
+
 // Skeleton for loading state
 function DraftsSkeleton() {
   return (
@@ -173,16 +184,90 @@ function DraftsSkeleton() {
   );
 }
 
+// Confirmation dialog for batch approve
+function BatchConfirmDialog({
+  count,
+  onConfirm,
+  onCancel,
+  isLoading,
+}: {
+  count: number;
+  onConfirm: () => void;
+  onCancel: () => void;
+  isLoading: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={onCancel}
+      />
+      {/* Dialog */}
+      <div
+        className="relative rounded-xl p-6 shadow-xl max-w-md w-full mx-4 border"
+        style={{
+          backgroundColor: 'var(--bg-elevated)',
+          borderColor: 'var(--border)',
+        }}
+      >
+        <h3
+          className="font-display text-lg font-semibold mb-2"
+          style={{ color: 'var(--text-primary)' }}
+        >
+          Approve {count} draft{count > 1 ? 's' : ''}?
+        </h3>
+        <p
+          className="text-sm mb-6"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          This will approve {count === 1 ? 'this draft' : `all ${count} selected drafts`} and
+          save {count === 1 ? 'it' : 'them'} to your email client. You can review and send
+          from your inbox.
+        </p>
+        <div className="flex items-center justify-end gap-3">
+          <button
+            onClick={onCancel}
+            disabled={isLoading}
+            className={cn(
+              'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+              'border border-[var(--border)] hover:bg-[var(--bg-subtle)]'
+            )}
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isLoading}
+            className={cn(
+              'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+              'bg-[var(--accent)] text-white hover:opacity-90',
+              'disabled:opacity-50'
+            )}
+          >
+            {isLoading ? 'Approving...' : `Approve & Save (${count})`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Drafts List View
 function DraftsList() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<EmailDraftStatus | 'all'>('all');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   // Fetch drafts with filter
   const { data: drafts, isLoading, error } = useDrafts(
     statusFilter !== 'all' ? statusFilter : undefined
   );
+
+  const batchAction = useBatchDraftAction();
 
   // Filter by search query
   const filteredDrafts = drafts?.filter((draft) => {
@@ -205,10 +290,70 @@ function DraftsList() {
     return 0;
   });
 
+  // Compute selectable drafts from current view
+  const selectableDrafts = useMemo(
+    () => sortedDrafts?.filter(isDraftSelectable) ?? [],
+    [sortedDrafts]
+  );
+
+  const selectedCount = selectedIds.size;
+  const allSelectableSelected = selectableDrafts.length > 0 && selectableDrafts.every(d => selectedIds.has(d.id));
+
+  const toggleSelection = useCallback((draftId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(draftId)) {
+        next.delete(draftId);
+      } else {
+        next.add(draftId);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    if (allSelectableSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(selectableDrafts.map(d => d.id)));
+    }
+  }, [allSelectableSelected, selectableDrafts]);
+
+  const handleBatchApprove = useCallback(() => {
+    setShowConfirmDialog(true);
+  }, []);
+
+  const confirmBatchApprove = useCallback(() => {
+    batchAction.mutate(
+      { draft_ids: Array.from(selectedIds), action: 'approve' },
+      {
+        onSuccess: () => {
+          setSelectedIds(new Set());
+          setShowConfirmDialog(false);
+        },
+        onError: () => {
+          setShowConfirmDialog(false);
+        },
+      }
+    );
+  }, [batchAction, selectedIds]);
+
+  const handleBatchDismiss = useCallback(() => {
+    batchAction.mutate(
+      { draft_ids: Array.from(selectedIds), action: 'dismiss' },
+      {
+        onSuccess: () => {
+          setSelectedIds(new Set());
+        },
+      }
+    );
+  }, [batchAction, selectedIds]);
+
   const hasDrafts = sortedDrafts && sortedDrafts.length > 0;
 
   return (
-    <div className="flex-1 overflow-y-auto p-8">
+    <div className="flex-1 overflow-y-auto p-8 relative">
       {/* Learning mode indicator */}
       <LearningModeBanner />
 
@@ -267,7 +412,10 @@ function DraftsList() {
           {STATUS_FILTERS.map((filter) => (
             <button
               key={filter.value}
-              onClick={() => setStatusFilter(filter.value)}
+              onClick={() => {
+                setStatusFilter(filter.value);
+                setSelectedIds(new Set()); // Clear selection on filter change
+              }}
               className={cn(
                 'px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
                 statusFilter === filter.value
@@ -325,146 +473,258 @@ function DraftsList() {
           }
         />
       ) : (
-        <div className="space-y-3">
+        <div className={cn("space-y-3", selectedCount > 0 && "pb-20")}>
           {sortedDrafts?.map((draft) => {
             // Use fallback for unrecognized statuses to prevent crashes
             const statusStyle = STATUS_STYLES[draft.status] || DEFAULT_STATUS_STYLE;
+            const selectable = isDraftSelectable(draft);
+            const isSelected = selectedIds.has(draft.id);
             return (
-              <button
+              <div
                 key={draft.id}
-                onClick={() => navigate(`/communications/drafts/${draft.id}`)}
                 className={cn(
                   'w-full text-left border rounded-lg p-4 transition-all duration-200',
-                  'hover:border-[var(--accent)]/50 hover:shadow-sm'
+                  'hover:border-[var(--accent)]/50 hover:shadow-sm',
+                  'flex items-center gap-3',
+                  isSelected && 'ring-2 ring-[var(--accent)]/30'
                 )}
                 style={{
-                  borderColor: 'var(--border)',
+                  borderColor: isSelected ? 'var(--accent)' : 'var(--border)',
                   backgroundColor: 'var(--bg-elevated)',
                 }}
               >
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    {/* Avatar */}
-                    <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-                      style={{ backgroundColor: 'var(--bg-subtle)' }}
-                    >
-                      <Mail
-                        className="w-5 h-5"
-                        style={{ color: 'var(--text-secondary)' }}
-                      />
+                {/* Checkbox */}
+                {selectable ? (
+                  <button
+                    onClick={(e) => toggleSelection(draft.id, e)}
+                    className={cn(
+                      'flex-shrink-0 w-5 h-5 rounded border transition-colors flex items-center justify-center',
+                      isSelected
+                        ? 'bg-[var(--accent)] border-[var(--accent)]'
+                        : 'border-[var(--border)] hover:border-[var(--accent)]'
+                    )}
+                    aria-label={isSelected ? 'Deselect draft' : 'Select draft'}
+                  >
+                    {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
+                  </button>
+                ) : (
+                  <div className="flex-shrink-0 w-5 h-5" />
+                )}
+
+                {/* Clickable draft content */}
+                <button
+                  onClick={() => navigate(`/communications/drafts/${draft.id}`)}
+                  className="flex-1 text-left min-w-0"
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      {/* Avatar */}
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                        style={{ backgroundColor: 'var(--bg-subtle)' }}
+                      >
+                        <Mail
+                          className="w-5 h-5"
+                          style={{ color: 'var(--text-secondary)' }}
+                        />
+                      </div>
+
+                      {/* Content */}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span
+                            className={cn(
+                              "text-sm truncate",
+                              isPlaceholderDraft(draft)
+                                ? "font-normal italic"
+                                : "font-medium"
+                            )}
+                            style={{ color: isPlaceholderDraft(draft) ? 'var(--text-secondary)' : 'var(--text-primary)' }}
+                          >
+                            {isPlaceholderDraft(draft)
+                              ? 'Outreach Opportunity'
+                              : draft.recipient_name || draft.recipient_email}
+                          </span>
+                          <span
+                            className="font-mono text-xs"
+                            style={{ color: 'var(--text-secondary)' }}
+                          >
+                            {PURPOSE_LABELS[draft.purpose]}
+                          </span>
+                        </div>
+                        <p
+                          className="text-sm truncate"
+                          style={{ color: 'var(--text-secondary)' }}
+                        >
+                          {draft.subject}
+                          {(draft.previous_versions_count ?? 0) > 0 && (
+                            <span
+                              className="ml-2 text-xs"
+                              style={{ color: 'var(--text-tertiary, var(--text-secondary))', opacity: 0.7 }}
+                            >
+                              ({draft.previous_versions_count!} previous version{draft.previous_versions_count! > 1 ? 's' : ''})
+                            </span>
+                          )}
+                        </p>
+                        {generateBodyPreview(draft.body) && (
+                          <p
+                            className="text-xs truncate mt-0.5"
+                            style={{ color: 'var(--text-tertiary, var(--text-secondary))', opacity: 0.7 }}
+                          >
+                            {generateBodyPreview(draft.body)}
+                          </p>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Content */}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span
-                          className={cn(
-                            "text-sm truncate",
-                            isPlaceholderDraft(draft)
-                              ? "font-normal italic"
-                              : "font-medium"
-                          )}
-                          style={{ color: isPlaceholderDraft(draft) ? 'var(--text-secondary)' : 'var(--text-primary)' }}
-                        >
-                          {isPlaceholderDraft(draft)
-                            ? 'Outreach Opportunity'
-                            : draft.recipient_name || draft.recipient_email}
-                        </span>
+                    {/* Right side */}
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <div className="flex items-center gap-1.5">
+                        <Clock
+                          className="w-3.5 h-3.5"
+                          style={{ color: 'var(--text-secondary)' }}
+                        />
                         <span
                           className="font-mono text-xs"
                           style={{ color: 'var(--text-secondary)' }}
                         >
-                          {PURPOSE_LABELS[draft.purpose]}
+                          {formatRelativeTime(draft.created_at)}
                         </span>
                       </div>
-                      <p
-                        className="text-sm truncate"
-                        style={{ color: 'var(--text-secondary)' }}
-                      >
-                        {draft.subject}
-                        {(draft.previous_versions_count ?? 0) > 0 && (
-                          <span
-                            className="ml-2 text-xs"
-                            style={{ color: 'var(--text-tertiary, var(--text-secondary))', opacity: 0.7 }}
-                          >
-                            ({draft.previous_versions_count!} previous version{draft.previous_versions_count! > 1 ? 's' : ''})
-                          </span>
-                        )}
-                      </p>
-                      {generateBodyPreview(draft.body) && (
-                        <p
-                          className="text-xs truncate mt-0.5"
-                          style={{ color: 'var(--text-tertiary, var(--text-secondary))', opacity: 0.7 }}
-                        >
-                          {generateBodyPreview(draft.body)}
-                        </p>
-                      )}
-                    </div>
-                  </div>
 
-                  {/* Right side */}
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <div className="flex items-center gap-1.5">
-                      <Clock
-                        className="w-3.5 h-3.5"
+                      {/* Confidence tier badge */}
+                      {draft.confidence_tier && TIER_STYLES[draft.confidence_tier] && (
+                        <span
+                          className="px-2 py-0.5 rounded-full text-[10px] font-medium"
+                          style={{
+                            backgroundColor: TIER_STYLES[draft.confidence_tier].bg,
+                            color: TIER_STYLES[draft.confidence_tier].text,
+                          }}
+                        >
+                          {TIER_STYLES[draft.confidence_tier].label}
+                        </span>
+                      )}
+
+                      {/* Draft type badge for intelligence-generated drafts */}
+                      {draft.draft_type && draft.draft_type !== 'reply' && DRAFT_TYPE_STYLES[draft.draft_type] && (
+                        <span
+                          className="px-2 py-0.5 rounded-full text-[10px] font-medium"
+                          style={{
+                            backgroundColor: DRAFT_TYPE_STYLES[draft.draft_type].bg,
+                            color: DRAFT_TYPE_STYLES[draft.draft_type].text,
+                          }}
+                        >
+                          {DRAFT_TYPE_STYLES[draft.draft_type].label}
+                        </span>
+                      )}
+
+                      {/* Status badge */}
+                      <span
+                        className="px-2 py-0.5 rounded-full text-xs font-medium"
+                        style={{
+                          backgroundColor: statusStyle.bg,
+                          color: statusStyle.text,
+                        }}
+                      >
+                        {statusStyle.label}
+                      </span>
+
+                      <ArrowRight
+                        className="w-4 h-4"
                         style={{ color: 'var(--text-secondary)' }}
                       />
-                      <span
-                        className="font-mono text-xs"
-                        style={{ color: 'var(--text-secondary)' }}
-                      >
-                        {formatRelativeTime(draft.created_at)}
-                      </span>
                     </div>
-
-                    {/* Confidence tier badge */}
-                    {draft.confidence_tier && TIER_STYLES[draft.confidence_tier] && (
-                      <span
-                        className="px-2 py-0.5 rounded-full text-[10px] font-medium"
-                        style={{
-                          backgroundColor: TIER_STYLES[draft.confidence_tier].bg,
-                          color: TIER_STYLES[draft.confidence_tier].text,
-                        }}
-                      >
-                        {TIER_STYLES[draft.confidence_tier].label}
-                      </span>
-                    )}
-
-                    {/* Draft type badge for intelligence-generated drafts */}
-                    {draft.draft_type && draft.draft_type !== 'reply' && DRAFT_TYPE_STYLES[draft.draft_type] && (
-                      <span
-                        className="px-2 py-0.5 rounded-full text-[10px] font-medium"
-                        style={{
-                          backgroundColor: DRAFT_TYPE_STYLES[draft.draft_type].bg,
-                          color: DRAFT_TYPE_STYLES[draft.draft_type].text,
-                        }}
-                      >
-                        {DRAFT_TYPE_STYLES[draft.draft_type].label}
-                      </span>
-                    )}
-
-                    {/* Status badge */}
-                    <span
-                      className="px-2 py-0.5 rounded-full text-xs font-medium"
-                      style={{
-                        backgroundColor: statusStyle.bg,
-                        color: statusStyle.text,
-                      }}
-                    >
-                      {statusStyle.label}
-                    </span>
-
-                    <ArrowRight
-                      className="w-4 h-4"
-                      style={{ color: 'var(--text-secondary)' }}
-                    />
                   </div>
-                </div>
-              </button>
+                </button>
+              </div>
             );
           })}
         </div>
+      )}
+
+      {/* Floating batch action bar */}
+      {selectedCount > 0 && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 rounded-xl shadow-2xl border px-5 py-3 flex items-center gap-4"
+          style={{
+            backgroundColor: 'var(--bg-elevated)',
+            borderColor: 'var(--border)',
+          }}
+        >
+          {/* Select all checkbox */}
+          <button
+            onClick={toggleSelectAll}
+            className="flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-80"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {allSelectableSelected ? (
+              <CheckSquare className="w-4 h-4" style={{ color: 'var(--accent)' }} />
+            ) : (
+              <Square className="w-4 h-4" style={{ color: 'var(--text-secondary)' }} />
+            )}
+            Select All
+          </button>
+
+          {/* Divider */}
+          <div className="w-px h-6 bg-[var(--border)]" />
+
+          {/* Count */}
+          <span
+            className="text-sm font-mono"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            {selectedCount} of {selectableDrafts.length} selected
+          </span>
+
+          {/* Divider */}
+          <div className="w-px h-6 bg-[var(--border)]" />
+
+          {/* Approve & Send button */}
+          <button
+            onClick={handleBatchApprove}
+            disabled={batchAction.isPending}
+            className={cn(
+              'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors',
+              'bg-[var(--accent)] text-white hover:opacity-90',
+              'disabled:opacity-50'
+            )}
+          >
+            Approve & Save ({selectedCount})
+          </button>
+
+          {/* Dismiss button */}
+          <button
+            onClick={handleBatchDismiss}
+            disabled={batchAction.isPending}
+            className={cn(
+              'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors',
+              'border border-[var(--border)] hover:bg-[var(--bg-subtle)]',
+              'disabled:opacity-50'
+            )}
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Dismiss ({selectedCount})
+          </button>
+
+          {/* Clear selection */}
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="p-1 rounded hover:bg-[var(--bg-subtle)] transition-colors"
+            aria-label="Clear selection"
+          >
+            <X className="w-4 h-4" style={{ color: 'var(--text-secondary)' }} />
+          </button>
+        </div>
+      )}
+
+      {/* Confirmation dialog for batch approve */}
+      {showConfirmDialog && (
+        <BatchConfirmDialog
+          count={selectedCount}
+          onConfirm={confirmBatchApprove}
+          onCancel={() => setShowConfirmDialog(false)}
+          isLoading={batchAction.isPending}
+        />
       )}
     </div>
   );
