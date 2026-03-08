@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import traceback
 from datetime import UTC, datetime
 from typing import Any
 
@@ -438,12 +439,18 @@ async def get_original_email(
         "date": scan_log_entry.get("scanned_at"),
     }
 
-    # If full body requested, fetch from email provider via Composio
-    if full:
+    # Fetch full body if requested OR if snippet is NULL (auto-fetch to fill gap)
+    should_fetch = full or not scan_log_entry.get("snippet")
+    if should_fetch:
         email_id = scan_log_entry.get("email_id")
         if email_id:
             full_body = await _fetch_full_email_body(current_user.id, email_id)
             if full_body:
+                # Strip control characters that break JSON serialization
+                # (keep \n, \r, \t which are valid in JSON strings)
+                full_body = "".join(
+                    ch if ch >= " " or ch in "\n\r\t" else " " for ch in full_body
+                )
                 response["full_body"] = full_body
                 response["has_full_body"] = True
 
@@ -457,6 +464,7 @@ async def get_original_email(
                             ).eq("user_id", current_user.id).eq(
                                 "email_id", email_id
                             ).execute()
+                            response["snippet"] = _backfill_snippet
                             logger.info(
                                 "Backfilled NULL snippet from full body fetch",
                                 extra={"user_id": current_user.id, "email_id": email_id},
@@ -536,6 +544,9 @@ async def _find_scan_log_entry(
 async def _fetch_full_email_body(user_id: str, email_id: str) -> str | None:
     """Fetch the full email body from the user's email provider via Composio.
 
+    Uses the resilient execution path with session-based execution and
+    auth-error failover, matching patterns in email_tools.py.
+
     Args:
         user_id: The user ID.
         email_id: The message ID from the email provider.
@@ -543,13 +554,17 @@ async def _fetch_full_email_body(user_id: str, email_id: str) -> str | None:
     Returns:
         Full email body as HTML/text string, or None on failure.
     """
+    logger.info(
+        "Attempting to fetch full email body for email_id=%s", email_id,
+        extra={"user_id": user_id},
+    )
     try:
         db = SupabaseClient.get_client()
 
         # Get user's email integration (prefer Outlook, fall back to Gmail)
         integration = (
             db.table("user_integrations")
-            .select("integration_type, composio_connection_id")
+            .select("id, integration_type, composio_connection_id")
             .eq("user_id", user_id)
             .eq("integration_type", "outlook")
             .eq("status", "active")
@@ -560,7 +575,7 @@ async def _fetch_full_email_body(user_id: str, email_id: str) -> str | None:
         if not integration.data:
             integration = (
                 db.table("user_integrations")
-                .select("integration_type, composio_connection_id")
+                .select("id, integration_type, composio_connection_id")
                 .eq("user_id", user_id)
                 .eq("integration_type", "gmail")
                 .eq("status", "active")
@@ -574,45 +589,275 @@ async def _fetch_full_email_body(user_id: str, email_id: str) -> str | None:
 
         provider = integration.data[0]["integration_type"]
         connection_id = integration.data[0]["composio_connection_id"]
+        integration_id = integration.data[0]["id"]
 
-        from src.integrations.oauth import get_oauth_client
+        # Use the resilient execution path (session-first, fallback to legacy)
+        from src.services.email_tools import _execute_composio
 
-        oauth_client = get_oauth_client()
+        # Strategy 1: Fetch single message by ID
+        body = await _fetch_single_message(
+            user_id, email_id, provider, connection_id, integration_id,
+        )
+        if body:
+            return body
 
-        if provider == "outlook":
-            response = oauth_client.execute_action_sync(
-                connection_id=connection_id,
-                action="OUTLOOK_GET_MESSAGE",
-                params={"message_id": email_id},
-                user_id=user_id,
-            )
-            if response.get("successful") and response.get("data"):
-                body_data = response["data"].get("body", {})
-                return body_data.get("content", "")
-        else:
-            response = oauth_client.execute_action_sync(
-                connection_id=connection_id,
-                action="GMAIL_GET_MESSAGE",
-                params={"message_id": email_id},
-                user_id=user_id,
-            )
-            if response.get("successful") and response.get("data"):
-                msg = response["data"]
-                return msg.get("body", msg.get("textBody", msg.get("snippet", "")))
+        # Strategy 2: If single message fetch failed, try fetching the thread
+        # and extracting the relevant message (threads are more reliably available)
+        logger.info(
+            "Single message fetch failed, trying thread-based fallback for email_id=%s",
+            email_id,
+            extra={"user_id": user_id},
+        )
+        body = await _fetch_from_thread(
+            user_id, email_id, provider, connection_id, integration_id,
+        )
+        if body:
+            return body
+
+        # Strategy 3: Check if draft context has the email body stored
+        body = await _fetch_from_draft_context(user_id, email_id)
+        if body:
+            return body
 
         logger.warning(
-            "Failed to fetch email from provider",
-            extra={"user_id": user_id, "email_id": email_id, "provider": provider},
+            "All fetch strategies exhausted for email_id=%s",
+            email_id,
+            extra={"user_id": user_id, "provider": provider},
         )
         return None
 
-    except Exception as e:
-        logger.exception(
-            "Error fetching full email body: %s",
-            e,
+    except Exception:
+        logger.error(
+            "Full email fetch failed: %s", traceback.format_exc(),
             extra={"user_id": user_id, "email_id": email_id},
         )
         return None
+
+
+async def _fetch_single_message(
+    user_id: str,
+    email_id: str,
+    provider: str,
+    connection_id: str,
+    integration_id: str,
+) -> str | None:
+    """Fetch a single email message by ID using the resilient Composio path."""
+    from src.services.email_tools import _execute_composio
+
+    try:
+        if provider == "outlook":
+            response = await _execute_composio(
+                user_id=user_id,
+                integration_id=integration_id,
+                connection_id=connection_id,
+                integration_type=provider,
+                action="OUTLOOK_GET_MESSAGE",
+                params={"message_id": email_id},
+            )
+            if response.get("successful") and response.get("data"):
+                data = response["data"]
+                # Handle both response formats
+                if "response_data" in data:
+                    data = data["response_data"]
+                body_data = data.get("body", {})
+                if isinstance(body_data, dict):
+                    return body_data.get("content", "")
+                if isinstance(body_data, str):
+                    return body_data
+            logger.warning(
+                "Outlook single message fetch unsuccessful: %s",
+                response.get("error", "no error detail"),
+                extra={"user_id": user_id, "email_id": email_id},
+            )
+        else:
+            response = await _execute_composio(
+                user_id=user_id,
+                integration_id=integration_id,
+                connection_id=connection_id,
+                integration_type=provider,
+                action="GMAIL_GET_MESSAGE",
+                params={"message_id": email_id},
+            )
+            if response.get("successful") and response.get("data"):
+                msg = response["data"]
+                body = msg.get("body", "")
+                if isinstance(body, dict):
+                    body = body.get("content", body.get("text", ""))
+                if body:
+                    return body
+                return msg.get("textBody", msg.get("snippet", ""))
+            logger.warning(
+                "Gmail single message fetch unsuccessful: %s",
+                response.get("error", "no error detail"),
+                extra={"user_id": user_id, "email_id": email_id},
+            )
+    except Exception:
+        logger.warning(
+            "Single message fetch exception: %s", traceback.format_exc(),
+            extra={"user_id": user_id, "email_id": email_id},
+        )
+
+    return None
+
+
+async def _fetch_from_thread(
+    user_id: str,
+    email_id: str,
+    provider: str,
+    connection_id: str,
+    integration_id: str,
+) -> str | None:
+    """Fetch email body by finding it within its thread.
+
+    Uses the same thread-fetching patterns as reply_detector which are
+    confirmed working.
+    """
+    from src.services.email_tools import _execute_composio
+
+    try:
+        # First we need the thread/conversation ID for this email.
+        # Check email_scan_log for the thread_id.
+        db = SupabaseClient.get_client()
+        scan_entry = (
+            db.table("email_scan_log")
+            .select("thread_id")
+            .eq("user_id", user_id)
+            .eq("email_id", email_id)
+            .limit(1)
+            .execute()
+        )
+
+        thread_id = None
+        if scan_entry.data:
+            thread_id = scan_entry.data[0].get("thread_id")
+
+        if not thread_id:
+            logger.info(
+                "No thread_id found for email_id=%s, cannot use thread fallback",
+                email_id,
+            )
+            return None
+
+        if provider == "outlook":
+            response = await _execute_composio(
+                user_id=user_id,
+                integration_id=integration_id,
+                connection_id=connection_id,
+                integration_type=provider,
+                action="OUTLOOK_LIST_MESSAGES",
+                params={
+                    "conversationId": thread_id,
+                    "orderby": ["receivedDateTime asc"],
+                    "top": 50,
+                },
+            )
+            if response.get("successful") and response.get("data"):
+                data = response["data"]
+                # Handle dual response format
+                if "response_data" in data:
+                    messages = data["response_data"].get("value", [])
+                else:
+                    messages = data.get("value", [])
+
+                # Find the specific message in the thread
+                for msg in messages:
+                    if msg.get("id") == email_id:
+                        body_data = msg.get("body", {})
+                        if isinstance(body_data, dict):
+                            return body_data.get("content", "")
+                        if isinstance(body_data, str):
+                            return body_data
+
+                # If exact match not found, return the last non-user message
+                # (likely the one needing reply)
+                if messages:
+                    last_msg = messages[-1]
+                    body_data = last_msg.get("body", {})
+                    if isinstance(body_data, dict):
+                        return body_data.get("content", "")
+                    if isinstance(body_data, str):
+                        return body_data
+        else:
+            response = await _execute_composio(
+                user_id=user_id,
+                integration_id=integration_id,
+                connection_id=connection_id,
+                integration_type=provider,
+                action="GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
+                params={"thread_id": thread_id},
+            )
+            if response.get("successful") and response.get("data"):
+                thread_data = response["data"]
+                thread_messages = thread_data.get("messages", [])
+
+                # Find the specific message
+                for msg in thread_messages:
+                    if msg.get("id") == email_id:
+                        body = msg.get("body", "")
+                        if isinstance(body, dict):
+                            body = body.get("content", body.get("text", ""))
+                        if body:
+                            return body
+                        return msg.get("snippet", "")
+
+                # Fallback: last message in thread
+                if thread_messages:
+                    last_msg = thread_messages[-1]
+                    body = last_msg.get("body", "")
+                    if isinstance(body, dict):
+                        body = body.get("content", body.get("text", ""))
+                    return body or last_msg.get("snippet", "")
+
+    except Exception:
+        logger.warning(
+            "Thread-based fetch exception: %s", traceback.format_exc(),
+            extra={"user_id": user_id, "email_id": email_id},
+        )
+
+    return None
+
+
+async def _fetch_from_draft_context(user_id: str, email_id: str) -> str | None:
+    """Try to extract email body from draft context JSONB field.
+
+    Some drafts store the original email content in their context field
+    during creation.
+    """
+    try:
+        db = SupabaseClient.get_client()
+        drafts = (
+            db.table("email_drafts")
+            .select("context")
+            .eq("user_id", user_id)
+            .eq("original_email_id", email_id)
+            .limit(1)
+            .execute()
+        )
+
+        if drafts.data:
+            context = drafts.data[0].get("context")
+            if isinstance(context, str):
+                try:
+                    context = json.loads(context)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if isinstance(context, dict):
+                # Check various keys where email body might be stored
+                for key in ("original_body", "email_body", "body", "original_email_body"):
+                    body = context.get(key)
+                    if body and isinstance(body, str) and len(body) > 20:
+                        logger.info(
+                            "Found email body in draft context key=%s for email_id=%s",
+                            key, email_id,
+                        )
+                        return body
+    except Exception:
+        logger.warning(
+            "Draft context fetch exception: %s", traceback.format_exc(),
+            extra={"user_id": user_id, "email_id": email_id},
+        )
+
+    return None
 
 
 @router.put("/{draft_id}", response_model=EmailDraftResponse)

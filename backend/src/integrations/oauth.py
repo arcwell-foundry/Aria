@@ -11,6 +11,37 @@ from src.core.resilience import CircuitBreaker, composio_circuit_breaker
 
 logger = logging.getLogger(__name__)
 
+# Composio tool name mapping: old (codebase) → new (Composio platform)
+# The Composio platform renamed many Outlook tools by adding an extra
+# "OUTLOOK_" prefix (e.g. OUTLOOK_GET_MESSAGE → OUTLOOK_OUTLOOK_GET_MESSAGE).
+# This map keeps the rest of the codebase unchanged.
+_TOOL_NAME_MAP: dict[str, str] = {
+    "OUTLOOK_GET_MESSAGE": "OUTLOOK_OUTLOOK_GET_MESSAGE",
+    "OUTLOOK_LIST_MESSAGES": "OUTLOOK_OUTLOOK_LIST_MESSAGES",
+    "OUTLOOK_SEND_EMAIL": "OUTLOOK_OUTLOOK_SEND_EMAIL",
+    "OUTLOOK_CREATE_DRAFT": "OUTLOOK_OUTLOOK_CREATE_DRAFT",
+    "OUTLOOK_CREATE_DRAFT_REPLY": "OUTLOOK_OUTLOOK_CREATE_DRAFT_REPLY",
+    "OUTLOOK_GET_PROFILE": "OUTLOOK_OUTLOOK_GET_PROFILE",
+    "OUTLOOK_CALENDAR_CREATE_EVENT": "OUTLOOK_OUTLOOK_CALENDAR_CREATE_EVENT",
+    "OUTLOOK_UPDATE_CALENDAR_EVENT": "OUTLOOK_OUTLOOK_UPDATE_CALENDAR_EVENT",
+    "OUTLOOK_DELETE_EVENT": "OUTLOOK_OUTLOOK_DELETE_EVENT",
+    "OUTLOOK_LIST_EVENTS": "OUTLOOK_OUTLOOK_LIST_EVENTS",
+    "OUTLOOK_GET_EVENT": "OUTLOOK_OUTLOOK_GET_EVENT",
+    "OUTLOOK_GET_SCHEDULE": "OUTLOOK_OUTLOOK_GET_SCHEDULE",
+    "OUTLOOK_LIST_CONTACTS": "OUTLOOK_OUTLOOK_LIST_CONTACTS",
+    "OUTLOOK_GET_CONTACT": "OUTLOOK_OUTLOOK_GET_CONTACT",
+    "OUTLOOK_REPLY_EMAIL": "OUTLOOK_OUTLOOK_REPLY_EMAIL",
+    "OUTLOOK_SEARCH_MESSAGES": "OUTLOOK_OUTLOOK_SEARCH_MESSAGES",
+    "OUTLOOK_MOVE_MESSAGE": "OUTLOOK_OUTLOOK_MOVE_MESSAGE",
+    "OUTLOOK_UPDATE_EMAIL": "OUTLOOK_OUTLOOK_UPDATE_EMAIL",
+    "OUTLOOK_LIST_MAIL_FOLDERS": "OUTLOOK_OUTLOOK_LIST_MAIL_FOLDERS",
+}
+
+
+def _resolve_tool_name(action: str) -> str:
+    """Map legacy tool names to current Composio platform names."""
+    return _TOOL_NAME_MAP.get(action, action)
+
 
 class ComposioOAuthClient:
     """Client for Composio OAuth operations using the official SDK.
@@ -384,20 +415,36 @@ class ComposioOAuthClient:
         cb = circuit_breaker or composio_circuit_breaker
         cb.check()
 
+        # Translate legacy tool names to current Composio platform names
+        resolved_action = _resolve_tool_name(action)
+
         # Resolve the tool version required by the SDK (unless skipping)
         version = None
         if not dangerously_skip_version_check:
-            version = await asyncio.to_thread(self._resolve_tool_version, action)
+            version = await asyncio.to_thread(self._resolve_tool_version, resolved_action)
+
+        # Pre-load tool schema so SDK doesn't KeyError on _custom_tools lookup
+        if resolved_action not in self._client.tools._tool_schemas:
+            try:
+                tool_schema = await asyncio.to_thread(
+                    self._client.client.tools.retrieve, tool_slug=resolved_action,
+                )
+                self._client.tools._tool_schemas[resolved_action] = tool_schema
+                if version is None:
+                    versions = getattr(tool_schema, "available_versions", None)
+                    if versions:
+                        version = versions[0]
+            except Exception as e:
+                logger.debug("Could not preload tool schema for %s: %s", resolved_action, e)
 
         # Execute Composio action via SDK
         def _execute() -> Any:
             return self._client.tools.execute(
-                slug=action,
+                slug=resolved_action,
                 connected_account_id=connection_id,
                 user_id=user_id,
                 arguments=params,
                 version=version,
-                dangerously_skip_version_check=dangerously_skip_version_check,
             )
 
         try:
@@ -434,34 +481,44 @@ class ComposioOAuthClient:
         Returns:
             Action result dict with 'successful', 'data', and 'error' keys.
         """
+        # Translate legacy tool names to current Composio platform names
+        resolved_action = _resolve_tool_name(action)
+
         version: str | None = None
 
         if not dangerously_skip_version_check:
             # Pre-load tool schema to avoid KeyError in Composio SDK
             # The SDK's execute() tries _custom_tools[slug].info which fails
             # if the tool isn't in the registry. We preload via retrieve().
-            if action not in self._client.tools._tool_schemas:
+            if resolved_action not in self._client.tools._tool_schemas:
                 try:
-                    tool = self._client.client.tools.retrieve(tool_slug=action)
-                    self._client.tools._tool_schemas[action] = tool
+                    tool = self._client.client.tools.retrieve(tool_slug=resolved_action)
+                    self._client.tools._tool_schemas[resolved_action] = tool
                     versions = getattr(tool, "available_versions", None)
                     if versions:
                         version = versions[0]
                 except Exception as e:
-                    logger.debug("Could not preload tool schema for %s: %s", action, e)
+                    logger.debug("Could not preload tool schema for %s: %s", resolved_action, e)
 
             # If we didn't get a version from preload, resolve it now
             if version is None:
-                version = self._resolve_tool_version(action)
+                version = self._resolve_tool_version(resolved_action)
+        else:
+            # Even when skipping version check, preload schema to avoid KeyError
+            if resolved_action not in self._client.tools._tool_schemas:
+                try:
+                    tool = self._client.client.tools.retrieve(tool_slug=resolved_action)
+                    self._client.tools._tool_schemas[resolved_action] = tool
+                except Exception as e:
+                    logger.debug("Could not preload tool schema for %s: %s", resolved_action, e)
 
         # Execute Composio action via SDK
         result = self._client.tools.execute(
-            slug=action,
+            slug=resolved_action,
             connected_account_id=connection_id,
             user_id=user_id,
             arguments=params,
             version=version,
-            dangerously_skip_version_check=dangerously_skip_version_check,
         )
         # The SDK returns a dict with 'successful', 'data', and 'error' keys
         if isinstance(result, dict):
