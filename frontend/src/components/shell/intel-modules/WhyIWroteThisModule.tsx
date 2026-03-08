@@ -1,8 +1,28 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import DOMPurify from 'dompurify';
 import { Brain, Mail, Clock, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { useIntelDraft, useIntelDrafts, useRouteContext, formatRelativeTime } from '@/hooks/useIntelPanelData';
 import { getOriginalEmail } from '@/api/drafts';
+
+function decodeHtmlEntities(text: string): string {
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = text;
+  let decoded = textarea.value;
+  // Strip zero-width characters
+  decoded = decoded.replace(/[\u200B\uFEFF\u200C\u200D]/g, '');
+  // Clean up excessive whitespace
+  decoded = decoded.replace(/\s+/g, ' ').trim();
+  return decoded;
+}
+
+function formatEmailThread(text: string): string {
+  let formatted = decodeHtmlEntities(text);
+  // Add line breaks before common email headers
+  formatted = formatted.replace(/(From:|Date:|To:|Subject:|Sent from)/g, '\n$1');
+  // Add line break before "On [date]... wrote:" pattern
+  formatted = formatted.replace(/(On\s)/g, '\n\n$1');
+  return formatted.trim();
+}
 
 interface OriginalEmail {
   from: string;
@@ -51,6 +71,8 @@ function WhyIWroteThisSkeleton() {
  * Expandable block showing the original email being replied to.
  * Shows snippet by default, with a "Show full email" toggle that
  * fetches the complete body from the email provider on demand.
+ *
+ * Auto-fetches full email if snippet is null/empty on mount.
  */
 function ReplyingToBlock({
   draftId,
@@ -63,6 +85,38 @@ function ReplyingToBlock({
   const [fullBody, setFullBody] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState(false);
+  const [autoFetched, setAutoFetched] = useState(false);
+
+  // Check if snippet is missing or empty
+  const snippetMissing = !originalEmail?.snippet || originalEmail.snippet.trim() === '';
+
+  // Auto-fetch full email when snippet is null/empty
+  useEffect(() => {
+    if (!snippetMissing || autoFetched || loading || !draftId) {
+      return;
+    }
+
+    const autoFetchFullEmail = async () => {
+      setLoading(true);
+      setFetchError(false);
+      try {
+        const result = await getOriginalEmail(draftId, true);
+        if (result.has_full_body && result.full_body) {
+          setFullBody(result.full_body);
+          setExpanded(true);
+        } else {
+          setFetchError(true);
+        }
+      } catch {
+        setFetchError(true);
+      } finally {
+        setLoading(false);
+        setAutoFetched(true);
+      }
+    };
+
+    autoFetchFullEmail();
+  }, [snippetMissing, autoFetched, loading, draftId]);
 
   const handleToggle = async () => {
     if (expanded) {
@@ -187,60 +241,98 @@ function ReplyingToBlock({
           </div>
         )}
 
-        {/* Email body: snippet or full */}
-        {originalEmail.snippet && (
-          <div className="mt-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
-            {expanded && fullBody ? (
-              <div
-                className="font-sans text-[12px] leading-[1.5] max-h-[400px] overflow-y-auto prose prose-sm prose-slate"
-                style={{ color: 'var(--text-primary)' }}
-                dangerouslySetInnerHTML={{ __html: sanitizedBody }}
-              />
-            ) : (
-              <p
-                className={`font-sans text-[12px] leading-[1.5] ${expanded ? '' : 'line-clamp-3'}`}
-                style={{ color: 'var(--text-primary)' }}
-              >
-                {originalEmail.snippet}
-              </p>
-            )}
-
-            {/* Toggle link */}
-            <button
-              type="button"
-              onClick={handleToggle}
-              disabled={loading}
-              className="mt-2 flex items-center gap-1 font-sans text-[11px] font-medium hover:underline disabled:opacity-50"
-              style={{ color: 'var(--accent)' }}
-            >
-              {loading ? (
-                <>
-                  <Loader2 size={10} className="animate-spin" />
-                  Loading full email...
-                </>
-              ) : expanded ? (
-                <>
-                  <ChevronUp size={10} />
-                  Collapse
-                </>
-              ) : (
-                <>
-                  <ChevronDown size={10} />
-                  Show full email
-                </>
+        {/* Email body: snippet, full body, loading state, or error */}
+        <div className="mt-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+          {/* Case 1: Snippet is null/empty - show loading or auto-fetched content */}
+          {snippetMissing ? (
+            <>
+              {loading && (
+                <p
+                  className="font-sans text-[12px] italic flex items-center gap-1.5"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  <Loader2 size={12} className="animate-spin" />
+                  Loading original email...
+                </p>
               )}
-            </button>
+              {!loading && fullBody && (
+                <div
+                  className="font-sans text-[12px] leading-[1.5] max-h-[400px] overflow-y-auto prose prose-sm prose-slate"
+                  style={{ color: 'var(--text-primary)' }}
+                  dangerouslySetInnerHTML={{ __html: sanitizedBody }}
+                />
+              )}
+              {!loading && fetchError && !fullBody && (
+                <p
+                  className="font-sans text-[12px] italic"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  Original email content unavailable
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Case 2: Snippet exists - show snippet with expand/collapse */}
+              {expanded && fullBody ? (
+                <div
+                  className="font-sans text-[12px] leading-[1.5] max-h-[400px] overflow-y-auto prose prose-sm prose-slate"
+                  style={{ color: 'var(--text-primary)' }}
+                  dangerouslySetInnerHTML={{ __html: sanitizedBody }}
+                />
+              ) : expanded ? (
+                <p
+                  className="font-sans text-[12px] leading-[1.5] whitespace-pre-wrap"
+                  style={{ color: 'var(--text-primary)' }}
+                >
+                  {formatEmailThread(originalEmail.snippet)}
+                </p>
+              ) : (
+                <p
+                  className="font-sans text-[12px] leading-[1.5] line-clamp-3"
+                  style={{ color: 'var(--text-primary)' }}
+                >
+                  {decodeHtmlEntities(originalEmail.snippet)}
+                </p>
+              )}
 
-            {expanded && fetchError && !fullBody && (
-              <p
-                className="mt-1 font-sans text-[11px] italic"
-                style={{ color: 'var(--text-secondary)' }}
+              {/* Toggle link */}
+              <button
+                type="button"
+                onClick={handleToggle}
+                disabled={loading}
+                className="mt-2 flex items-center gap-1 font-sans text-[11px] font-medium hover:underline disabled:opacity-50"
+                style={{ color: 'var(--accent)' }}
               >
-                Full email content is not available. Showing snippet only.
-              </p>
-            )}
-          </div>
-        )}
+                {loading ? (
+                  <>
+                    <Loader2 size={10} className="animate-spin" />
+                    Loading full email...
+                  </>
+                ) : expanded ? (
+                  <>
+                    <ChevronUp size={10} />
+                    Collapse
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown size={10} />
+                    Show full email
+                  </>
+                )}
+              </button>
+
+              {expanded && fetchError && !fullBody && (
+                <p
+                  className="mt-1 font-sans text-[11px] italic"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  Full email content is not available. Showing snippet only.
+                </p>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

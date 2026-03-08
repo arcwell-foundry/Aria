@@ -303,6 +303,26 @@ async def _get_original_email_for_draft(
     return None
 
 
+def _extract_snippet_from_body(html_body: str) -> str | None:
+    """Extract a plain-text snippet (up to 500 chars) from an HTML email body."""
+    if not html_body or not html_body.strip():
+        return None
+    # Strip HTML tags to get plain text
+    text = re.sub(r"<style[^>]*>.*?</style>", "", html_body, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"&lt;", "<", text)
+    text = re.sub(r"&gt;", ">", text)
+    text = re.sub(r"&#\d+;", "", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = text.strip()
+    return text[:500] if text else None
+
+
 def _format_original_email(scan_log_entry: dict[str, Any]) -> dict[str, Any]:
     """Format an email_scan_log entry for the original_email response.
 
@@ -426,6 +446,23 @@ async def get_original_email(
             if full_body:
                 response["full_body"] = full_body
                 response["has_full_body"] = True
+
+                # Opportunistic backfill: if snippet was NULL, extract and save it
+                if not scan_log_entry.get("snippet"):
+                    try:
+                        _backfill_snippet = _extract_snippet_from_body(full_body)
+                        if _backfill_snippet:
+                            db.table("email_scan_log").update(
+                                {"snippet": _backfill_snippet}
+                            ).eq("user_id", current_user.id).eq(
+                                "email_id", email_id
+                            ).execute()
+                            logger.info(
+                                "Backfilled NULL snippet from full body fetch",
+                                extra={"user_id": current_user.id, "email_id": email_id},
+                            )
+                    except Exception:
+                        pass  # Non-critical — don't block the response
             else:
                 logger.warning(
                     "Could not fetch full email body",

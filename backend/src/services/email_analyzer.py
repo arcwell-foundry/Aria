@@ -373,10 +373,21 @@ class EmailAnalyzer:
         sender_email = self._extract_sender_email(email)
         sender_name = self._extract_sender_name(email)
         subject = email.get("subject", "(no subject)")
-        raw_body = email.get("body", email.get("snippet", ""))
+        # Use `or` so empty strings fall through to the next source
+        raw_body = email.get("body") or email.get("snippet") or ""
         cleaned_body = _clean_email_body(raw_body)
         body = cleaned_body or (raw_body if isinstance(raw_body, str) else "")
         snippet = body[:200] if body else ""
+        # Fallback: try provider's snippet/bodyPreview fields directly
+        if not snippet:
+            for _field in ("snippet", "bodyPreview"):
+                _fallback = email.get(_field, "")
+                if isinstance(_fallback, str) and _fallback.strip():
+                    snippet = _strip_html(_fallback)[:200]
+                    break
+        # Last resort: use subject as minimal snippet
+        if not snippet:
+            snippet = subject[:200] if subject else ""
         email_id = email.get("id", email.get("message_id", str(uuid.uuid4())))
         thread_id = email.get("thread_id", email.get("conversationId", email_id))
 
@@ -2025,6 +2036,9 @@ class EmailAnalyzer:
         """
         try:
             snippet_text = categorized.snippet[:500] if categorized.snippet else None
+            # Fallback: use subject as minimal snippet to avoid NULL
+            if not snippet_text:
+                snippet_text = categorized.subject[:500] if categorized.subject else None
 
             # Check for existing entry
             existing = (

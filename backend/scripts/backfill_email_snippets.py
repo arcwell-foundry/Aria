@@ -11,6 +11,9 @@ Usage:
     # Dry run (count only, no updates):
     python scripts/backfill_email_snippets.py --user-id <user_id> --dry-run
 
+    # Only backfill entries linked to reply drafts (highest priority):
+    python scripts/backfill_email_snippets.py --user-id <user_id> --drafts-only
+
     # With rate limiting:
     python scripts/backfill_email_snippets.py --user-id <user_id> --delay 1.0
 """
@@ -45,8 +48,13 @@ def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text).strip()
 
 
-async def get_null_snippet_emails(user_id: str) -> list[dict]:
-    """Get distinct email_ids with NULL snippets from email_scan_log."""
+async def get_null_snippet_emails(user_id: str, drafts_first: bool = True) -> list[dict]:
+    """Get distinct email_ids with NULL snippets from email_scan_log.
+
+    Args:
+        user_id: The user to backfill.
+        drafts_first: If True, entries linked to drafts are returned first.
+    """
     supabase = SupabaseClient.get_client()
 
     result = (
@@ -68,7 +76,32 @@ async def get_null_snippet_emails(user_id: str) -> list[dict]:
         if eid and eid not in seen:
             seen[eid] = row
 
-    return list(seen.values())
+    entries = list(seen.values())
+
+    # Prioritize entries linked to drafts (highest value for UX)
+    if drafts_first and entries:
+        draft_result = (
+            supabase.table("email_drafts")
+            .select("original_email_id")
+            .eq("user_id", user_id)
+            .eq("purpose", "reply")
+            .not_.is_("original_email_id", "null")
+            .execute()
+        )
+        draft_email_ids = {
+            r["original_email_id"] for r in (draft_result.data or [])
+        }
+
+        if draft_email_ids:
+            linked = [e for e in entries if e["email_id"] in draft_email_ids]
+            rest = [e for e in entries if e["email_id"] not in draft_email_ids]
+            entries = linked + rest
+            logger.info(
+                "Prioritized %d draft-linked entries out of %d total",
+                len(linked), len(entries),
+            )
+
+    return entries
 
 
 async def get_user_email_integration(user_id: str) -> dict | None:
@@ -163,7 +196,12 @@ async def update_snippet(scan_id: str, snippet: str, email_id: str) -> bool:
         return False
 
 
-async def backfill(user_id: str, dry_run: bool = False, delay: float = 0.5):
+async def backfill(
+    user_id: str,
+    dry_run: bool = False,
+    delay: float = 0.5,
+    drafts_only: bool = False,
+):
     """Run the backfill process."""
     logger.info("Starting snippet backfill for user %s", user_id)
 
@@ -178,7 +216,25 @@ async def backfill(user_id: str, dry_run: bool = False, delay: float = 0.5):
     logger.info("Using %s integration (connection: %s)", provider, connection_id[:8])
 
     # Get emails needing backfill
-    null_entries = await get_null_snippet_emails(user_id)
+    null_entries = await get_null_snippet_emails(user_id, drafts_first=True)
+
+    if drafts_only:
+        # Filter to only entries linked to drafts
+        supabase = SupabaseClient.get_client()
+        draft_result = (
+            supabase.table("email_drafts")
+            .select("original_email_id")
+            .eq("user_id", user_id)
+            .eq("purpose", "reply")
+            .not_.is_("original_email_id", "null")
+            .execute()
+        )
+        draft_email_ids = {
+            r["original_email_id"] for r in (draft_result.data or [])
+        }
+        null_entries = [e for e in null_entries if e["email_id"] in draft_email_ids]
+        logger.info("Filtered to %d draft-linked entries only", len(null_entries))
+
     total = len(null_entries)
     logger.info("Found %d unique emails with NULL snippets", total)
 
@@ -230,9 +286,10 @@ def main():
     parser.add_argument("--user-id", required=True, help="User ID to backfill")
     parser.add_argument("--dry-run", action="store_true", help="Count only, no updates")
     parser.add_argument("--delay", type=float, default=0.5, help="Delay between API calls (seconds)")
+    parser.add_argument("--drafts-only", action="store_true", help="Only backfill entries linked to reply drafts")
     args = parser.parse_args()
 
-    asyncio.run(backfill(args.user_id, args.dry_run, args.delay))
+    asyncio.run(backfill(args.user_id, args.dry_run, args.delay, args.drafts_only))
 
 
 if __name__ == "__main__":

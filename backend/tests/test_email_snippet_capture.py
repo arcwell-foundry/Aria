@@ -86,8 +86,8 @@ class TestSnippetCapture:
         assert "Q3" in result.snippet
 
     @pytest.mark.asyncio
-    async def test_empty_body_produces_empty_snippet(self, analyzer):
-        """When body is genuinely empty, snippet should be empty string."""
+    async def test_empty_body_falls_back_to_subject(self, analyzer):
+        """When body is genuinely empty, snippet should fall back to subject."""
         email = {
             "id": "msg_789",
             "subject": "No body email",
@@ -97,4 +97,5 @@ class TestSnippetCapture:
         }
 
         result = await analyzer.categorize_email(email, user_id="test-user")
-        assert result.snippet == ""
+        # With empty body, snippet falls back to subject to avoid NULL in DB
+        assert result.snippet == "No body email"
