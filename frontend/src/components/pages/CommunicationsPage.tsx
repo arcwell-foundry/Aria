@@ -18,6 +18,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Search, Filter, Mail, Clock, ArrowRight, CircleAlert } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { isPlaceholderDraft } from '@/utils/isPlaceholderDraft';
 import { useDrafts } from '@/hooks/useDrafts';
 import { EmptyState } from '@/components/common/EmptyState';
 import { DraftDetailPage } from './DraftDetailPage';
@@ -193,7 +194,17 @@ function DraftsList() {
     );
   });
 
-  const hasDrafts = filteredDrafts && filteredDrafts.length > 0;
+  // Sort placeholder drafts after real drafts
+  const sortedDrafts = filteredDrafts?.slice().sort((a, b) => {
+    const aIsPlaceholder = isPlaceholderDraft(a);
+    const bIsPlaceholder = isPlaceholderDraft(b);
+    // Non-placeholders come first
+    if (aIsPlaceholder && !bIsPlaceholder) return 1;
+    if (!aIsPlaceholder && bIsPlaceholder) return -1;
+    return 0;
+  });
+
+  const hasDrafts = sortedDrafts && sortedDrafts.length > 0;
 
   return (
     <div className="flex-1 overflow-y-auto p-8">
@@ -314,7 +325,7 @@ function DraftsList() {
         />
       ) : (
         <div className="space-y-3">
-          {filteredDrafts.map((draft) => {
+          {sortedDrafts?.map((draft) => {
             // Use fallback for unrecognized statuses to prevent crashes
             const statusStyle = STATUS_STYLES[draft.status] || DEFAULT_STATUS_STYLE;
             return (
@@ -347,10 +358,17 @@ function DraftsList() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-0.5">
                         <span
-                          className="font-medium text-sm truncate"
-                          style={{ color: 'var(--text-primary)' }}
+                          className={cn(
+                            "text-sm truncate",
+                            isPlaceholderDraft(draft)
+                              ? "font-normal italic"
+                              : "font-medium"
+                          )}
+                          style={{ color: isPlaceholderDraft(draft) ? 'var(--text-secondary)' : 'var(--text-primary)' }}
                         >
-                          {draft.recipient_name || draft.recipient_email}
+                          {isPlaceholderDraft(draft)
+                            ? 'Outreach Opportunity'
+                            : draft.recipient_name || draft.recipient_email}
                         </span>
                         <span
                           className="font-mono text-xs"

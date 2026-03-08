@@ -11,6 +11,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from src.services.contact_resolution_service import ContactResolutionService
+
 logger = logging.getLogger(__name__)
 
 
@@ -488,32 +490,37 @@ Respond in this exact JSON format:
         extra_context: Optional[dict] = None,
         aria_reasoning: str = "",
     ) -> dict[str, Any]:
-        """Save LLM-generated email to email_drafts and create notification."""
+        """Save LLM-generated email to email_drafts and create notification.
+
+        Attempts to resolve real contacts for the company. If contacts are found,
+        creates one draft per contact with status='draft'. Otherwise, falls back
+        to a placeholder draft with status='pending_review'.
+        """
         subject = email_data.get("subject_options", ["Supply continuity discussion"])[0]
         body = email_data.get("body", "")
         aria_notes = email_data.get("aria_notes", "")
         all_subjects = email_data.get("subject_options", [subject])
 
-        draft_id = None
-        try:
-            context_data: dict[str, Any] = {
-                "signal_context": insight_content[:300],
-                "company_name": company_name,
-                "entity_type": entity_type,
-                "generation_mode": "template",
-            }
-            if extra_context:
-                context_data.update(extra_context)
+        # Build common context data once
+        context_data: dict[str, Any] = {
+            "signal_context": insight_content[:300],
+            "company_name": company_name,
+            "entity_type": entity_type,
+        }
+        if extra_context:
+            context_data.update(extra_context)
 
-            insert_data: dict[str, Any] = {
+        # Build common insert fields
+        def build_insert_data(recipient_email: str, recipient_name: str, status: str) -> dict[str, Any]:
+            data: dict[str, Any] = {
                 "user_id": user_id,
-                "recipient_email": "pending@placeholder.com",
-                "recipient_name": "[Contact Name]",
+                "recipient_email": recipient_email,
+                "recipient_name": recipient_name,
                 "subject": subject,
                 "body": body,
                 "purpose": purpose,
                 "tone": "formal",
-                "status": "pending_review",
+                "status": status,
                 "aria_notes": (
                     f"ARIA generated this {draft_type.replace('_', ' ')} email "
                     f"based on {company_name} intelligence. {aria_notes}"
@@ -531,46 +538,121 @@ Respond in this exact JSON format:
                 "aria_reasoning": aria_reasoning if aria_reasoning else None,
             }
             if insight_id:
-                insert_data["insight_id"] = insight_id
+                data["insight_id"] = insight_id
+            return data
 
-            draft_result = self._db.table("email_drafts").insert(insert_data).execute()
-            draft_id = draft_result.data[0]["id"] if draft_result.data else None
+        # Try to resolve real contacts for all intelligence-generated outreach drafts
+        resolved_contacts: list[dict[str, str]] = []
+        outreach_types = {
+            "competitive_displacement",
+            "conference_outreach",
+            "clinical_trial_outreach",
+        }
+        if draft_type in outreach_types:
+            resolved_contacts = await self._resolve_displacement_contacts(user_id, company_name)
+            if resolved_contacts:
+                logger.info(
+                    "[ActionExecutor] Contact resolution path: creating %d draft(s) with real contacts for '%s'",
+                    len(resolved_contacts),
+                    company_name,
+                )
+            else:
+                logger.info(
+                    "[ActionExecutor] Placeholder path: no contacts resolved for '%s', using placeholder",
+                    company_name,
+                )
+
+        draft_ids: list[str] = []
+        created_count = 0
+
+        try:
+            if resolved_contacts:
+                # Create one draft per resolved contact with real name/email
+                for contact in resolved_contacts:
+                    contact_email = contact.get("email", "")
+                    contact_name = contact.get("name", "[Contact Name]")
+
+                    insert_data = build_insert_data(
+                        recipient_email=contact_email,
+                        recipient_name=contact_name,
+                        status="draft",  # Real drafts are ready for review
+                    )
+                    context_data["generation_mode"] = "contact_resolved"
+
+                    draft_result = self._db.table("email_drafts").insert(insert_data).execute()
+                    if draft_result.data:
+                        draft_ids.append(str(draft_result.data[0]["id"]))
+                        created_count += 1
+            else:
+                # Fallback: create placeholder draft
+                context_data["generation_mode"] = "template"
+                insert_data = build_insert_data(
+                    recipient_email="pending@placeholder.com",
+                    recipient_name="[Contact Name]",
+                    status="pending_review",  # Placeholder needs contact selection
+                )
+
+                draft_result = self._db.table("email_drafts").insert(insert_data).execute()
+                if draft_result.data:
+                    draft_ids.append(str(draft_result.data[0]["id"]))
+                    created_count = 1
+
         except Exception as e:
             logger.error("[ActionExecutor] Failed to save email draft: %s", e)
 
         # Create notification pointing to Communications
+        draft_id = draft_ids[0] if draft_ids else None
         try:
+            notification_message = (
+                f"ARIA drafted a {draft_type.replace('_', ' ')} email "
+                f"targeting {company_name}. Subject: \"{subject}\". "
+            )
+            if resolved_contacts:
+                notification_message += (
+                    f"{created_count} draft(s) created with resolved contacts. "
+                    f"Review in Communications."
+                )
+            else:
+                notification_message += "Review and personalize in Communications."
+
             self._db.table("notifications").insert({
                 "user_id": user_id,
                 "type": "draft_ready",
                 "title": f"Email drafted: {company_name}",
-                "message": (
-                    f"ARIA drafted a {draft_type.replace('_', ' ')} email "
-                    f"targeting {company_name}. Subject: \"{subject}\". "
-                    f"Review and personalize in Communications."
-                ),
+                "message": notification_message,
                 "link": "/communications",
                 "metadata": json.dumps({
-                    "draft_id": str(draft_id) if draft_id else None,
+                    "draft_ids": draft_ids,
+                    "draft_id": draft_id,
                     "company": company_name,
                     "action_type": draft_type,
+                    "contacts_resolved": len(resolved_contacts),
                 }),
             }).execute()
         except Exception as e:
             logger.warning("[ActionExecutor] Notification failed: %s", e)
 
+        # Build response
+        summary = (
+            f"{draft_type.replace('_', ' ').title()} email drafted for "
+            f"{company_name}. Written in your voice using intelligence "
+            f"positioning."
+        )
+        if resolved_contacts:
+            summary += f" {created_count} draft(s) created with resolved contacts."
+        else:
+            summary += " Review in Communications."
+
         return {
             "status": "completed",
-            "summary": (
-                f"{draft_type.replace('_', ' ').title()} email drafted for "
-                f"{company_name}. Written in your voice using intelligence "
-                f"positioning. Review in Communications."
-            ),
-            "draft_id": str(draft_id) if draft_id else None,
+            "summary": summary,
+            "draft_ids": draft_ids,
+            "draft_id": draft_id,  # Primary draft ID for backwards compatibility
             "subject": subject,
             "subject_alternatives": all_subjects[1:] if len(all_subjects) > 1 else [],
             "email_drafted": True,
             "company": company_name,
+            "contacts_resolved": len(resolved_contacts),
         }
 
     def _generate_fallback_email(
@@ -673,6 +755,48 @@ Respond in this exact JSON format:
             return None
         except Exception:
             return None
+
+    async def _resolve_displacement_contacts(
+        self, user_id: str, company_name: str
+    ) -> list[dict[str, str]]:
+        """Resolve contacts for displacement outreach using ContactResolutionService.
+
+        This is a wrapper around ContactResolutionService that provides a clean
+        interface for the action executor.
+
+        Args:
+            user_id: The user ID to search contacts for.
+            company_name: The company name to search for.
+
+        Returns:
+            List of contact dictionaries with 'name' and 'email' keys.
+            Empty list if no contacts found.
+        """
+        try:
+            contact_service = ContactResolutionService()
+            contacts = await contact_service.resolve_contacts(
+                user_id=user_id,
+                company_name=company_name,
+            )
+            if contacts:
+                logger.info(
+                    "[ActionExecutor] Resolved %d contact(s) for displacement outreach to '%s'",
+                    len(contacts),
+                    company_name,
+                )
+            else:
+                logger.info(
+                    "[ActionExecutor] No contacts resolved for '%s', will use placeholder",
+                    company_name,
+                )
+            return contacts
+        except Exception as e:
+            logger.warning(
+                "[ActionExecutor] Contact resolution failed for '%s': %s",
+                company_name,
+                e,
+            )
+            return []
 
     # ================================================================
     # SAVE TO EMAIL CLIENT VIA COMPOSIO

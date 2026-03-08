@@ -20,10 +20,13 @@ import {
   CheckCircle,
   Loader2,
   Mail,
+  AlertCircle,
+  UserPlus,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { toast } from 'sonner';
 import { useDraft, useUpdateDraft, useSendDraft, useRegenerateDraft, useSaveDraftToClient } from '@/hooks/useDrafts';
+import { isPlaceholderDraft } from '@/utils/isPlaceholderDraft';
 import { DraftIntelligenceContext } from '@/components/communications/DraftIntelligenceContext';
 import { LearningModeBanner } from '@/components/communications/LearningModeBanner';
 import type { EmailDraftTone } from '@/api/drafts';
@@ -213,14 +216,33 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
                 {statusStyle.label}
               </span>
             </div>
-            {draft.recipient_name && (
+            {isPlaceholderDraft(draft) ? (
+              <div className="flex items-center gap-2">
+                <p
+                  className="text-sm"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  Outreach Opportunity
+                </p>
+                <span
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
+                  style={{
+                    backgroundColor: 'var(--warning)',
+                    color: 'white',
+                  }}
+                >
+                  <AlertCircle className="w-3 h-3" />
+                  Contact resolution needed
+                </span>
+              </div>
+            ) : draft.recipient_name ? (
               <p
                 className="text-sm"
                 style={{ color: 'var(--text-secondary)' }}
               >
                 To: {draft.recipient_name} &lt;{draft.recipient_email}&gt;
               </p>
-            )}
+            ) : null}
           </div>
 
           {/* Action buttons */}
@@ -275,6 +297,25 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
                   )}
                   style={{ color: 'var(--text-primary)' }}
                 />
+              ) : isPlaceholderDraft(draft) ? (
+                <div className="flex items-center gap-2">
+                  <span
+                    className="flex items-center gap-1.5 text-sm italic"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    Outreach Opportunity
+                  </span>
+                  <span
+                    className="text-xs px-2 py-0.5 rounded"
+                    style={{
+                      backgroundColor: 'var(--bg-subtle)',
+                      color: 'var(--text-tertiary)',
+                    }}
+                  >
+                    Add a contact to send this email
+                  </span>
+                </div>
               ) : (
                 <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
                   {draft.recipient_name ? `${draft.recipient_name} <${draft.recipient_email}>` : draft.recipient_email}
