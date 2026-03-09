@@ -28,11 +28,25 @@ export interface ContactHistoryEntry {
 }
 
 /**
+ * Pipeline context linking a contact to a lead/account.
+ */
+export interface PipelineContext {
+  company_name: string | null;
+  lead_name: string | null;
+  lead_id: string | null;
+  lifecycle_stage: string | null;
+  health_score: number | null;
+  relationship_type: string | null;
+  source: string;
+}
+
+/**
  * Response from the contact history endpoint.
  */
 export interface ContactHistoryResponse {
   contact_email: string;
   contact_name: string | null;
+  pipeline_context: PipelineContext | null;
   entries: ContactHistoryEntry[];
   total_count: number;
   received_count: number;

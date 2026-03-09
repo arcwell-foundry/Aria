@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
 from src.db.supabase import SupabaseClient
+from src.utils.email_pipeline_linker import get_pipeline_context_for_email
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +41,26 @@ class ContactHistoryEntry(BaseModel):
     confidence: float | None = Field(None, description="Confidence score")
 
 
+class PipelineContextModel(BaseModel):
+    """Pipeline context for a contact."""
+
+    company_name: str | None = None
+    lead_name: str | None = None
+    lead_id: str | None = None
+    lifecycle_stage: str | None = None
+    health_score: int | None = None
+    relationship_type: str | None = None
+    source: str = "unknown"
+
+
 class ContactHistoryResponse(BaseModel):
     """Response from contact history endpoint."""
 
     contact_email: str = Field(..., description="The contact's email address")
     contact_name: str | None = Field(None, description="The contact's display name (if known)")
+    pipeline_context: PipelineContextModel | None = Field(
+        None, description="Pipeline context if contact is linked to a lead/account"
+    )
     entries: list[ContactHistoryEntry] = Field(
         default_factory=list,
         description="Chronologically sorted timeline entries",
@@ -222,6 +238,21 @@ async def get_contact_history(
         # 4. Apply limit
         entries = entries[:limit]
 
+        # 5. Get pipeline context for this contact
+        pipeline_ctx = None
+        try:
+            pipeline_ctx = await get_pipeline_context_for_email(
+                db=db,
+                user_id=user_id,
+                contact_email=normalized_email,
+            )
+        except Exception as e:
+            logger.warning(
+                "COMMUNICATIONS_API: Pipeline context lookup failed for %s: %s",
+                normalized_email,
+                e,
+            )
+
         logger.info(
             "COMMUNICATIONS_API: Returned %d entries for contact %s (received=%d, sent=%d, draft=%d)",
             len(entries),
@@ -234,6 +265,7 @@ async def get_contact_history(
         return {
             "contact_email": normalized_email,
             "contact_name": contact_name,
+            "pipeline_context": pipeline_ctx,
             "entries": entries,
             "total_count": len(entries),
             "received_count": received_count,
