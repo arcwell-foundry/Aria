@@ -1189,6 +1189,63 @@ class ChatService:
             elif action_type == "debrief":
                 import re as _re
 
+                _GENERIC_DOMAINS = frozenset({
+                    "gmail.com", "outlook.com", "yahoo.com", "hotmail.com",
+                    "icloud.com", "aol.com", "protonmail.com", "live.com", "me.com",
+                })
+
+                def _extract_search_terms(email_addr: str) -> tuple[str, str, str]:
+                    """Extract (name_part, domain, company_name) from an email."""
+                    if "@" not in email_addr:
+                        return (email_addr, "", "")
+                    name_part = email_addr.split("@")[0].lower()
+                    domain = email_addr.split("@")[1].lower()
+                    # Strip common TLDs to get company name
+                    company_name = domain.split(".")[0]
+                    return (name_part, domain, company_name)
+
+                def _extract_title_keywords(
+                    title: str, user_name: str,
+                ) -> list[str]:
+                    """Extract company/person keywords from meeting title."""
+                    if not title:
+                        return []
+                    # Split on common delimiters
+                    parts: list[str] = []
+                    for delim in [" - ", " // ", " | ", " — "]:
+                        if delim in title:
+                            parts = [p.strip() for p in title.split(delim)]
+                            break
+                    if not parts:
+                        parts = [title]
+                    keywords: list[str] = []
+                    user_name_lower = user_name.lower() if user_name else ""
+                    user_name_parts = set(user_name_lower.split())
+                    for part in parts:
+                        # Skip parts that are the user's own name
+                        part_words = set(part.lower().split())
+                        if user_name_parts and part_words & user_name_parts == part_words:
+                            continue
+                        # Split "and" separated names within a part
+                        sub_parts = [s.strip() for s in _re.split(r'\band\b|,', part, flags=_re.I)]
+                        for sp in sub_parts:
+                            sp_lower = sp.lower().strip()
+                            if not sp_lower:
+                                continue
+                            # Skip if it's the user's name
+                            sp_words = set(sp_lower.split())
+                            if user_name_parts and sp_words & user_name_parts == sp_words:
+                                continue
+                            # Remove common non-keyword suffixes
+                            cleaned = _re.sub(r'\b(demo|call|meeting|sync|intro|chat)\b', '', sp_lower, flags=_re.I).strip()
+                            if cleaned and len(cleaned) >= 2:
+                                keywords.append(cleaned)
+                            # Also add individual words for person names
+                            for word in sp_lower.split():
+                                if len(word) >= 3 and word not in {"demo", "call", "meeting", "sync", "intro", "chat", "and", "the", "with"} and word not in user_name_parts:
+                                    keywords.append(word)
+                    return list(dict.fromkeys(keywords))  # dedupe, preserve order
+
                 # Extract meeting title from quoted string in message
                 title_match = _re.search(r'["\u201c]([^"\u201d]+)["\u201d]', message)
                 meeting_title = title_match.group(1) if title_match else None
@@ -1205,20 +1262,25 @@ class ChatService:
                 meetings = meetings_result.data or []
                 data["meetings"] = meetings
 
-                # Get user email for attendee filtering
+                # Get user email and name for attendee filtering
                 user_email = ""
+                user_full_name = ""
                 try:
                     user_result = db.table("user_profiles").select(
-                        "email"
+                        "email, full_name"
                     ).eq("user_id", user_id).limit(1).execute()
                     if user_result.data:
                         user_email = user_result.data[0].get("email", "")
+                        user_full_name = user_result.data[0].get("full_name", "")
                 except Exception:
                     pass
 
                 # Gather email history and memory context for attendees
                 email_context: list[dict[str, Any]] = []
                 memory_facts: list[dict[str, Any]] = []
+                draft_history: list[dict[str, Any]] = []
+                company_intel: list[dict[str, Any]] = []
+
                 if meetings:
                     meeting = meetings[0]
                     attendees = meeting.get("attendees") or []
@@ -1228,37 +1290,230 @@ class ChatService:
                         if a != user_email and not any(a.endswith(d) for d in platform_domains)
                     ]
 
+                    # Extract keywords from meeting title
+                    title_keywords = _extract_title_keywords(
+                        meeting.get("title", ""), user_full_name,
+                    )
+
+                    # Collect all search terms across attendees for deduplication
+                    all_domains_searched: set[str] = set()
+
                     for att_email in external_attendees[:3]:
-                        # Email history
+                        name_part, domain, company_name = _extract_search_terms(att_email)
+                        is_generic = domain in _GENERIC_DOMAINS
+
+                        # --- FIX 1: Broad email search by domain + name ---
                         try:
-                            email_result = db.table("email_scan_log").select(
-                                "subject, sender_email, scanned_at"
-                            ).eq("user_id", user_id).eq(
-                                "sender_email", att_email.lower()
-                            ).order("scanned_at", desc=True).limit(3).execute()
-                            if email_result.data:
-                                email_context.extend(email_result.data)
+                            or_conditions: list[str] = []
+                            if not is_generic and domain:
+                                or_conditions.append(f"sender_email.ilike.%@{domain}")
+                            if name_part:
+                                or_conditions.append(f"subject.ilike.%{name_part}%")
+                                or_conditions.append(f"snippet.ilike.%{name_part}%")
+                            if company_name and not is_generic:
+                                or_conditions.append(f"subject.ilike.%{company_name}%")
+                                or_conditions.append(f"snippet.ilike.%{company_name}%")
+
+                            if or_conditions:
+                                email_result = db.table("email_scan_log").select(
+                                    "subject, sender_email, snippet, scanned_at"
+                                ).eq("user_id", user_id).or_(
+                                    ",".join(or_conditions)
+                                ).order("scanned_at", desc=True).limit(5).execute()
+                                if email_result.data:
+                                    email_context.extend(email_result.data)
                         except Exception:
                             pass
 
-                        # Memory facts about attendee/company
+                        # Search email_drafts for drafts to/about this contact
                         try:
-                            name_part = att_email.split("@")[0] if "@" in att_email else att_email
-                            domain_part = att_email.split("@")[1].split(".")[0] if "@" in att_email else ""
-                            search_terms = [t for t in [name_part, domain_part] if t]
-                            for term in search_terms[:2]:
+                            draft_or: list[str] = []
+                            if not is_generic and domain:
+                                draft_or.append(f"recipient_email.ilike.%@{domain}")
+                            if company_name and not is_generic:
+                                draft_or.append(f"subject.ilike.%{company_name}%")
+                            if name_part:
+                                draft_or.append(f"subject.ilike.%{name_part}%")
+
+                            if draft_or:
+                                draft_result = db.table("email_drafts").select(
+                                    "subject, recipient_email, created_at"
+                                ).eq("user_id", user_id).or_(
+                                    ",".join(draft_or)
+                                ).order("created_at", desc=True).limit(3).execute()
+                                if draft_result.data:
+                                    draft_history.extend(draft_result.data)
+                        except Exception:
+                            pass
+
+                        # Search cross_email_intelligence for company insights
+                        if company_name and not is_generic and domain not in all_domains_searched:
+                            all_domains_searched.add(domain)
+                            try:
+                                intel_or: list[str] = [
+                                    f"company_domain.ilike.%{company_name}%",
+                                    f"insight.ilike.%{company_name}%",
+                                ]
+                                if name_part:
+                                    intel_or.append(f"insight.ilike.%{name_part}%")
+
+                                intel_result = db.table("cross_email_intelligence").select(
+                                    "insight, strategic_implication, pattern_type"
+                                ).eq("user_id", user_id).or_(
+                                    ",".join(intel_or)
+                                ).limit(3).execute()
+                                if intel_result.data:
+                                    company_intel.extend(intel_result.data)
+                            except Exception:
+                                pass
+
+                        # --- FIX 2: Correct memory_semantic columns ---
+                        try:
+                            search_terms = [t for t in [name_part, company_name] if t]
+                            if is_generic:
+                                search_terms = [name_part] if name_part else []
+                            mem_or_conditions: list[str] = []
+                            for term in search_terms:
+                                mem_or_conditions.append(f"fact.ilike.%{term}%")
+                            if not is_generic and domain:
+                                mem_or_conditions.append(f"fact.ilike.%{domain}%")
+
+                            if mem_or_conditions:
                                 mem_result = db.table("memory_semantic").select(
-                                    "fact, entity_name, salience"
-                                ).eq("user_id", user_id).ilike(
-                                    "fact", f"%{term}%"
-                                ).order("salience", desc=True).limit(3).execute()
+                                    "fact, confidence, source"
+                                ).eq("user_id", user_id).or_(
+                                    ",".join(mem_or_conditions)
+                                ).order("confidence", desc=True).limit(5).execute()
                                 if mem_result.data:
                                     memory_facts.extend(mem_result.data)
                         except Exception:
                             pass
 
+                    # Also search using title keywords (e.g., "BYTE51" from meeting title)
+                    for kw in title_keywords[:3]:
+                        if len(kw) < 3:
+                            continue
+                        try:
+                            kw_email = db.table("email_scan_log").select(
+                                "subject, sender_email, snippet, scanned_at"
+                            ).eq("user_id", user_id).or_(
+                                f"subject.ilike.%{kw}%,snippet.ilike.%{kw}%"
+                            ).order("scanned_at", desc=True).limit(3).execute()
+                            if kw_email.data:
+                                email_context.extend(kw_email.data)
+                        except Exception:
+                            pass
+                        try:
+                            kw_mem = db.table("memory_semantic").select(
+                                "fact, confidence, source"
+                            ).eq("user_id", user_id).ilike(
+                                "fact", f"%{kw}%"
+                            ).order("confidence", desc=True).limit(3).execute()
+                            if kw_mem.data:
+                                memory_facts.extend(kw_mem.data)
+                        except Exception:
+                            pass
+
+                    # --- FIX 4: Composio fallback for scan gaps ---
+                    # If we found very few emails from the scan log, try
+                    # searching the user's actual mailbox via Composio
+                    if len(email_context) < 2 and external_attendees:
+                        try:
+                            integ_result = db.table("user_integrations").select(
+                                "composio_connection_id, integration_type"
+                            ).eq("user_id", user_id).in_(
+                                "integration_type", ["outlook", "gmail"]
+                            ).eq("status", "active").limit(1).execute()
+
+                            if integ_result.data:
+                                conn_id = integ_result.data[0].get("composio_connection_id")
+                                provider = integ_result.data[0].get("integration_type", "").lower()
+                                if conn_id:
+                                    from src.integrations.oauth import get_oauth_client as _get_oauth
+
+                                    _oauth = _get_oauth()
+                                    # Search for each attendee
+                                    for att_email in external_attendees[:2]:
+                                        try:
+                                            if provider == "outlook":
+                                                search_resp = await _oauth.execute_action(
+                                                    connection_id=conn_id,
+                                                    action="OUTLOOK_LIST_MESSAGES",
+                                                    params={
+                                                        "folder": "AllItems",
+                                                        "top": 5,
+                                                        "$search": f'"from:{att_email} OR to:{att_email}"',
+                                                        "orderby": ["receivedDateTime desc"],
+                                                    },
+                                                    user_id=user_id,
+                                                    dangerously_skip_version_check=True,
+                                                )
+                                                if search_resp.get("successful") and search_resp.get("data"):
+                                                    msgs = search_resp["data"].get("value", [])
+                                                    if not msgs:
+                                                        msgs = search_resp["data"].get("response_data", {}).get("value", [])
+                                                    for msg in (msgs or [])[:5]:
+                                                        from_addr = msg.get("from", {}).get("emailAddress", {})
+                                                        email_context.append({
+                                                            "subject": msg.get("subject", ""),
+                                                            "sender_email": from_addr.get("address", ""),
+                                                            "snippet": (msg.get("bodyPreview", "") or "")[:200],
+                                                            "scanned_at": msg.get("receivedDateTime", ""),
+                                                        })
+                                            else:
+                                                search_resp = await _oauth.execute_action(
+                                                    connection_id=conn_id,
+                                                    action="GMAIL_FETCH_EMAILS",
+                                                    params={
+                                                        "query": f"from:{att_email} OR to:{att_email}",
+                                                        "max_results": 5,
+                                                    },
+                                                    user_id=user_id,
+                                                )
+                                                if search_resp.get("successful") and search_resp.get("data"):
+                                                    msgs = search_resp["data"].get("emails", [])
+                                                    for msg in (msgs or [])[:5]:
+                                                        email_context.append({
+                                                            "subject": msg.get("subject", ""),
+                                                            "sender_email": msg.get("sender", msg.get("from", "")),
+                                                            "snippet": (msg.get("snippet", msg.get("preview", "")) or "")[:200],
+                                                            "scanned_at": msg.get("date", msg.get("internalDate", "")),
+                                                        })
+                                        except Exception as _comp_err:
+                                            logger.warning(
+                                                "Composio email search failed for debrief attendee %s: %s",
+                                                att_email, _comp_err,
+                                            )
+                        except Exception as _integ_err:
+                            logger.warning(
+                                "Composio integration lookup failed for debrief: %s",
+                                _integ_err,
+                            )
+
+                    # Deduplicate email_context by subject
+                    seen_subjects: set[str] = set()
+                    deduped_emails: list[dict[str, Any]] = []
+                    for e in email_context:
+                        subj = (e.get("subject") or "").strip().lower()
+                        if subj and subj not in seen_subjects:
+                            seen_subjects.add(subj)
+                            deduped_emails.append(e)
+                    email_context = deduped_emails
+
+                    # Deduplicate memory_facts by fact text
+                    seen_facts: set[str] = set()
+                    deduped_facts: list[dict[str, Any]] = []
+                    for f in memory_facts:
+                        fact_text = (f.get("fact") or "").strip().lower()
+                        if fact_text and fact_text not in seen_facts:
+                            seen_facts.add(fact_text)
+                            deduped_facts.append(f)
+                    memory_facts = deduped_facts
+
                 data["email_history"] = email_context
                 data["memory_facts"] = memory_facts
+                data["draft_history"] = draft_history
+                data["company_intel"] = company_intel
 
             return data
         except Exception as e:
@@ -1322,10 +1577,14 @@ class ChatService:
             ),
             "debrief": (
                 "The user wants to debrief a meeting. You have the full meeting details, "
-                "email history with attendees, and known facts from memory below.\n\n"
+                "email history with attendees/company (including domain-matched and keyword-matched emails), "
+                "draft history, known facts from memory, and company intelligence below.\n\n"
                 "INSTRUCTIONS:\n"
                 "- Acknowledge the meeting with specific details (title, date, time, duration, who attended).\n"
-                "- Reference any relevant email history or known facts about the attendees.\n"
+                "- Reference any relevant email history or known facts about the attendees or their company.\n"
+                "  Even if an email is not directly from the attendee, if it is from the same company domain\n"
+                "  or mentions the attendee by name, reference it as relevant context.\n"
+                "- Reference any company intelligence insights if available.\n"
                 "- Ask the user to walk you through the debrief with these structured questions:\n"
                 "  1. Overall outcome: Was this meeting positive, neutral, or concerning?\n"
                 "  2. Key discussion points: What were the main topics covered?\n"
@@ -1333,7 +1592,8 @@ class ChatService:
                 "  4. Action items: What needs to happen next and by when?\n"
                 "  5. Insights: Anything notable about the attendees, their priorities, or competitive dynamics?\n"
                 "- Be conversational and specific. Reference the actual attendee names and company.\n"
-                "- Do NOT say you don't have the meeting data. You have it in the data below.\n"
+                "- Do NOT say you don't have email history if there are ANY emails in the data below,\n"
+                "  even if they are from a different sender at the same company.\n"
                 "- If no meeting was found, list their recent past meetings and ask which one to debrief.\n"
                 "- No em dashes.\n\n"
             ),
