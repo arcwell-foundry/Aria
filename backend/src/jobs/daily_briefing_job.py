@@ -249,7 +249,7 @@ async def run_daily_briefing_job() -> dict[str, Any]:
             queued_insights = await _consume_briefing_queue(user_id)
 
             # Generate the briefing (this also creates an in-app notification)
-            await briefing_service.generate_briefing(
+            content = await briefing_service.generate_briefing(
                 user_id=user_id,
                 briefing_date=user_today,
                 queued_insights=queued_insights if queued_insights else None,
@@ -265,6 +265,22 @@ async def run_daily_briefing_job() -> dict[str, Any]:
                     "queued_insights": len(queued_insights),
                 },
             )
+
+            # Deliver the briefing via user's preferred channel (chat/voice/avatar)
+            # This updates delivery_method and delivered_at in daily_briefings
+            delivery_result = await briefing_service.deliver_briefing(
+                user_id=user_id,
+                briefing_date=user_today,
+                content=content,
+            )
+            if delivery_result.get("success"):
+                logger.info(
+                    "Briefing delivered",
+                    extra={
+                        "user_id": user_id,
+                        "delivery_method": delivery_result.get("delivery_method"),
+                    },
+                )
 
             # Create video briefing session if enabled
             await _maybe_create_video_briefing(user_id, user_today)

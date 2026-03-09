@@ -703,6 +703,286 @@ class BriefingService:
         data = result.data
         return [b for b in data if isinstance(b, dict)]
 
+    async def deliver_briefing(
+        self,
+        user_id: str,
+        briefing_date: date | None = None,
+        content: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Deliver a briefing to the user via their preferred channel.
+
+        This method handles delivery for all three modes:
+        - chat: WebSocket message + notification (default)
+        - voice: Tavus audio (TODO: Stream D)
+        - avatar: Tavus video (TODO: Stream D)
+
+        Args:
+            user_id: The user's UUID.
+            briefing_date: The briefing date (defaults to today).
+            content: Optional pre-fetched briefing content (skips DB lookup).
+
+        Returns:
+            Dict with delivery status and method used.
+        """
+        if briefing_date is None:
+            briefing_date = date.today()
+
+        # Get the briefing row from DB
+        briefing_result = (
+            self._db.table("daily_briefings")
+            .select("id, content, delivery_method, delivered_at")
+            .eq("user_id", user_id)
+            .eq("briefing_date", briefing_date.isoformat())
+            .limit(1)
+            .execute()
+        )
+
+        if not briefing_result.data:
+            logger.warning(
+                "No briefing found to deliver",
+                extra={"user_id": user_id, "briefing_date": briefing_date.isoformat()},
+            )
+            return {"success": False, "error": "briefing_not_found"}
+
+        briefing_row = briefing_result.data[0]
+        briefing_id = briefing_row["id"]
+
+        # Already delivered?
+        if briefing_row.get("delivered_at"):
+            logger.debug(
+                "Briefing already delivered",
+                extra={
+                    "user_id": user_id,
+                    "briefing_id": briefing_id,
+                    "delivery_method": briefing_row.get("delivery_method"),
+                },
+            )
+            return {
+                "success": True,
+                "already_delivered": True,
+                "delivery_method": briefing_row.get("delivery_method"),
+            }
+
+        # Get briefing content
+        if content is None:
+            raw_content = briefing_row.get("content")
+            content = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
+
+        if not content:
+            return {"success": False, "error": "no_content"}
+
+        # Get user's delivery mode preference
+        delivery_mode = await self._get_delivery_mode(user_id)
+
+        # Perform delivery based on mode
+        delivery_success = False
+        delivery_method = "chat"  # Default
+
+        if delivery_mode == "chat":
+            delivery_success = await self._deliver_via_websocket(
+                user_id, briefing_id, content, briefing_date
+            )
+            delivery_method = "websocket"
+        elif delivery_mode == "voice":
+            # Voice mode: WebSocket + Tavus audio
+            # TODO: Stream D - implement Tavus voice delivery
+            delivery_success = await self._deliver_via_websocket(
+                user_id, briefing_id, content, briefing_date
+            )
+            delivery_method = "voice"
+            logger.info(
+                "Voice delivery requested but not yet implemented, falling back to WebSocket",
+                extra={"user_id": user_id},
+            )
+        elif delivery_mode == "avatar":
+            # Avatar mode: WebSocket + Tavus video
+            # TODO: Stream D - implement Tavus avatar delivery
+            delivery_success = await self._deliver_via_websocket(
+                user_id, briefing_id, content, briefing_date
+            )
+            delivery_method = "avatar"
+            logger.info(
+                "Avatar delivery requested but not yet implemented, falling back to WebSocket",
+                extra={"user_id": user_id},
+            )
+        else:
+            # Unknown mode - default to WebSocket
+            delivery_success = await self._deliver_via_websocket(
+                user_id, briefing_id, content, briefing_date
+            )
+            delivery_method = "websocket"
+
+        # Create notification regardless of delivery method
+        await self._create_briefing_notification(user_id, briefing_id, content, briefing_date)
+
+        # Update delivery status in DB
+        now = datetime.now(UTC).isoformat()
+        try:
+            self._db.table("daily_briefings").update(
+                {
+                    "delivery_method": delivery_method,
+                    "delivered_at": now,
+                    "ws_delivered": True,
+                }
+            ).eq("id", briefing_id).execute()
+
+            logger.info(
+                "Briefing delivered successfully",
+                extra={
+                    "user_id": user_id,
+                    "briefing_id": briefing_id,
+                    "delivery_method": delivery_method,
+                    "briefing_date": briefing_date.isoformat(),
+                },
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to update delivery status",
+                extra={"user_id": user_id, "briefing_id": briefing_id, "error": str(e)},
+            )
+
+        return {
+            "success": delivery_success,
+            "delivery_method": delivery_method,
+            "briefing_id": briefing_id,
+            "delivered_at": now,
+        }
+
+    async def _get_delivery_mode(self, user_id: str) -> str:
+        """Get user's preferred briefing delivery mode.
+
+        Args:
+            user_id: The user's UUID.
+
+        Returns:
+            Delivery mode: 'chat', 'voice', or 'avatar'. Defaults to 'chat'.
+        """
+        try:
+            prefs_result = (
+                self._db.table("user_preferences")
+                .select("briefing_delivery_mode")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if prefs_result.data:
+                mode = prefs_result.data[0].get("briefing_delivery_mode", "chat")
+                if mode in ("chat", "voice", "avatar"):
+                    return mode
+        except Exception as e:
+            logger.debug(
+                "Could not fetch delivery mode, using default",
+                extra={"user_id": user_id, "error": str(e)},
+            )
+        return "chat"
+
+    async def _deliver_via_websocket(
+        self,
+        user_id: str,
+        briefing_id: str,
+        content: dict[str, Any],
+        briefing_date: date,
+    ) -> bool:
+        """Deliver briefing via WebSocket broadcast.
+
+        Args:
+            user_id: The user's UUID.
+            briefing_id: The briefing's UUID.
+            content: The briefing content.
+            briefing_date: The briefing date.
+
+        Returns:
+            True if delivery succeeded.
+        """
+        try:
+            from src.core.ws import ws_manager
+
+            # Broadcast briefing.ready event to user's WebSocket channel
+            summary = content.get("summary", "")
+            rich_content = content.get("rich_content", [])
+            ui_commands = content.get("ui_commands", [])
+            suggestions = content.get("suggestions", ["Show me details", "Dismiss"])
+
+            # Send the briefing as an ARIA message
+            await ws_manager.send_aria_message(
+                user_id=user_id,
+                message=summary,
+                rich_content=rich_content,
+                ui_commands=ui_commands,
+                suggestions=suggestions,
+            )
+
+            # Also broadcast a briefing.ready event for any listeners
+            await ws_manager.send_to_user(
+                user_id,
+                {
+                    "type": "briefing.ready",
+                    "briefing_id": briefing_id,
+                    "briefing_date": briefing_date.isoformat(),
+                    "summary": summary[:500] if summary else "",
+                    "sections": list(content.keys()),
+                    "generated_at": content.get("generated_at", ""),
+                },
+            )
+
+            logger.info(
+                "Briefing delivered via WebSocket",
+                extra={"user_id": user_id, "briefing_id": briefing_id},
+            )
+            return True
+
+        except Exception as e:
+            logger.warning(
+                "WebSocket delivery failed",
+                extra={"user_id": user_id, "briefing_id": briefing_id, "error": str(e)},
+            )
+            return False
+
+    async def _create_briefing_notification(
+        self,
+        user_id: str,
+        briefing_id: str,
+        content: dict[str, Any],
+        briefing_date: date,
+    ) -> None:
+        """Create a notification for the briefing.
+
+        Args:
+            user_id: The user's UUID.
+            briefing_id: The briefing's UUID.
+            content: The briefing content.
+            briefing_date: The briefing date.
+        """
+        try:
+            from src.models.notification import NotificationType
+            from src.services.notification_service import NotificationService
+
+            summary = content.get("summary", "")
+            # Truncate summary for notification body
+            body = summary[:200] + "..." if len(summary) > 200 else summary
+
+            await NotificationService.create_notification(
+                user_id=user_id,
+                type=NotificationType.BRIEFING_READY,
+                title="Your morning briefing is ready",
+                message=body,
+                link="/briefing",
+                metadata={
+                    "briefing_id": briefing_id,
+                    "briefing_date": briefing_date.isoformat(),
+                },
+            )
+
+            logger.debug(
+                "Briefing notification created",
+                extra={"user_id": user_id, "briefing_id": briefing_id},
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to create briefing notification",
+                extra={"user_id": user_id, "briefing_id": briefing_id, "error": str(e)},
+            )
+
     def _build_rich_content(
         self,
         calendar: dict[str, Any],

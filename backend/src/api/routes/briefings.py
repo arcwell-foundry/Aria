@@ -420,6 +420,72 @@ async def get_today_briefing(
     return {"briefing": None, "status": "not_generated"}
 
 
+@router.get("/latest")
+async def get_latest_briefing(
+    current_user: CurrentUser,
+    generate_if_missing: bool = Query(False, description="Generate briefing if none exists"),
+) -> dict[str, Any]:
+    """Get the most recent briefing for on-demand access.
+
+    Powers "ARIA, give me my briefing" voice/chat commands.
+    Returns the most recent briefing regardless of date, or generates
+    one if requested and missing.
+
+    Args:
+        generate_if_missing: If True, generates a new briefing if none exists.
+
+    Returns:
+        The latest briefing content with metadata.
+    """
+    from src.db.supabase import SupabaseClient
+
+    db = SupabaseClient.get_client()
+
+    # Get the most recent briefing for this user
+    result = (
+        db.table("daily_briefings")
+        .select("id, briefing_date, content, delivery_method, delivered_at, created_at")
+        .eq("user_id", current_user.id)
+        .order("briefing_date", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    if result.data:
+        row = result.data[0]
+        raw_content = row.get("content")
+        content = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
+
+        return {
+            "briefing": content,
+            "briefing_id": row.get("id"),
+            "briefing_date": row.get("briefing_date"),
+            "delivery_method": row.get("delivery_method"),
+            "delivered_at": row.get("delivered_at"),
+            "status": "ready",
+        }
+
+    # No briefing exists
+    if generate_if_missing:
+        service = BriefingService()
+        content = await service.generate_briefing(current_user.id)
+
+        # Deliver it immediately
+        delivery_result = await service.deliver_briefing(
+            user_id=current_user.id,
+            content=content,
+        )
+
+        return {
+            "briefing": content,
+            "delivery_method": delivery_result.get("delivery_method"),
+            "delivered_at": delivery_result.get("delivered_at"),
+            "status": "generated",
+        }
+
+    return {"briefing": None, "status": "not_generated"}
+
+
 def _is_buffer_event(title: str | None) -> bool:
     """Check if an event is a buffer event (should not count as real meeting)."""
     if not title:
@@ -1147,6 +1213,88 @@ async def test_text_fallback() -> dict[str, Any]:
         "elapsed_ms": int((time.time() - start) * 1000),
         "message": "Tavus is configured, would proceed with video delivery.",
         "status": "delivered",
+    }
+
+
+@router.post("/run-meeting-brief-backfill")
+async def run_meeting_brief_backfill(
+    current_user: CurrentUser,
+    reset_profiles: bool = Query(
+        False, description="Reset attendee profiles with null titles so they get re-enriched"
+    ),
+) -> dict[str, Any]:
+    """Generate meeting briefs for ALL past calendar events with attendees.
+
+    No time window restriction — processes every calendar event that has
+    external attendees and doesn't already have a brief.
+
+    Set ``reset_profiles=true`` to force re-enrichment of attendee profiles
+    that have missing titles (fixes bad name/title from earlier runs).
+    """
+    import asyncio
+
+    if reset_profiles:
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+        # Reset profiles with null title so they get re-enriched
+        reset_result = (
+            db.table("attendee_profiles")
+            .update({"research_status": "pending", "last_researched_at": "2020-01-01T00:00:00Z"})
+            .is_("title", "null")
+            .eq("research_status", "completed")
+            .execute()
+        )
+        reset_count = len(reset_result.data or [])
+        logger.info("Reset %d attendee profiles with null titles", reset_count)
+
+    from src.jobs.meeting_brief_generator import backfill_meeting_briefs
+
+    # Run in background so we don't timeout
+    async def _run() -> None:
+        try:
+            result = await backfill_meeting_briefs()
+            logger.info("Meeting brief backfill complete", extra=result)
+        except Exception:
+            logger.exception("Meeting brief backfill failed")
+
+        # Re-enrich any remaining stale profiles (e.g. from events that
+        # already had briefs and were skipped by the backfill)
+        if reset_profiles:
+            try:
+                from src.services.attendee_profile import AttendeeProfileService
+
+                profile_service = AttendeeProfileService()
+                from src.db.supabase import SupabaseClient as _SB
+
+                _db = _SB.get_client()
+                stale = (
+                    _db.table("attendee_profiles")
+                    .select("email, name")
+                    .eq("research_status", "pending")
+                    .execute()
+                )
+                stale_attendees = [
+                    {"email": r["email"], "name": r.get("name") or ""}
+                    for r in (stale.data or [])
+                ]
+                if stale_attendees:
+                    from src.jobs.meeting_brief_generator import _enrich_attendees
+
+                    enriched = await _enrich_attendees(stale_attendees, force_refresh=True)
+                    logger.info(
+                        "Re-enriched %d stale attendee profiles",
+                        len(enriched),
+                    )
+            except Exception:
+                logger.exception("Failed to re-enrich stale profiles")
+
+    asyncio.create_task(_run())
+
+    return {
+        "status": "backfill_started",
+        "message": "Meeting brief backfill running in background. Check logs for progress.",
+        "reset_profiles": reset_profiles,
     }
 
 

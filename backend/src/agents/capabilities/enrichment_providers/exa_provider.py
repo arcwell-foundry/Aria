@@ -27,6 +27,7 @@ Websets endpoints (Phase 3):
 
 import asyncio
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -191,6 +192,25 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
                 if "linkedin.com/in/" in url:
                     enrichment.linkedin_url = url
                     enrichment.social_profiles["linkedin"] = url
+                    # Parse name and title from LinkedIn result title
+                    # Typical format: "Name - Title at Company | LinkedIn"
+                    result_title = result.get("title", "")
+                    if result_title:
+                        cleaned = result_title.split(" | ")[0].strip()
+                        if " - " in cleaned:
+                            name_part, role_part = cleaned.split(" - ", 1)
+                            # Strip pronoun markers like (he/him), (she/her)
+                            name_part = re.sub(
+                                r"\s*\((?:he|she|they|ze)/\w+(?:/\w+)?\)\s*",
+                                "",
+                                name_part,
+                            ).strip()
+                            if name_part:
+                                enrichment.name = name_part
+                            if role_part.strip():
+                                enrichment.title = role_part.strip()
+                        elif cleaned:
+                            enrichment.name = cleaned
                     # Extract text content if available
                     text = result.get("text", "")
                     if text and not enrichment.bio:

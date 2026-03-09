@@ -82,6 +82,36 @@ def _extract_attendee_emails(attendees: Any) -> list[str]:
     return emails
 
 
+def _extract_attendees_with_names(attendees: Any) -> list[dict[str, str]]:
+    """Extract email addresses AND display names from the attendees JSONB field.
+
+    Google/Outlook calendar APIs store attendees as dicts with both
+    ``email`` and ``name``/``displayName`` fields. This function preserves
+    the name so enrichment can use it instead of guessing from the email
+    local part.
+
+    Args:
+        attendees: Raw attendees value from database.
+
+    Returns:
+        List of dicts with ``email`` and ``name`` keys.
+    """
+    if not attendees:
+        return []
+
+    results: list[dict[str, str]] = []
+    if isinstance(attendees, list):
+        for item in attendees:
+            if isinstance(item, str) and "@" in item:
+                results.append({"email": item.lower(), "name": ""})
+            elif isinstance(item, dict):
+                email = item.get("email") or item.get("emailAddress", "")
+                name = item.get("name") or item.get("displayName", "")
+                if email and "@" in email:
+                    results.append({"email": email.lower(), "name": name})
+    return results
+
+
 async def find_calendar_events_needing_briefs(
     hours_ahead: int = 48,
     hours_back: int = 2,
@@ -173,7 +203,8 @@ async def find_calendar_events_needing_briefs(
 
 
 async def _enrich_attendees(
-    emails: list[str],
+    attendees: list[dict[str, str]],
+    force_refresh: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Enrich attendee profiles: check cache first, then Exa for missing.
 
@@ -181,17 +212,21 @@ async def _enrich_attendees(
     whatever data is available.
 
     Args:
-        emails: List of attendee email addresses.
+        attendees: List of dicts with ``email`` and ``name`` keys.
+        force_refresh: If True, re-enrich even if a cached profile exists.
 
     Returns:
         Dict mapping email to profile data.
     """
-    if not emails:
+    if not attendees:
         return {}
 
     from src.services.attendee_profile import AttendeeProfileService
 
     profile_service = AttendeeProfileService()
+
+    emails = [a["email"] for a in attendees]
+    name_by_email: dict[str, str] = {a["email"]: a.get("name", "") for a in attendees}
 
     # Step 1: Check cache for all emails
     cached_profiles = await profile_service.get_profiles_batch(emails)
@@ -199,7 +234,9 @@ async def _enrich_attendees(
     # Step 2: Find emails not in cache or stale
     emails_to_enrich: list[str] = []
     for email in emails:
-        if email not in cached_profiles:
+        if force_refresh:
+            emails_to_enrich.append(email)
+        elif email not in cached_profiles:
             emails_to_enrich.append(email)
         else:
             # Check if stale (older than 7 days)
@@ -229,9 +266,16 @@ async def _enrich_attendees(
             domain = email.split("@")[1] if "@" in email else ""
             company_hint = domain.split(".")[0].title() if domain else ""
 
-            # Search by email to find profile
+            # Use calendar display name if available, otherwise derive from email
+            calendar_name = name_by_email.get(email, "")
+            if calendar_name:
+                search_name = calendar_name
+            else:
+                search_name = email.split("@")[0].replace(".", " ").title()
+
+            # Search by name to find profile
             person = await exa.search_person(
-                name=email.split("@")[0].replace(".", " ").title(),
+                name=search_name,
                 company=company_hint,
                 role="",
             )
@@ -317,7 +361,8 @@ async def run_meeting_brief_job(
         user_id = str(event["user_id"])
         title = event.get("title") or "Untitled Meeting"
         start_time = event.get("start_time", "")
-        attendee_emails = _extract_attendee_emails(event.get("attendees"))
+        attendees_with_names = _extract_attendees_with_names(event.get("attendees"))
+        attendee_emails = [a["email"] for a in attendees_with_names]
 
         try:
             # Parse start_time
@@ -351,7 +396,7 @@ async def run_meeting_brief_job(
             )
 
             # Step 2: Enrich attendees (non-blocking)
-            enriched_profiles = await _enrich_attendees(attendee_emails)
+            enriched_profiles = await _enrich_attendees(attendees_with_names)
 
             # Step 3: Generate brief content
             result = await service.generate_brief_content(
@@ -513,7 +558,8 @@ async def backfill_meeting_briefs() -> dict[str, Any]:
         user_id = str(event["user_id"])
         title = event.get("title") or "Untitled Meeting"
         start_time = event.get("start_time", "")
-        attendee_emails = _extract_attendee_emails(event.get("attendees"))
+        attendees_with_names = _extract_attendees_with_names(event.get("attendees"))
+        attendee_emails = [a["email"] for a in attendees_with_names]
 
         try:
             if isinstance(start_time, str):
@@ -534,7 +580,7 @@ async def backfill_meeting_briefs() -> dict[str, Any]:
             briefs_created += 1
 
             # Enrich attendees
-            enriched_profiles = await _enrich_attendees(attendee_emails)
+            enriched_profiles = await _enrich_attendees(attendees_with_names)
 
             # Generate content
             content = await service.generate_brief_content(
