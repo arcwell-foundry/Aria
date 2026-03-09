@@ -94,7 +94,7 @@ function isRepliedEmail(decision: ScanDecisionInfo): boolean {
   return decision.reason.toLowerCase().includes('already replied');
 }
 
-function DecisionRow({ decision }: { decision: ScanDecisionInfo }) {
+function DecisionRow({ decision, onContactClick }: { decision: ScanDecisionInfo; onContactClick?: (email: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const categoryStyle = CATEGORY_STYLES[decision.category];
   const urgencyStyle = URGENCY_STYLES[decision.urgency];
@@ -123,12 +123,16 @@ function DecisionRow({ decision }: { decision: ScanDecisionInfo }) {
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 mb-0.5">
-              <span
-                className="font-medium text-sm truncate"
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onContactClick?.(decision.sender_email);
+                }}
+                className="font-medium text-sm truncate hover:underline"
                 style={{ color: 'var(--text-primary)' }}
               >
                 {decision.sender_name || decision.sender_email}
-              </span>
+              </button>
               {decision.sender_name && (
                 <span
                   className="text-xs truncate hidden sm:inline"
@@ -210,7 +214,7 @@ function DecisionRow({ decision }: { decision: ScanDecisionInfo }) {
   );
 }
 
-export function EmailDecisionsLog() {
+export function EmailDecisionsLog({ onContactClick }: { onContactClick?: (email: string) => void }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<EmailCategory | 'all'>('all');
   const [draftedFilter, setDraftedFilter] = useState<'all' | 'drafted' | 'not_drafted'>('all');
@@ -401,7 +405,7 @@ export function EmailDecisionsLog() {
       ) : (
         <div className="space-y-3">
           {filteredDecisions.map((decision) => (
-            <DecisionRow key={decision.email_id} decision={decision} />
+            <DecisionRow key={decision.email_id} decision={decision} onContactClick={onContactClick} />
           ))}
           {filteredDecisions.length < 5 && !searchQuery && categoryFilter === 'all' && draftedFilter === 'all' && (
             <p

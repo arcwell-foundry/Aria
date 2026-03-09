@@ -32,6 +32,7 @@ from src.api.routes import (
     chat,
     cognitive_load,
     communication,
+    communications,  # Contact-centric communications view
     companion,  # Phase 8: Companion personality routes
     compliance,
     debriefs,
@@ -357,6 +358,7 @@ app.include_router(capabilities.router, prefix="/api/v1")  # Prompt 5B: MCP capa
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(cognitive_load.router, prefix="/api/v1")
 app.include_router(communication.router, prefix="/api/v1")
+app.include_router(communications.router, prefix="/api/v1")  # Contact-centric communications view
 app.include_router(companion.router, prefix="/api/v1")  # Phase 8: Companion personality
 app.include_router(companion_user_router, prefix="/api/v1")  # US-802: Theory of Mind
 app.include_router(companion_emotional_router, prefix="/api/v1")  # US-804: Emotional Intelligence
