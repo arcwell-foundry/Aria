@@ -55,7 +55,7 @@ async def run_email_backfill(user_id: str, lookback_days: int = 90) -> dict[str,
     # Get user's active email connection
     integrations = (
         db.table("user_integrations")
-        .select("composio_connection_id, provider")
+        .select("composio_connection_id, integration_type")
         .eq("user_id", user_id)
         .eq("status", "active")
         .execute()
@@ -64,11 +64,11 @@ async def run_email_backfill(user_id: str, lookback_days: int = 90) -> dict[str,
     conn_id = None
     provider = None
     for i in integrations.data or []:
-        if i.get("provider") in ("outlook", "microsoft"):
+        if i.get("integration_type") in ("outlook", "microsoft"):
             conn_id = i.get("composio_connection_id")
             provider = "outlook"
             break
-        elif i.get("provider") == "gmail":
+        elif i.get("integration_type") == "gmail":
             conn_id = i.get("composio_connection_id")
             provider = "gmail"
             break
