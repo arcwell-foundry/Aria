@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
@@ -419,6 +419,67 @@ async def get_pending_debriefs(
         )
         for m in pending_meetings
     ]
+
+
+@router.post("/backfill-email-scan")
+async def backfill_email_scan(
+    current_user: CurrentUser,
+    background_tasks: BackgroundTasks,
+    lookback_days: int = Query(90, ge=1, le=365, description="Days to look back"),
+) -> dict[str, Any]:
+    """Trigger a one-time email scan with extended lookback to fill gaps.
+
+    The email scanner normally runs with a 24-hour lookback. This endpoint
+    triggers a wider scan to capture older emails that were never ingested
+    (e.g., emails from before the scanner was first activated).
+
+    The scanner deduplicates by email_id, so running this multiple times
+    is safe and won't create duplicate entries.
+
+    Args:
+        current_user: The authenticated user.
+        background_tasks: FastAPI background task queue.
+        lookback_days: How many days back to scan (default 90).
+
+    Returns:
+        Status confirmation with lookback parameters.
+    """
+    from src.services.email_analyzer import EmailAnalyzer
+
+    lookback_hours = lookback_days * 24
+    analyzer = EmailAnalyzer()
+
+    async def _run_backfill() -> None:
+        try:
+            result = await analyzer.scan_inbox(
+                user_id=str(current_user.id),
+                since_hours=lookback_hours,
+            )
+            logger.info(
+                "Email backfill scan complete: %d emails processed for user %s (lookback=%d days)",
+                result.total_emails,
+                current_user.id,
+                lookback_days,
+            )
+        except Exception:
+            logger.exception(
+                "Email backfill scan failed for user %s",
+                current_user.id,
+            )
+
+    background_tasks.add_task(_run_backfill)
+
+    logger.info(
+        "Email backfill scan triggered for user %s (lookback=%d days)",
+        current_user.id,
+        lookback_days,
+    )
+
+    return {
+        "status": "backfill_started",
+        "lookback_days": lookback_days,
+        "lookback_hours": lookback_hours,
+    }
 
 
 @router.get("/{debrief_id}", response_model=DebriefResponse)

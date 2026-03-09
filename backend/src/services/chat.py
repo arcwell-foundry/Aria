@@ -1475,6 +1475,29 @@ class ChatService:
                             deduped_emails.append(e)
                     email_context = deduped_emails
 
+                    # If sparse email context, trigger a background backfill scan
+                    # so future debriefs for these contacts have richer history
+                    if len(email_context) < 3 and external_attendees:
+                        try:
+                            from src.services.email_analyzer import EmailAnalyzer
+                            _analyzer = EmailAnalyzer()
+                            asyncio.create_task(
+                                _analyzer.scan_inbox(
+                                    user_id=user_id,
+                                    since_hours=2160,  # 90 days back
+                                )
+                            )
+                            logger.info(
+                                "[DEBRIEF] Triggered background email backfill (90 days) "
+                                "due to sparse context (%d emails found)",
+                                len(email_context),
+                            )
+                        except Exception as _backfill_err:
+                            logger.warning(
+                                "[DEBRIEF] Background backfill trigger failed: %s",
+                                str(_backfill_err)[:100],
+                            )
+
                     # Log emails being passed to LLM for debugging
                     logger.info(
                         "[DEBRIEF] scan_log search complete: %d emails, %d memory facts",
