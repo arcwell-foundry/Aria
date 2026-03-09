@@ -63,14 +63,31 @@ export function ARIAWorkspace() {
       debriefHandledRef.current = true;
       const title = searchParams.get('title');
       const attendees = searchParams.get('attendees');
+      const startTime = searchParams.get('start_time');
+      const endTime = searchParams.get('end_time');
+      const attendeeEmails = searchParams.get('attendee_emails');
 
-      let prompt = "Let's debrief my meeting";
+      let prompt = "DEBRIEF REQUEST:";
       if (title) {
-        prompt += `: "${title}"`;
+        prompt += ` Meeting "${title}"`;
       }
-      if (attendees) {
-        prompt += ` with ${attendees}`;
+      if (startTime) {
+        const start = new Date(startTime);
+        const dateStr = start.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+        const timeStr = start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        prompt += ` on ${dateStr} at ${timeStr}`;
+        if (endTime) {
+          const end = new Date(endTime);
+          const durationMin = Math.round((end.getTime() - start.getTime()) / 60000);
+          prompt += ` (${durationMin} minutes)`;
+        }
       }
+      if (attendeeEmails) {
+        prompt += `. Attendees: ${attendeeEmails}`;
+      } else if (attendees) {
+        prompt += `. Attendees: ${attendees}`;
+      }
+      prompt += ". Please help me debrief this meeting.";
 
       // Store the prompt and clear URL params; send will happen in the next effect
       pendingDebriefRef.current = prompt;

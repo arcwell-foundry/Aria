@@ -915,6 +915,10 @@ class ChatService:
         # Battle card / competitive lookup - pull from battle_cards
         (re.compile(r"\b(?:what|tell|show|compare)\b.{0,30}\b(?:battle ?card|vs|versus|compared to|competitive|against)", re.I),
          "competitive_lookup", "Look up competitive intelligence from existing data"),
+
+        # Debrief - pull from calendar_events + email history + memory
+        (re.compile(r"(?:debrief|DEBRIEF REQUEST:)", re.I),
+         "debrief", "Debrief a meeting from existing data"),
     ]
 
     @staticmethod
@@ -1182,6 +1186,80 @@ class ChatService:
                 ).eq("user_id", user_id).order("detected_at", desc=True).limit(5).execute()
                 data["signals"] = signals.data or []
 
+            elif action_type == "debrief":
+                import re as _re
+
+                # Extract meeting title from quoted string in message
+                title_match = _re.search(r'["\u201c]([^"\u201d]+)["\u201d]', message)
+                meeting_title = title_match.group(1) if title_match else None
+
+                # Query calendar_events for the meeting (past meetings)
+                calendar_query = db.table("calendar_events").select(
+                    "title, start_time, end_time, attendees, external_company"
+                ).eq("user_id", user_id)
+                if meeting_title:
+                    calendar_query = calendar_query.ilike("title", f"%{meeting_title[:50]}%")
+                meetings_result = calendar_query.order(
+                    "start_time", desc=True
+                ).limit(5).execute()
+                meetings = meetings_result.data or []
+                data["meetings"] = meetings
+
+                # Get user email for attendee filtering
+                user_email = ""
+                try:
+                    user_result = db.table("user_profiles").select(
+                        "email"
+                    ).eq("user_id", user_id).limit(1).execute()
+                    if user_result.data:
+                        user_email = user_result.data[0].get("email", "")
+                except Exception:
+                    pass
+
+                # Gather email history and memory context for attendees
+                email_context: list[dict[str, Any]] = []
+                memory_facts: list[dict[str, Any]] = []
+                if meetings:
+                    meeting = meetings[0]
+                    attendees = meeting.get("attendees") or []
+                    platform_domains = ("@lu.ma", "@calendar.google.com", "@resource.calendar.google.com")
+                    external_attendees = [
+                        a for a in attendees
+                        if a != user_email and not any(a.endswith(d) for d in platform_domains)
+                    ]
+
+                    for att_email in external_attendees[:3]:
+                        # Email history
+                        try:
+                            email_result = db.table("email_scan_log").select(
+                                "subject, sender_email, scanned_at"
+                            ).eq("user_id", user_id).eq(
+                                "sender_email", att_email.lower()
+                            ).order("scanned_at", desc=True).limit(3).execute()
+                            if email_result.data:
+                                email_context.extend(email_result.data)
+                        except Exception:
+                            pass
+
+                        # Memory facts about attendee/company
+                        try:
+                            name_part = att_email.split("@")[0] if "@" in att_email else att_email
+                            domain_part = att_email.split("@")[1].split(".")[0] if "@" in att_email else ""
+                            search_terms = [t for t in [name_part, domain_part] if t]
+                            for term in search_terms[:2]:
+                                mem_result = db.table("memory_semantic").select(
+                                    "fact, entity_name, salience"
+                                ).eq("user_id", user_id).ilike(
+                                    "fact", f"%{term}%"
+                                ).order("salience", desc=True).limit(3).execute()
+                                if mem_result.data:
+                                    memory_facts.extend(mem_result.data)
+                        except Exception:
+                            pass
+
+                data["email_history"] = email_context
+                data["memory_facts"] = memory_facts
+
             return data
         except Exception as e:
             logger.error("Quick action data gather failed: %s", e, exc_info=True)
@@ -1241,6 +1319,23 @@ class ChatService:
                 "The user wants competitive intelligence. You have battle cards and "
                 "competitor signals below. Give a direct competitive comparison with strengths, "
                 "weaknesses, and recent moves. Be opinionated. Do NOT propose a plan.\n\n"
+            ),
+            "debrief": (
+                "The user wants to debrief a meeting. You have the full meeting details, "
+                "email history with attendees, and known facts from memory below.\n\n"
+                "INSTRUCTIONS:\n"
+                "- Acknowledge the meeting with specific details (title, date, time, duration, who attended).\n"
+                "- Reference any relevant email history or known facts about the attendees.\n"
+                "- Ask the user to walk you through the debrief with these structured questions:\n"
+                "  1. Overall outcome: Was this meeting positive, neutral, or concerning?\n"
+                "  2. Key discussion points: What were the main topics covered?\n"
+                "  3. Commitments: What did you commit to? What did they commit to?\n"
+                "  4. Action items: What needs to happen next and by when?\n"
+                "  5. Insights: Anything notable about the attendees, their priorities, or competitive dynamics?\n"
+                "- Be conversational and specific. Reference the actual attendee names and company.\n"
+                "- Do NOT say you don't have the meeting data. You have it in the data below.\n"
+                "- If no meeting was found, list their recent past meetings and ask which one to debrief.\n"
+                "- No em dashes.\n\n"
             ),
         }
 

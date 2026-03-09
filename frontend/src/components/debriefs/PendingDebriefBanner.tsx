@@ -141,6 +141,12 @@ export function PendingDebriefBanner() {
     if (meeting.title) {
       params.set("title", meeting.title);
     }
+    if (meeting.start_time) {
+      params.set("start_time", meeting.start_time);
+    }
+    if (meeting.end_time) {
+      params.set("end_time", meeting.end_time);
+    }
     if (meeting.attendees?.length) {
       const userEmail = user?.email;
       const platformDomains = ['@lu.ma', '@calendar.google.com', '@resource.calendar.google.com'];
@@ -149,6 +155,7 @@ export function PendingDebriefBanner() {
         return !platformDomains.some((domain) => a.endsWith(domain));
       });
       if (externalAttendees.length > 0) {
+        params.set("attendee_emails", externalAttendees.join(","));
         const names = externalAttendees
           .map((a) => {
             // Extract name from email (before @) or use as-is
