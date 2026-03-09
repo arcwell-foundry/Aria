@@ -191,39 +191,48 @@ async def _process_transcript(payload: dict[str, Any], db: Any) -> None:
             },
         )
 
-        # Update meeting session to completed
-        db.table("meeting_sessions").update({
-            "status": "completed",
-            "ended_at": datetime.now(UTC).isoformat(),
-            "updated_at": datetime.now(UTC).isoformat(),
-        }).eq("id", session_id).execute()
+        # Update meeting session to ended
+        try:
+            db.table("meeting_sessions").update({
+                "status": "ended",
+                "ended_at": datetime.now(UTC).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
+            }).eq("id", session_id).execute()
+        except Exception:
+            logger.exception(
+                "Failed to update meeting session status for session %s", session_id
+            )
 
         # Queue action for user review
-        db.table("aria_action_queue").insert({
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "agent": "scribe",
-            "action_type": "debrief_review",
-            "title": "Meeting debrief ready for review",
-            "description": f"Debrief for: {session.get('meeting_title', 'Untitled meeting')}",
-            "risk_level": "low",
-            "status": "pending",
-            "payload": {
-                "meeting_session_id": session_id,
-                "debrief_id": debrief_id,
-                "reference_id": debrief_id,
-                "reference_type": "meeting_debrief",
-                "meeting_title": session.get("meeting_title", ""),
-            },
-        }).execute()
-
-        logger.info(
-            "Debrief review action queued",
-            extra={
-                "debrief_id": debrief_id,
+        try:
+            db.table("aria_action_queue").insert({
+                "id": str(uuid.uuid4()),
                 "user_id": user_id,
-            },
-        )
+                "agent": "scribe",
+                "action_type": "debrief_review",
+                "title": "Meeting debrief ready for review",
+                "description": f"Debrief for: {session.get('meeting_title', 'Untitled meeting')}",
+                "risk_level": "low",
+                "status": "pending",
+                "payload": {
+                    "meeting_session_id": session_id,
+                    "debrief_id": debrief_id,
+                    "reference_id": debrief_id,
+                    "reference_type": "meeting_debrief",
+                    "meeting_title": session.get("meeting_title", ""),
+                },
+            }).execute()
+            logger.info(
+                "Debrief review action queued",
+                extra={
+                    "debrief_id": debrief_id,
+                    "user_id": user_id,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to queue debrief review action for session %s", session_id
+            )
 
     except Exception:
         logger.exception(
