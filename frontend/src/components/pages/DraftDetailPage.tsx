@@ -9,14 +9,12 @@
  * - Bottom actions bar: Send Email, Save Draft, Regenerate
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChevronLeft,
   Send,
-  Save,
   RefreshCw,
-  Eye,
   CheckCircle,
   Loader2,
   Mail,
@@ -50,13 +48,16 @@ interface DraftDetailPageProps {
   draftId: string;
 }
 
+// Auto-save states
+type SaveState = 'idle' | 'saving' | 'saved';
+
 export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
   const navigate = useNavigate();
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedRecipient, setEditedRecipient] = useState('');
-  const [editedSubject, setEditedSubject] = useState('');
   const [editedBody, setEditedBody] = useState('');
   const [saveToClientError, setSaveToClientError] = useState('');
+  const [bodySaveState, setBodySaveState] = useState<SaveState>('idle');
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasUnsavedBodyChanges = useRef(false);
 
   // Queries and mutations
   const { data: draft, isLoading, error } = useDraft(draftId);
@@ -77,25 +78,56 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
   const isBusy = isSaving || isSending || isRegenerating || isSavingToClient;
 
   // Initialize edited values when draft loads
-  if (draft && !editedRecipient && !editedSubject) {
-    setEditedRecipient(draft.recipient_email);
-    setEditedSubject(draft.subject);
+  if (draft && !editedBody) {
     setEditedBody(draft.body);
   }
 
-  // Handlers
-  const handleSave = async () => {
-    if (!draft) return;
-    await updateDraft.mutateAsync({
-      draftId,
-      data: {
-        recipient_email: editedRecipient,
-        subject: editedSubject,
-        body: editedBody,
-      },
-    });
-    setIsEditing(false);
+  // Auto-save body changes with 2-second debounce
+  const autoSaveBody = useCallback(async (body: string) => {
+    if (!draft || body === draft.body) {
+      hasUnsavedBodyChanges.current = false;
+      return;
+    }
+
+    setBodySaveState('saving');
+    try {
+      await updateDraft.mutateAsync({
+        draftId,
+        data: { body },
+      });
+      setBodySaveState('saved');
+      hasUnsavedBodyChanges.current = false;
+      // Reset to idle after 2 seconds
+      setTimeout(() => setBodySaveState('idle'), 2000);
+    } catch {
+      setBodySaveState('idle');
+      toast.error('Failed to save changes');
+    }
+  }, [draft, draftId, updateDraft]);
+
+  const handleBodyChange = (newBody: string) => {
+    setEditedBody(newBody);
+    hasUnsavedBodyChanges.current = true;
+
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Set new timeout for auto-save
+    saveTimeoutRef.current = setTimeout(() => {
+      autoSaveBody(newBody);
+    }, 2000);
   };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleSend = async () => {
     if (!draft) return;
@@ -251,24 +283,21 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
             ) : null}
           </div>
 
-          {/* Action buttons */}
+          {/* Save state indicator */}
           {!isSent && (
             <div className="flex items-center gap-2 flex-shrink-0">
-              <button
-                onClick={() => setIsEditing(!isEditing)}
-                className={cn(
-                  'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
-                  isEditing
-                    ? 'bg-[var(--accent)] text-white'
-                    : 'border border-[var(--border)] hover:bg-[var(--bg-subtle)]'
-                )}
-                style={{
-                  color: isEditing ? 'white' : 'var(--text-primary)',
-                }}
-              >
-                <Eye className="w-4 h-4 inline-block mr-2" />
-                {isEditing ? 'Preview' : 'Edit'}
-              </button>
+              {bodySaveState === 'saving' && (
+                <span className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Saving...
+                </span>
+              )}
+              {bodySaveState === 'saved' && (
+                <span className="flex items-center gap-1.5 text-xs text-[var(--success)]">
+                  <CheckCircle className="w-3 h-3" />
+                  Saved
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -291,19 +320,7 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
               >
                 To:
               </span>
-              {isEditing ? (
-                <input
-                  type="email"
-                  value={editedRecipient}
-                  onChange={(e) => setEditedRecipient(e.target.value)}
-                  className={cn(
-                    'flex-1 px-3 py-1.5 rounded border text-sm',
-                    'border-[var(--border)] bg-[var(--bg-subtle)]',
-                    'focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/30'
-                  )}
-                  style={{ color: 'var(--text-primary)' }}
-                />
-              ) : isPlaceholderDraft(draft) ? (
+              {isPlaceholderDraft(draft) ? (
                 <div className="flex items-center gap-2">
                   <span
                     className="flex items-center gap-1.5 text-sm italic"
@@ -337,23 +354,9 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
               >
                 Subject:
               </span>
-              {isEditing ? (
-                <input
-                  type="text"
-                  value={editedSubject}
-                  onChange={(e) => setEditedSubject(e.target.value)}
-                  className={cn(
-                    'flex-1 px-3 py-1.5 rounded border text-sm',
-                    'border-[var(--border)] bg-[var(--bg-subtle)]',
-                    'focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/30'
-                  )}
-                  style={{ color: 'var(--text-primary)' }}
-                />
-              ) : (
-                <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                  {draft.subject}
-                </span>
-              )}
+              <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                {draft.subject}
+              </span>
             </div>
 
             {/* Tone selector */}
@@ -388,7 +391,7 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
             </div>
           </div>
 
-          {/* Email Body */}
+          {/* Email Body - Always editable */}
           <div className="p-6 relative">
             {isRegenerating && (
               <div className="absolute inset-0 flex items-center justify-center z-10 rounded-b-lg"
@@ -402,31 +405,20 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
                 </div>
               </div>
             )}
-            {isEditing ? (
-              <textarea
-                value={editedBody}
-                onChange={(e) => setEditedBody(e.target.value)}
-                className={cn(
-                  'w-full min-h-[300px] p-4 rounded border text-sm leading-relaxed resize-y font-sans',
-                  'border-[var(--border)] bg-[var(--bg-subtle)]',
-                  'focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/30'
-                )}
-                style={{ color: 'var(--text-primary)' }}
-                placeholder="Email body..."
-              />
-            ) : (
-              <div
-                className="prose prose-sm max-w-none"
-                style={{ color: 'var(--text-primary)' }}
-              >
-                {/* Render body with line breaks */}
-                {draft.body.split('\n').map((paragraph, i) => (
-                  <p key={i} className="mb-4 last:mb-0 leading-relaxed">
-                    {paragraph || '\u00A0'}
-                  </p>
-                ))}
-              </div>
-            )}
+            <textarea
+              value={editedBody}
+              onChange={(e) => handleBodyChange(e.target.value)}
+              disabled={isSent}
+              className={cn(
+                'w-full min-h-[300px] p-4 rounded border text-sm leading-relaxed resize-y font-sans',
+                'border-[var(--border)] bg-[var(--bg-subtle)]',
+                'focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/30',
+                'cursor-text',
+                isSent && 'opacity-70 cursor-not-allowed'
+              )}
+              style={{ color: 'var(--text-primary)' }}
+              placeholder="Email body..."
+            />
           </div>
         </div>
 
@@ -489,29 +481,8 @@ export function DraftDetailPage({ draftId }: DraftDetailPageProps) {
               Regenerate
             </button>
 
-            {/* Right: Save, Save to Client, and Send */}
+            {/* Right: Save to Client, and Send */}
             <div className="flex items-center gap-3">
-              {isEditing && (
-                <button
-                  onClick={handleSave}
-                  disabled={isBusy}
-                  className={cn(
-                    'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium',
-                    'border border-[var(--border)] transition-colors',
-                    'hover:bg-[var(--bg-subtle)]',
-                    isBusy && 'opacity-50 cursor-not-allowed'
-                  )}
-                  style={{ color: 'var(--text-primary)' }}
-                >
-                  {isSaving ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Save className="w-4 h-4" />
-                  )}
-                  Save Draft
-                </button>
-              )}
-
               {/* Save to Email Client (Gmail/Outlook) */}
               {draft.saved_to_client_at ? (
                 <button
