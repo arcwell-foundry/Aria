@@ -3,6 +3,7 @@
  *
  * Provides functions for:
  * - Contact history: Unified timeline of all communications with a specific contact
+ * - Upcoming meetings: Calendar events enriched with email context
  */
 
 import { apiClient } from "./client";
@@ -89,6 +90,40 @@ export interface CommunicationsAnalyticsResponse {
   response_by_contact_type: Record<string, number>;
 }
 
+/**
+ * An attendee in an upcoming meeting.
+ */
+export interface MeetingAttendee {
+  name: string;
+  email: string;
+}
+
+/**
+ * Email communication context for an upcoming meeting.
+ */
+export interface MeetingEmailContext {
+  contact_email: string;
+  total_emails: number;
+  latest_subject: string | null;
+  latest_date: string | null;
+  latest_date_relative: string | null;
+  has_pending_draft: boolean;
+  draft_id: string | null;
+  pipeline_context: PipelineContext | null;
+}
+
+/**
+ * An upcoming meeting enriched with email context.
+ */
+export interface UpcomingMeetingWithContext {
+  meeting_id: string | null;
+  meeting_title: string;
+  meeting_time: string;
+  time_until: string;
+  attendees: MeetingAttendee[];
+  email_context: MeetingEmailContext;
+}
+
 // ---------------------------------------------------------------------------
 // API Functions
 // ---------------------------------------------------------------------------
@@ -141,6 +176,30 @@ export async function fetchCommunicationsAnalytics(
 
   const response = await apiClient.get<CommunicationsAnalyticsResponse>(
     `/communications/analytics?${params.toString()}`
+  );
+
+  return response.data;
+}
+
+/**
+ * Fetch upcoming meetings enriched with email context.
+ *
+ * Returns meetings in the next N hours that have email communication history
+ * with at least one attendee. Returns an empty array if no calendar is
+ * connected or no meetings have email context.
+ *
+ * @param hoursAhead - How many hours ahead to look (default: 24, max: 168)
+ * @returns List of upcoming meetings with email context, possibly empty
+ */
+export async function fetchUpcomingMeetings(
+  hoursAhead: number = 24
+): Promise<UpcomingMeetingWithContext[]> {
+  const params = new URLSearchParams({
+    hours_ahead: hoursAhead.toString(),
+  });
+
+  const response = await apiClient.get<UpcomingMeetingWithContext[]>(
+    `/communications/upcoming-meetings?${params.toString()}`
   );
 
   return response.data;

@@ -3,6 +3,7 @@
 User-facing endpoints for the Communications page, including:
 - Contact history: Unified timeline of all communications with a specific contact
 - Analytics: Communication metrics and response time analytics
+- Upcoming meetings: Calendar events enriched with email context
 """
 
 import logging
@@ -106,6 +107,43 @@ class VolumeDayEntry(BaseModel):
     received: int = Field(0, description="Number of emails received")
     drafted: int = Field(0, description="Number of drafts created")
     sent: int = Field(0, description="Number of emails sent")
+
+
+class MeetingAttendee(BaseModel):
+    """An attendee in an upcoming meeting."""
+
+    name: str = Field(..., description="Attendee display name")
+    email: str = Field(..., description="Attendee email address")
+
+
+class MeetingEmailContext(BaseModel):
+    """Email communication context for an upcoming meeting."""
+
+    contact_email: str = Field(..., description="Primary contact email")
+    total_emails: int = Field(0, description="Total email interactions with this contact")
+    latest_subject: str | None = Field(None, description="Subject of the most recent email")
+    latest_date: str | None = Field(None, description="ISO timestamp of the most recent email")
+    latest_date_relative: str | None = Field(None, description="Relative time string (e.g., '5d ago')")
+    has_pending_draft: bool = Field(False, description="Whether there is a pending draft for this contact")
+    draft_id: str | None = Field(None, description="ID of the pending draft, if any")
+    pipeline_context: dict[str, Any] | None = Field(
+        None, description="Pipeline context (company, lead, stage, health)"
+    )
+
+
+class UpcomingMeetingWithContext(BaseModel):
+    """An upcoming meeting enriched with email context."""
+
+    meeting_id: str | None = Field(None, description="Calendar event ID")
+    meeting_title: str = Field(..., description="Meeting title")
+    meeting_time: str = Field(..., description="ISO timestamp of meeting start")
+    time_until: str = Field(..., description="Human-readable time until meeting (e.g., '2 hours')")
+    attendees: list[MeetingAttendee] = Field(
+        default_factory=list, description="Meeting attendees"
+    )
+    email_context: MeetingEmailContext = Field(
+        ..., description="Email communication context for the primary contact"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +391,74 @@ async def get_communications_analytics(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve communication analytics. Please try again.",
         ) from e
+
+
+@router.get(
+    "/upcoming-meetings",
+    response_model=list[UpcomingMeetingWithContext],
+)
+async def get_upcoming_meetings_with_context(
+    current_user: CurrentUser,
+    hours_ahead: int = Query(
+        24,
+        ge=1,
+        le=168,
+        description="How many hours ahead to look for meetings (default: 24, max: 168)",
+    ),
+) -> list[dict[str, Any]]:
+    """Get upcoming meetings enriched with email context.
+
+    Queries calendar_events for meetings in the next N hours, then enriches
+    each meeting with email communication context from email_scan_log and
+    email_drafts.  Only returns meetings where ARIA can add value — i.e.,
+    where there is email history with at least one attendee.
+
+    Returns an empty list (not an error) if:
+    - No calendar integration is connected
+    - No upcoming meetings exist
+    - No meetings have email context
+
+    Args:
+        current_user: The authenticated user.
+        hours_ahead: How many hours ahead to look (default: 24).
+
+    Returns:
+        List of UpcomingMeetingWithContext, possibly empty.
+    """
+    user_id = current_user.id
+
+    logger.info(
+        "COMMUNICATIONS_API: Fetching upcoming meetings with context for user %s, hours_ahead=%d",
+        user_id,
+        hours_ahead,
+    )
+
+    try:
+        from src.services.pre_meeting_context import PreMeetingContextService
+
+        service = PreMeetingContextService()
+        meetings = await service.get_upcoming_meetings_with_context(
+            user_id=user_id,
+            hours_ahead=hours_ahead,
+        )
+
+        logger.info(
+            "COMMUNICATIONS_API: Found %d upcoming meetings with email context for user %s",
+            len(meetings),
+            user_id,
+        )
+
+        return meetings
+
+    except Exception as e:
+        # Graceful degradation — never block the page for calendar failures
+        logger.warning(
+            "COMMUNICATIONS_API: Failed to get upcoming meetings for user %s: %s",
+            user_id,
+            e,
+            exc_info=True,
+        )
+        return []
 
 
 def _generate_snippet(body: str | None, max_length: int = 150) -> str | None:

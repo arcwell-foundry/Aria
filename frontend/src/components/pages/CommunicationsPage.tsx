@@ -16,7 +16,7 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Search, Filter, Mail, Clock, ArrowRight, CircleAlert, Check, X, CheckSquare, Square } from 'lucide-react';
+import { Search, Filter, Mail, Clock, ArrowRight, CircleAlert, Check, X, CheckSquare, Square, Calendar, FileEdit, ExternalLink } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { isPlaceholderDraft } from '@/utils/isPlaceholderDraft';
 import { useDrafts, useBatchDraftAction } from '@/hooks/useDrafts';
@@ -25,6 +25,8 @@ import { DraftDetailPage } from './DraftDetailPage';
 import { EmailDecisionsLog } from '@/components/communications/EmailDecisionsLog';
 import { LearningModeBanner } from '@/components/communications/LearningModeBanner';
 import { ContactHistoryView } from '@/components/communications/ContactHistoryView';
+import { useUpcomingMeetings } from '@/hooks/useUpcomingMeetings';
+import type { UpcomingMeetingWithContext } from '@/api/communications';
 import type { EmailDraftStatus, EmailDraftPurpose, ConfidenceTier, EmailDraftListItem } from '@/api/drafts';
 
 type CommunicationsView = 'drafts' | 'decisions';
@@ -262,6 +264,170 @@ function BatchConfirmDialog({
   );
 }
 
+// Upcoming meetings banner — shows meetings with email context
+function UpcomingMeetingsBanner({
+  onContactClick,
+  onDraftClick,
+}: {
+  onContactClick: (email: string) => void;
+  onDraftClick: (draftId: string) => void;
+}) {
+  const { data: meetings } = useUpcomingMeetings(24);
+
+  if (!meetings || meetings.length === 0) return null;
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-center gap-2 mb-3">
+        <Calendar
+          className="w-4 h-4"
+          style={{ color: 'var(--accent)' }}
+        />
+        <span
+          className="text-xs font-medium uppercase tracking-wider"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          Upcoming meetings
+        </span>
+      </div>
+      <div className="flex gap-3 overflow-x-auto pb-1">
+        {meetings.map((meeting: UpcomingMeetingWithContext) => (
+          <MeetingContextCard
+            key={meeting.meeting_id ?? meeting.meeting_time}
+            meeting={meeting}
+            onContactClick={onContactClick}
+            onDraftClick={onDraftClick}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Single meeting context card
+function MeetingContextCard({
+  meeting,
+  onContactClick,
+  onDraftClick,
+}: {
+  meeting: UpcomingMeetingWithContext;
+  onContactClick: (email: string) => void;
+  onDraftClick: (draftId: string) => void;
+}) {
+  const ctx = meeting.email_context;
+  const primaryAttendee = meeting.attendees[0];
+  const attendeeDisplay = primaryAttendee?.name || ctx.contact_email.split('@')[0];
+
+  return (
+    <div
+      className="flex-shrink-0 w-80 border rounded-lg p-3 transition-all duration-200 hover:shadow-sm"
+      style={{
+        backgroundColor: 'var(--bg-elevated)',
+        borderColor: 'var(--border)',
+        borderLeftWidth: '3px',
+        borderLeftColor: 'var(--accent)',
+      }}
+    >
+      {/* Meeting title + time */}
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="min-w-0 flex-1">
+          <p
+            className="text-sm font-medium truncate"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {meeting.meeting_title}
+          </p>
+          <p
+            className="text-xs"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            in {meeting.time_until}
+            {meeting.attendees.length > 1 && (
+              <span className="ml-1">
+                ({meeting.attendees.length} attendees)
+              </span>
+            )}
+          </p>
+        </div>
+        <div
+          className="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium"
+          style={{
+            backgroundColor: 'var(--accent)',
+            color: 'white',
+          }}
+        >
+          {meeting.time_until.includes('hour') || meeting.time_until.includes('minute') || meeting.time_until === 'now'
+            ? 'SOON'
+            : 'UPCOMING'}
+        </div>
+      </div>
+
+      {/* Latest email context */}
+      {ctx.latest_subject && (
+        <div
+          className="text-xs truncate mb-2 px-2 py-1.5 rounded"
+          style={{
+            backgroundColor: 'var(--bg-subtle)',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          <span style={{ color: 'var(--text-primary)' }}>Latest:</span>{' '}
+          {ctx.latest_subject}
+          {ctx.latest_date_relative && (
+            <span className="ml-1 opacity-70">{ctx.latest_date_relative}</span>
+          )}
+        </div>
+      )}
+
+      {/* Pipeline context badge */}
+      {ctx.pipeline_context?.company_name && (
+        <div className="mb-2">
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded"
+            style={{
+              backgroundColor: 'var(--bg-subtle)',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            {ctx.pipeline_context.company_name}
+            {ctx.pipeline_context.relationship_type && (
+              <> ({ctx.pipeline_context.relationship_type.replace(/_/g, ' ')})</>
+            )}
+          </span>
+        </div>
+      )}
+
+      {/* Action links */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => onContactClick(ctx.contact_email)}
+          className="flex items-center gap-1 text-xs font-medium transition-colors hover:opacity-80"
+          style={{ color: 'var(--accent)' }}
+        >
+          <ExternalLink className="w-3 h-3" />
+          View Thread
+        </button>
+        {ctx.has_pending_draft && ctx.draft_id && (
+          <button
+            onClick={() => onDraftClick(ctx.draft_id!)}
+            className="flex items-center gap-1 text-xs font-medium transition-colors hover:opacity-80"
+            style={{ color: '#7c3aed' }}
+          >
+            <FileEdit className="w-3 h-3" />
+            Review Draft
+          </button>
+        )}
+        <span
+          className="ml-auto text-[10px] font-mono"
+          style={{ color: 'var(--text-secondary)', opacity: 0.6 }}
+        >
+          {ctx.total_emails} email{ctx.total_emails !== 1 ? 's' : ''} with {attendeeDisplay}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // Drafts List View
 function DraftsList({ onContactClick }: { onContactClick: (email: string) => void }) {
   const navigate = useNavigate();
@@ -366,6 +532,12 @@ function DraftsList({ onContactClick }: { onContactClick: (email: string) => voi
     <div className="flex-1 overflow-y-auto p-8 relative">
       {/* Learning mode indicator */}
       <LearningModeBanner />
+
+      {/* Upcoming meetings with email context */}
+      <UpcomingMeetingsBanner
+        onContactClick={onContactClick}
+        onDraftClick={(draftId) => navigate(`/communications/drafts/${draftId}`)}
+      />
 
       {/* Header */}
       <div className="mb-6">
