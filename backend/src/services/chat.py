@@ -1436,20 +1436,80 @@ class ChatService:
                                         "[DEBRIEF] Composio email search failed for %s in %s: %s",
                                         att_email, folder, _folder_err,
                                     )
+                            # Log sample message structure for debugging
+                            if all_msgs:
+                                import json as _json
+                                sample = all_msgs[0] if isinstance(all_msgs[0], dict) else {}
+                                logger.info(
+                                    "[DEBRIEF] Sample Composio message keys: %s",
+                                    list(sample.keys()) if sample else "NOT_A_DICT",
+                                )
+                                logger.info(
+                                    "[DEBRIEF] Sample Composio message (first 500 chars): %s",
+                                    _json.dumps(sample, default=str)[:500],
+                                )
+
                             for msg in all_msgs[:20]:
-                                from_addr = msg.get("from", {}).get("emailAddress", {})
-                                to_addrs = [
-                                    r.get("emailAddress", {}).get("address", "")
-                                    for r in (msg.get("toRecipients") or [])
-                                ]
-                                cc_addrs = [
-                                    r.get("emailAddress", {}).get("address", "")
-                                    for r in (msg.get("ccRecipients") or [])
-                                ]
+                                # Extract sender from multiple possible paths
+                                sender_email = ""
+                                sender_name = ""
+                                if isinstance(msg, dict):
+                                    # Path 1: Outlook Graph API nested structure
+                                    # {"from": {"emailAddress": {"name": "...", "address": "..."}}}
+                                    from_obj = msg.get("from") or msg.get("sender") or {}
+                                    if isinstance(from_obj, dict):
+                                        email_addr_obj = from_obj.get("emailAddress", {})
+                                        if isinstance(email_addr_obj, dict):
+                                            sender_email = email_addr_obj.get("address", "")
+                                            sender_name = email_addr_obj.get("name", "")
+                                        # Path 2: flat dict {"from": {"address": "...", "name": "..."}}
+                                        if not sender_email:
+                                            sender_email = from_obj.get("address", "")
+                                            sender_name = sender_name or from_obj.get("name", "")
+                                    # Path 3: "from" is a string (some normalizations)
+                                    if not sender_email and isinstance(msg.get("from"), str):
+                                        sender_email = msg["from"]
+                                    # Path 4: flat keys from some Composio normalizations
+                                    if not sender_email:
+                                        sender_email = (
+                                            msg.get("from_email", "")
+                                            or msg.get("senderEmail", "")
+                                            or msg.get("sender_email", "")
+                                        )
+
+                                # Extract to/cc from multiple possible paths
+                                to_addrs: list[str] = []
+                                to_recipients = msg.get("toRecipients") or msg.get("to_recipients") or msg.get("to") or []
+                                if isinstance(to_recipients, list):
+                                    for r in to_recipients:
+                                        if isinstance(r, dict):
+                                            ea = r.get("emailAddress", {})
+                                            addr = ea.get("address", "") if isinstance(ea, dict) else ""
+                                            if not addr:
+                                                addr = r.get("address", "") or r.get("email", "")
+                                            if addr:
+                                                to_addrs.append(addr)
+                                        elif isinstance(r, str) and r.strip():
+                                            to_addrs.append(r.strip())
+
+                                cc_addrs: list[str] = []
+                                cc_recipients = msg.get("ccRecipients") or msg.get("cc_recipients") or msg.get("cc") or []
+                                if isinstance(cc_recipients, list):
+                                    for r in cc_recipients:
+                                        if isinstance(r, dict):
+                                            ea = r.get("emailAddress", {})
+                                            addr = ea.get("address", "") if isinstance(ea, dict) else ""
+                                            if not addr:
+                                                addr = r.get("address", "") or r.get("email", "")
+                                            if addr:
+                                                cc_addrs.append(addr)
+                                        elif isinstance(r, str) and r.strip():
+                                            cc_addrs.append(r.strip())
+
                                 results.append({
                                     "subject": msg.get("subject", ""),
-                                    "sender_email": from_addr.get("address", ""),
-                                    "sender_name": from_addr.get("name", ""),
+                                    "sender_email": sender_email,
+                                    "sender_name": sender_name,
                                     "to_emails": to_addrs,
                                     "cc_emails": cc_addrs,
                                     "snippet": (msg.get("bodyPreview", "") or "")[:300],
@@ -1505,6 +1565,20 @@ class ChatService:
                                 to_list = [a.lower() for a in (r.get("to_emails") or []) if a]
                                 cc_list = [a.lower() for a in (r.get("cc_emails") or []) if a]
                                 all_participants = [sender] + to_list + cc_list
+
+                                # Defense-in-depth: if we couldn't parse any
+                                # participant addresses from this email, trust
+                                # the Outlook search engine result rather than
+                                # discarding it (the KQL query already filtered).
+                                has_any_addr = any(a for a in all_participants if a)
+                                if not has_any_addr:
+                                    logger.info(
+                                        "[DEBRIEF] Post-filter keeping email with no parsed addresses "
+                                        "(trusting search engine): subject=%s",
+                                        r.get("subject", "")[:80],
+                                    )
+                                    filtered.append(r)
+                                    continue
 
                                 if is_domain_search:
                                     # Domain search: check if any participant's email
