@@ -954,17 +954,35 @@ async def deliver_briefing(
 
             if result.data:
                 briefing = result.data[0]
+                briefing_id = briefing.get("id")
                 raw_content = briefing.get("content")
                 fallback_content = (
                     json.loads(raw_content) if isinstance(raw_content, str) else raw_content
                 )
+
+                # Update delivery status in DB
+                now = datetime.now(UTC).isoformat()
+                try:
+                    db.table("daily_briefings").update(
+                        {
+                            "delivery_method": "text",
+                            "delivered_at": now,
+                            "ws_delivered": False,
+                        }
+                    ).eq("id", briefing_id).execute()
+                except Exception as upd_err:
+                    logger.warning(
+                        f"Failed to update delivery status: {upd_err}",
+                        extra={"user_id": current_user.id, "briefing_id": briefing_id},
+                    )
+
                 logger.info(
                     "Briefing delivered in text-only mode (Tavus not configured, from DB)",
-                    extra={"user_id": current_user.id},
+                    extra={"user_id": current_user.id, "briefing_id": briefing_id},
                 )
                 return {
                     "mode": "text_only",
-                    "briefing_id": briefing.get("id"),
+                    "briefing_id": briefing_id,
                     "content": fallback_content,
                     "briefing_date": briefing.get("briefing_date"),
                     "message": "Video avatar not configured. Text briefing available.",
@@ -985,6 +1003,27 @@ async def deliver_briefing(
             # 15 second timeout for generation when Tavus is unconfigured
             async with asyncio.timeout(15):
                 content = await service.generate_briefing(current_user.id)
+
+            # Update delivery status on the newly generated briefing
+            try:
+                from src.db.supabase import SupabaseClient
+
+                db2 = SupabaseClient.get_client()
+                today_str2 = date.today().isoformat()
+                now = datetime.now(UTC).isoformat()
+                db2.table("daily_briefings").update(
+                    {
+                        "delivery_method": "text",
+                        "delivered_at": now,
+                        "ws_delivered": False,
+                    }
+                ).eq("user_id", current_user.id).eq("briefing_date", today_str2).execute()
+            except Exception as upd_err:
+                logger.warning(
+                    f"Failed to update delivery status for generated briefing: {upd_err}",
+                    extra={"user_id": current_user.id},
+                )
+
             logger.info(
                 "Briefing delivered in text-only mode (Tavus not configured, freshly generated)",
                 extra={"user_id": current_user.id},
@@ -1039,6 +1078,27 @@ async def deliver_briefing(
                 suggestions=content.get("suggestions", []),
             )
             await ws_manager.send_to_user(current_user.id, event)
+
+            # Update delivery status in DB
+            try:
+                from src.db.supabase import SupabaseClient as _SB
+
+                _db = _SB.get_client()
+                _now = datetime.now(UTC).isoformat()
+                _today = date.today().isoformat()
+                _db.table("daily_briefings").update(
+                    {
+                        "delivery_method": "websocket",
+                        "delivered_at": _now,
+                        "ws_delivered": True,
+                    }
+                ).eq("user_id", current_user.id).eq("briefing_date", _today).execute()
+            except Exception as upd_err:
+                logger.warning(
+                    f"Failed to update delivery status after WS delivery: {upd_err}",
+                    extra={"user_id": current_user.id},
+                )
+
             logger.info("Briefing delivered via WebSocket", extra={"user_id": current_user.id})
             return {"mode": "video", "briefing": content, "status": "delivered"}
         except Exception as ws_error:
@@ -1046,8 +1106,26 @@ async def deliver_briefing(
                 f"WebSocket briefing delivery failed, falling back to text-only: {ws_error}",
                 extra={"user_id": current_user.id},
             )
-            # Fall back to text-only if WebSocket fails
+            # Fall back to text-only if WebSocket fails — still mark as delivered
             if content:
+                try:
+                    from src.db.supabase import SupabaseClient as _SB2
+
+                    _db2 = _SB2.get_client()
+                    _now2 = datetime.now(UTC).isoformat()
+                    _today2 = date.today().isoformat()
+                    _db2.table("daily_briefings").update(
+                        {
+                            "delivery_method": "text",
+                            "delivered_at": _now2,
+                            "ws_delivered": False,
+                        }
+                    ).eq("user_id", current_user.id).eq("briefing_date", _today2).execute()
+                except Exception as upd_err:
+                    logger.warning(
+                        f"Failed to update delivery status on WS fallback: {upd_err}",
+                        extra={"user_id": current_user.id},
+                    )
                 return {
                     "mode": "text_only",
                     "content": content,
@@ -1080,17 +1158,35 @@ async def deliver_briefing(
 
         if result.data:
             briefing = result.data[0]
+            fallback_briefing_id = briefing.get("id")
             raw_content = briefing.get("content")
             fallback_content = (
                 json.loads(raw_content) if isinstance(raw_content, str) else raw_content
             )
+
+            # Update delivery status in DB
+            now = datetime.now(UTC).isoformat()
+            try:
+                db.table("daily_briefings").update(
+                    {
+                        "delivery_method": "text",
+                        "delivered_at": now,
+                        "ws_delivered": False,
+                    }
+                ).eq("id", fallback_briefing_id).execute()
+            except Exception as upd_err:
+                logger.warning(
+                    f"Failed to update delivery status in DB fallback: {upd_err}",
+                    extra={"user_id": current_user.id, "briefing_id": fallback_briefing_id},
+                )
+
             logger.info(
                 "Briefing delivered from database fallback",
-                extra={"user_id": current_user.id},
+                extra={"user_id": current_user.id, "briefing_id": fallback_briefing_id},
             )
             return {
                 "mode": "text_only",
-                "briefing_id": briefing.get("id"),
+                "briefing_id": fallback_briefing_id,
                 "content": fallback_content,
                 "briefing_date": briefing.get("briefing_date"),
                 "message": "Text briefing mode",
