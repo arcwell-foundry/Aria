@@ -1407,15 +1407,21 @@ async def _maybe_deliver_morning_briefing(user_id: str) -> bool:
             suggestions=suggestions,
         )
 
-        # Mark as delivered
+        # Mark as delivered with full delivery tracking
         if briefing_id:
             try:
+                from datetime import UTC, datetime
+
                 db.table("daily_briefings").update(
-                    {"ws_delivered": True}
+                    {
+                        "ws_delivered": True,
+                        "delivery_method": "websocket",
+                        "delivered_at": datetime.now(UTC).isoformat(),
+                    }
                 ).eq("id", briefing_id).execute()
             except Exception:
-                # ws_delivered column may not exist yet — tolerate gracefully
-                logger.debug("Could not set ws_delivered on daily_briefings (column may not exist)")
+                # ws_delivered/delivery_method columns may not exist yet
+                logger.debug("Could not update delivery status on daily_briefings")
 
         logger.info("Morning briefing delivered via WS", extra={"user_id": user_id})
         return True

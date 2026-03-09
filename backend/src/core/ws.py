@@ -146,6 +146,35 @@ class ConnectionManager:
         for ws in dead:
             self.disconnect(user_id, ws)
 
+    async def send_raw_to_user(self, user_id: str, data: dict[str, Any]) -> None:
+        """Send a raw dict payload to all of a user's active connections.
+
+        Unlike send_to_user which requires a WSEvent, this method sends
+        an arbitrary JSON-serializable dict directly. Use for custom event
+        types that don't have a WSEvent model (e.g. briefing.ready).
+
+        Args:
+            user_id: The user to send to.
+            data: Raw dict payload to send as JSON.
+        """
+        connections = self._connections.get(user_id, set())
+        if not connections:
+            return
+
+        dead: list[WebSocket] = []
+        for ws in connections:
+            try:
+                await ws.send_json(data)
+            except Exception:
+                logger.warning(
+                    "Failed to send raw WebSocket event, removing dead connection",
+                    extra={"user_id": user_id, "event_type": data.get("type", "unknown")},
+                )
+                dead.append(ws)
+
+        for ws in dead:
+            self.disconnect(user_id, ws)
+
     async def broadcast_to_company(
         self,
         company_id: str,

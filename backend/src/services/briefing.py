@@ -883,7 +883,17 @@ class BriefingService:
         content: dict[str, Any],
         briefing_date: date,
     ) -> bool:
-        """Deliver briefing via WebSocket broadcast.
+        """Deliver briefing via WebSocket broadcast and chat message.
+
+        Sends the briefing as:
+        1. An ARIA message via WebSocket (if user is connected)
+        2. A briefing.ready event for frontend listeners
+        3. A chat message in the user's active conversation
+
+        If the user is offline, the WebSocket send is a no-op (the user
+        will receive it via _maybe_deliver_morning_briefing on reconnect).
+        The chat message ensures the briefing is always persisted and
+        accessible.
 
         Args:
             user_id: The user's UUID.
@@ -892,18 +902,19 @@ class BriefingService:
             briefing_date: The briefing date.
 
         Returns:
-            True if delivery succeeded.
+            True if delivery succeeded (always True — offline is not a failure).
         """
+        from src.core.ws import ws_manager
+
+        summary = content.get("summary", "")
+        rich_content = content.get("rich_content", [])
+        ui_commands = content.get("ui_commands", [])
+        suggestions = content.get("suggestions", ["Show me details", "Dismiss"])
+
+        ws_sent = False
+
+        # 1. Send ARIA message via WebSocket (no-op if user offline)
         try:
-            from src.core.ws import ws_manager
-
-            # Broadcast briefing.ready event to user's WebSocket channel
-            summary = content.get("summary", "")
-            rich_content = content.get("rich_content", [])
-            ui_commands = content.get("ui_commands", [])
-            suggestions = content.get("suggestions", ["Show me details", "Dismiss"])
-
-            # Send the briefing as an ARIA message
             await ws_manager.send_aria_message(
                 user_id=user_id,
                 message=summary,
@@ -911,32 +922,56 @@ class BriefingService:
                 ui_commands=ui_commands,
                 suggestions=suggestions,
             )
+            ws_sent = True
+        except Exception as e:
+            logger.debug(
+                "WebSocket ARIA message send failed (user may be offline)",
+                extra={"user_id": user_id, "error": str(e)},
+            )
 
-            # Also broadcast a briefing.ready event for any listeners
-            await ws_manager.send_to_user(
+        # 2. Broadcast briefing.ready event for frontend listeners
+        try:
+            await ws_manager.send_raw_to_user(
                 user_id,
                 {
                     "type": "briefing.ready",
-                    "briefing_id": briefing_id,
-                    "briefing_date": briefing_date.isoformat(),
-                    "summary": summary[:500] if summary else "",
-                    "sections": list(content.keys()),
-                    "generated_at": content.get("generated_at", ""),
+                    "payload": {
+                        "briefing_id": briefing_id,
+                        "briefing_date": briefing_date.isoformat(),
+                        "summary": summary[:500] if summary else "",
+                        "sections": list(content.keys()),
+                        "generated_at": content.get("generated_at", ""),
+                    },
                 },
             )
-
-            logger.info(
-                "Briefing delivered via WebSocket",
-                extra={"user_id": user_id, "briefing_id": briefing_id},
+        except Exception as e:
+            logger.debug(
+                "WebSocket briefing.ready event failed (user may be offline)",
+                extra={"user_id": user_id, "error": str(e)},
             )
-            return True
 
+        # 3. Post briefing as a chat message in the user's conversation
+        try:
+            await self._post_briefing_as_chat_message(
+                user_id, briefing_id, content, briefing_date
+            )
         except Exception as e:
             logger.warning(
-                "WebSocket delivery failed",
-                extra={"user_id": user_id, "briefing_id": briefing_id, "error": str(e)},
+                "Failed to post briefing as chat message",
+                extra={"user_id": user_id, "error": str(e)},
             )
-            return False
+
+        logger.info(
+            "Briefing delivery completed",
+            extra={
+                "user_id": user_id,
+                "briefing_id": briefing_id,
+                "ws_sent": ws_sent,
+            },
+        )
+        # Always return True — the briefing is generated and stored.
+        # Offline users receive it on next WebSocket connect.
+        return True
 
     async def _create_briefing_notification(
         self,
@@ -982,6 +1017,113 @@ class BriefingService:
                 "Failed to create briefing notification",
                 extra={"user_id": user_id, "briefing_id": briefing_id, "error": str(e)},
             )
+
+    async def _post_briefing_as_chat_message(
+        self,
+        user_id: str,
+        briefing_id: str,
+        content: dict[str, Any],
+        briefing_date: date,
+    ) -> None:
+        """Post the briefing as an assistant message in the user's conversation.
+
+        Finds today's most recent conversation or creates a new one, then
+        inserts the briefing summary as an assistant message. This ensures
+        the briefing is accessible in chat history even if the user was
+        offline during WebSocket delivery.
+
+        Args:
+            user_id: The user's UUID.
+            briefing_id: The briefing's UUID.
+            content: The briefing content dict.
+            briefing_date: The briefing date.
+        """
+        import uuid as _uuid
+
+        from src.services.conversations import ConversationService
+
+        db = self._db
+        conv_svc = ConversationService(db_client=db)
+
+        summary = content.get("summary", "")
+        if not summary:
+            return
+
+        # Find today's most recent conversation for this user
+        today_str = briefing_date.isoformat()
+        conversation_id: str | None = None
+
+        try:
+            result = (
+                db.table("conversations")
+                .select("id")
+                .eq("user_id", user_id)
+                .gte("created_at", f"{today_str}T00:00:00")
+                .order("updated_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                conversation_id = result.data[0]["id"]
+        except Exception:
+            logger.debug(
+                "Could not find existing conversation for briefing",
+                extra={"user_id": user_id},
+            )
+
+        # Create a new conversation if none exists today
+        if not conversation_id:
+            conversation_id = str(_uuid.uuid4())
+            try:
+                db.table("conversations").insert(
+                    {
+                        "id": conversation_id,
+                        "user_id": user_id,
+                        "title": f"Morning Briefing - {briefing_date.strftime('%b %d')}",
+                        "message_count": 0,
+                    }
+                ).execute()
+            except Exception as e:
+                logger.warning(
+                    "Failed to create conversation for briefing",
+                    extra={"user_id": user_id, "error": str(e)},
+                )
+                return
+
+        # Insert briefing as assistant message
+        await conv_svc.save_message(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=summary,
+            metadata={
+                "type": "morning_briefing",
+                "briefing_id": briefing_id,
+                "briefing_date": today_str,
+            },
+        )
+
+        # Update conversation metadata
+        try:
+            preview = summary[:100] + "..." if len(summary) > 100 else summary
+            db.table("conversations").update(
+                {
+                    "message_count": 1,
+                    "last_message_at": datetime.now(UTC).isoformat(),
+                    "last_message_preview": preview,
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            ).eq("id", conversation_id).execute()
+        except Exception:
+            logger.debug("Could not update conversation metadata for briefing")
+
+        logger.info(
+            "Briefing posted as chat message",
+            extra={
+                "user_id": user_id,
+                "briefing_id": briefing_id,
+                "conversation_id": conversation_id,
+            },
+        )
 
     def _build_rich_content(
         self,
