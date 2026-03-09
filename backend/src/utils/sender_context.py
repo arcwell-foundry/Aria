@@ -9,10 +9,12 @@ Everything derived from each user's live data at classification time.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from supabase import Client
+
+from src.utils.email_pipeline_linker import get_pipeline_context_for_email
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,7 @@ class SenderContext:
     context_summary: str
     has_prior_drafts: bool
     confidence: float
+    pipeline_context: dict[str, Any] | None = None
 
 
 def _extract_domain(email: str) -> str:
@@ -175,6 +178,21 @@ async def get_sender_context(
                     logger.warning(
                         f"SENDER_CONTEXT: monitored_entities query failed: {e}"
                     )
+
+        # 1b. Get pipeline context (lead/account linkage)
+        try:
+            pipeline_ctx = await get_pipeline_context_for_email(
+                db=db,
+                user_id=user_id,
+                contact_email=sender_email_lower,
+            )
+            context.pipeline_context = pipeline_ctx
+        except Exception as e:
+            logger.warning(
+                "SENDER_CONTEXT: pipeline context lookup failed for %s: %s",
+                sender_email,
+                e,
+            )
 
         # 2. Check memory_semantic for sender references
         if not context.is_strategic:
