@@ -48,18 +48,18 @@ async def run_hunter_lead_generation_job() -> dict[str, Any]:
 
     db = SupabaseClient.get_client()
 
-    # Query active lead generation goals
+    # Query lead generation goals: active or plan_ready
     goals_result = (
         db.table("goals")
         .select("id, user_id, title, description, progress, metadata, goal_type, status")
-        .eq("status", "active")
+        .in_("status", ["active", "plan_ready"])
         .execute()
     )
 
     goals = _filter_lead_gen_goals(goals_result)
 
     if not goals:
-        logger.info("No active lead generation goals found")
+        logger.info("No active/plan_ready lead generation goals found")
         return {
             "users_checked": 0,
             "goals_processed": 0,
@@ -67,7 +67,7 @@ async def run_hunter_lead_generation_job() -> dict[str, Any]:
             "errors": 0,
         }
 
-    logger.info("Found %d active lead generation goals", len(goals))
+    logger.info("Found %d lead generation goals (active + plan_ready)", len(goals))
 
     goals_processed = 0
     leads_found = 0
@@ -78,6 +78,18 @@ async def run_hunter_lead_generation_job() -> dict[str, Any]:
         user_id = goal["user_id"]
 
         try:
+            # Activate plan_ready goals before processing
+            if goal.get("status") == "plan_ready":
+                db.table("goals").update({
+                    "status": "active",
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }).eq("id", goal_id).execute()
+                logger.info(
+                    "Activated plan_ready goal %s for user %s",
+                    goal_id,
+                    user_id,
+                )
+
             # Check if user has active email integrations
             integration_service = IntegrationService()
             gmail = await integration_service.get_integration(
