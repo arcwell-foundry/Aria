@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import { X, Clock, Users } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { usePendingDebriefs } from "@/hooks/useDebriefs";
+import { useAuth } from "@/hooks/useAuth";
 import type { PendingDebrief } from "@/api/debriefs";
 
 const STORAGE_KEY = "aria:pending-debriefs-dismissed";
@@ -124,6 +125,7 @@ function PendingDebriefItem({
 export function PendingDebriefBanner() {
   const navigate = useNavigate();
   const { data: pendingMeetings, isLoading } = usePendingDebriefs();
+  const { user } = useAuth();
   const [isDismissed, setIsDismissed] = useState(() => !!getStoredDismissal());
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -140,14 +142,22 @@ export function PendingDebriefBanner() {
       params.set("title", meeting.title);
     }
     if (meeting.attendees?.length) {
-      const names = (meeting.attendees as string[])
-        .map((a) => {
-          // Extract name from email (before @) or use as-is
-          const atIndex = a.indexOf("@");
-          return atIndex > 0 ? a.substring(0, atIndex).replace(/[._]/g, " ") : a;
-        })
-        .join(", ");
-      params.set("attendees", names);
+      const userEmail = user?.email;
+      const platformDomains = ['@lu.ma', '@calendar.google.com', '@resource.calendar.google.com'];
+      const externalAttendees = (meeting.attendees as string[]).filter((a) => {
+        if (userEmail && a === userEmail) return false;
+        return !platformDomains.some((domain) => a.endsWith(domain));
+      });
+      if (externalAttendees.length > 0) {
+        const names = externalAttendees
+          .map((a) => {
+            // Extract name from email (before @) or use as-is
+            const atIndex = a.indexOf("@");
+            return atIndex > 0 ? a.substring(0, atIndex).replace(/[._]/g, " ") : a;
+          })
+          .join(", ");
+        params.set("attendees", names);
+      }
     }
     navigate(`/?${params.toString()}`);
   };

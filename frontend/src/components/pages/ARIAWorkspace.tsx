@@ -51,6 +51,7 @@ export function ARIAWorkspace() {
   // Handle debrief query params (?debrief=meetingId&title=...&attendees=... or ?action=debrief)
   const [searchParams, setSearchParams] = useSearchParams();
   const debriefHandledRef = useRef(false);
+  const pendingDebriefRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (debriefHandledRef.current) return;
@@ -71,25 +72,13 @@ export function ARIAWorkspace() {
         prompt += ` with ${attendees}`;
       }
 
-      const store = useConversationStore.getState();
-      store.setInputValue(prompt);
+      // Store the prompt and clear URL params; send will happen in the next effect
+      pendingDebriefRef.current = prompt;
       setSearchParams({}, { replace: true });
-
-      // Focus the input after a tick
-      setTimeout(() => {
-        const textarea = document.querySelector('[data-aria-id="message-input"]') as HTMLTextAreaElement | null;
-        textarea?.focus();
-      }, 100);
     } else if (action === 'debrief') {
       debriefHandledRef.current = true;
-      const store = useConversationStore.getState();
-      store.setInputValue("I just finished some meetings. Help me debrief.");
+      pendingDebriefRef.current = "I just finished some meetings. Help me debrief.";
       setSearchParams({}, { replace: true });
-
-      setTimeout(() => {
-        const textarea = document.querySelector('[data-aria-id="message-input"]') as HTMLTextAreaElement | null;
-        textarea?.focus();
-      }, 100);
     }
   }, [searchParams, setSearchParams]);
 
@@ -590,6 +579,17 @@ export function ARIAWorkspace() {
     },
     [addMessage, activeConversationId, setActiveConversation],
   );
+
+  // Auto-send pending debrief message once handleSend is available
+  useEffect(() => {
+    if (!pendingDebriefRef.current) return;
+    const prompt = pendingDebriefRef.current;
+    pendingDebriefRef.current = null;
+    // Small delay to ensure WebSocket is connected and React has settled
+    setTimeout(() => {
+      handleSend(prompt);
+    }, 150);
+  }, [handleSend]);
 
   const handleStartTyping = useCallback(() => {
     const textarea = document.querySelector('[data-aria-id="message-input"]') as HTMLTextAreaElement | null;
