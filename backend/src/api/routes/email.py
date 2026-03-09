@@ -331,6 +331,9 @@ class ScanDecisionInfo(BaseModel):
     reason: str = Field(..., description="Reason for categorization")
     scanned_at: str = Field(..., description="Timestamp of scan")
     confidence: float | None = Field(None, description="Confidence score (0.0-1.0)")
+    pipeline_context: dict[str, Any] | None = Field(
+        None, description="Pipeline context linking sender to CRM leads"
+    )
 
 
 class ScanDecisionsResponse(BaseModel):

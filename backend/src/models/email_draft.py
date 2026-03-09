@@ -212,6 +212,10 @@ class EmailDraftListResponse(BaseModel):
     priority_score: int | None = Field(
         None, description="Computed priority score for sorting (higher = more important)"
     )
+    # Pipeline context from email_pipeline_linker
+    pipeline_context: dict[str, Any] | None = Field(
+        None, description="Pipeline context linking contact to CRM leads"
+    )
 
 
 class EmailRegenerateRequest(BaseModel):
