@@ -315,6 +315,23 @@ class EmailAnalyzer:
                     reply_e,
                 )
 
+            # 5b. Scan sent folder to proactively mark user_replied on scan log entries
+            try:
+                sent_updated = await self._scan_sent_folder_for_replies(user_id)
+                if sent_updated > 0:
+                    logger.info(
+                        "EMAIL_ANALYZER: Sent folder scan marked %d threads as user_replied "
+                        "for user %s",
+                        sent_updated,
+                        user_id,
+                    )
+            except Exception as sent_e:
+                logger.warning(
+                    "EMAIL_ANALYZER: Sent folder scan failed for user %s: %s",
+                    user_id,
+                    sent_e,
+                )
+
             # 6. Extract intelligence from classified emails
             # Only process NEEDS_REPLY and FYI emails (skip SKIP)
             emails_for_intelligence = result.needs_reply + result.fyi
@@ -1255,6 +1272,200 @@ class EmailAnalyzer:
                 exc_info=True,
             )
             return []
+
+    # ------------------------------------------------------------------
+    # Sent folder scan for reply detection
+    # ------------------------------------------------------------------
+
+    async def _scan_sent_folder_for_replies(
+        self,
+        user_id: str,
+        since_hours: int = 72,
+    ) -> int:
+        """Scan sent folder to mark email_scan_log threads as user_replied.
+
+        For each recent sent email, checks if the thread_id matches an
+        email_scan_log row and if the sent email was sent after the incoming
+        email's scanned_at. If so, sets user_replied=true on the log row.
+
+        Args:
+            user_id: The user whose sent folder to scan.
+            since_hours: How many hours of sent history to check.
+
+        Returns:
+            Number of email_scan_log rows updated with user_replied=true.
+        """
+        # Get user's email integration
+        integration_result = (
+            self._db.table("user_integrations")
+            .select("integration_type, composio_connection_id, account_email")
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .in_("integration_type", ["outlook", "gmail"])
+            .limit(1)
+            .execute()
+        )
+        if not integration_result.data:
+            return 0
+
+        integration = integration_result.data[0]
+        provider = integration.get("integration_type", "").lower()
+        connection_id = integration.get("composio_connection_id")
+        user_account_email = (integration.get("account_email") or "").lower()
+
+        if not connection_id:
+            return 0
+
+        from src.integrations.oauth import get_oauth_client
+
+        oauth_client = get_oauth_client()
+
+        since_dt = datetime.now(UTC) - timedelta(hours=since_hours)
+
+        # Fetch sent emails
+        sent_emails: list[dict[str, Any]] = []
+        try:
+            if provider == "outlook":
+                response = oauth_client.execute_action_sync(
+                    connection_id=connection_id,
+                    action="OUTLOOK_LIST_MESSAGES",
+                    params={
+                        "folder": "SentItems",
+                        "top": 100,
+                        "sent_date_time_gt": since_dt.isoformat(),
+                        "orderby": ["sentDateTime desc"],
+                    },
+                    user_id=user_id,
+                    dangerously_skip_version_check=True,
+                )
+                if response.get("successful"):
+                    data = response.get("data", {})
+                    raw = data.get("response_data", data).get("value", [])
+                    for msg in raw:
+                        conv_id = msg.get("conversationId")
+                        sent_at = msg.get("sentDateTime") or msg.get("createdDateTime", "")
+                        if conv_id:
+                            sent_emails.append({
+                                "thread_id": conv_id,
+                                "sent_at": sent_at,
+                            })
+            else:
+                since_epoch = int(since_dt.timestamp())
+                response = oauth_client.execute_action_sync(
+                    connection_id=connection_id,
+                    action="GMAIL_FETCH_EMAILS",
+                    params={
+                        "label": "SENT",
+                        "max_results": 100,
+                        "query": f"after:{since_epoch}",
+                    },
+                    user_id=user_id,
+                )
+                if response.get("successful"):
+                    gmail_emails = response.get("data", {}).get("emails", [])
+                    for msg in gmail_emails:
+                        thread_id = msg.get("threadId") or msg.get("thread_id")
+                        # Gmail internalDate is epoch ms
+                        internal_date = msg.get("internalDate")
+                        sent_at = ""
+                        if internal_date:
+                            try:
+                                sent_at = datetime.fromtimestamp(
+                                    int(internal_date) / 1000, tz=UTC
+                                ).isoformat()
+                            except (ValueError, TypeError):
+                                pass
+                        if not sent_at:
+                            sent_at = msg.get("date", "")
+                        if thread_id:
+                            sent_emails.append({
+                                "thread_id": thread_id,
+                                "sent_at": sent_at,
+                            })
+        except Exception as e:
+            logger.warning(
+                "EMAIL_ANALYZER: Sent folder fetch failed for user %s: %s",
+                user_id,
+                e,
+            )
+            return 0
+
+        if not sent_emails:
+            logger.debug(
+                "EMAIL_ANALYZER: No sent emails found in last %d hours for user %s",
+                since_hours,
+                user_id,
+            )
+            return 0
+
+        logger.info(
+            "EMAIL_ANALYZER: Fetched %d sent emails for reply matching (user %s)",
+            len(sent_emails),
+            user_id,
+        )
+
+        # Build a map of thread_id -> earliest sent_at
+        sent_by_thread: dict[str, str] = {}
+        for sent in sent_emails:
+            tid = sent["thread_id"]
+            sat = sent["sent_at"]
+            if tid not in sent_by_thread or (sat and sat < sent_by_thread.get(tid, "z")):
+                sent_by_thread[tid] = sat
+
+        # Find email_scan_log rows for these threads where user_replied is not yet true
+        updated = 0
+        thread_ids = list(sent_by_thread.keys())
+
+        # Process in batches to avoid overly large IN clauses
+        batch_size = 50
+        for i in range(0, len(thread_ids), batch_size):
+            batch = thread_ids[i : i + batch_size]
+            try:
+                log_rows = (
+                    self._db.table("email_scan_log")
+                    .select("id, thread_id, scanned_at")
+                    .eq("user_id", user_id)
+                    .in_("thread_id", batch)
+                    .is_("user_replied", "null")
+                    .execute()
+                )
+                for row in log_rows.data or []:
+                    tid = row.get("thread_id")
+                    scanned_at = row.get("scanned_at", "")
+                    sent_at = sent_by_thread.get(tid, "")
+
+                    # Only mark replied if the sent email is after the incoming email
+                    if sent_at and scanned_at and sent_at >= scanned_at:
+                        try:
+                            self._db.table("email_scan_log").update(
+                                {"user_replied": True}
+                            ).eq("id", row["id"]).execute()
+                            updated += 1
+                        except Exception as upd_e:
+                            logger.debug(
+                                "EMAIL_ANALYZER: Failed to update user_replied for %s: %s",
+                                row["id"],
+                                upd_e,
+                            )
+                    elif sent_at and not scanned_at:
+                        # No scanned_at to compare — sent email exists, mark replied
+                        try:
+                            self._db.table("email_scan_log").update(
+                                {"user_replied": True}
+                            ).eq("id", row["id"]).execute()
+                            updated += 1
+                        except Exception as upd_e:
+                            logger.debug(
+                                "EMAIL_ANALYZER: Failed to update user_replied for %s: %s",
+                                row["id"],
+                                upd_e,
+                            )
+            except Exception as batch_e:
+                logger.warning(
+                    "EMAIL_ANALYZER: Sent folder batch query failed: %s", batch_e
+                )
+
+        return updated
 
     # ------------------------------------------------------------------
     # Gmail body enrichment

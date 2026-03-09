@@ -1941,10 +1941,11 @@ class BriefingService:
                 }
 
         # 3. Overdue tasks from prospective_memories (legacy support)
+        # Also fetch metadata to check for email thread reply evidence
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         overdue_pm_result = (
             self._db.table("prospective_memories")
-            .select("id, task, priority, trigger_config")
+            .select("id, task, priority, trigger_config, metadata")
             .eq("user_id", user_id)
             .eq("status", "pending")
             .lt("trigger_config->>due_at", today_start.isoformat())
@@ -1954,6 +1955,47 @@ class BriefingService:
         for t in overdue_pm_result.data or []:
             if not isinstance(t, dict):
                 continue
+
+            # Check if user already replied to this email thread
+            metadata = t.get("metadata") or {}
+            thread_id = metadata.get("thread_id")
+            if thread_id and metadata.get("source") == "email_commitment":
+                try:
+                    reply_check = (
+                        self._db.table("email_scan_log")
+                        .select("id")
+                        .eq("user_id", user_id)
+                        .eq("thread_id", thread_id)
+                        .eq("user_replied", True)
+                        .limit(1)
+                        .execute()
+                    )
+                    if reply_check.data:
+                        # User already replied — auto-resolve and skip
+                        try:
+                            self._db.table("prospective_memories").update(
+                                {"status": "completed"}
+                            ).eq("id", t["id"]).execute()
+                            logger.info(
+                                "BRIEFING: Auto-resolved prospective_memory %s "
+                                "(user replied to thread %s)",
+                                t["id"],
+                                thread_id,
+                            )
+                        except Exception as resolve_e:
+                            logger.debug(
+                                "BRIEFING: Failed to auto-resolve pm %s: %s",
+                                t["id"],
+                                resolve_e,
+                            )
+                        continue  # Skip this item from overdue list
+                except Exception as check_e:
+                    logger.debug(
+                        "BRIEFING: Reply check failed for thread %s: %s",
+                        thread_id,
+                        check_e,
+                    )
+
             title = _sanitize_text(t.get("task", ""))
             due_at = t.get("trigger_config", {}).get("due_at")
             if title and (
