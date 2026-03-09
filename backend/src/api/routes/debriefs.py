@@ -85,8 +85,8 @@ async def run_email_backfill(user_id: str, lookback_days: int = 90) -> dict[str,
         # Backfill both Inbox and SentItems
         for folder in ("Inbox", "SentItems"):
             skip = 0
-            page_size = 15  # Composio caps at 15
-            max_pages = 100  # 100 pages x 15 = 1500 emails per folder
+            page_size = 50
+            max_pages = 60  # 60 pages x 50 = 3000 emails per folder
             folder_stored = 0
             reached_cutoff = False
 
@@ -95,25 +95,27 @@ async def run_email_backfill(user_id: str, lookback_days: int = 90) -> dict[str,
                     break
 
                 try:
+                    call_params = {
+                        "folder": folder,
+                        "top": page_size,
+                        "$skip": skip,
+                    }
+                    logger.info(
+                        "[BACKFILL] %s page %d: calling OUTLOOK_LIST_MESSAGES with params=%s",
+                        folder,
+                        page,
+                        call_params,
+                    )
+
                     resp = await asyncio.wait_for(
                         oauth.execute_action(
                             connection_id=conn_id,
                             action="OUTLOOK_LIST_MESSAGES",
-                            params={
-                                "folder": folder,
-                                "top": page_size,
-                                "$skip": skip,
-                                "$orderby": "receivedDateTime desc",
-                                "$select": (
-                                    "id,from,toRecipients,ccRecipients,subject,"
-                                    "bodyPreview,receivedDateTime,sentDateTime,"
-                                    "internetMessageId,conversationId"
-                                ),
-                            },
+                            params=call_params,
                             user_id=user_id,
                             dangerously_skip_version_check=True,
                         ),
-                        timeout=15.0,
+                        timeout=60.0,
                     )
 
                     if not resp.get("successful") or not resp.get("data"):
@@ -217,6 +219,103 @@ async def run_email_backfill(user_id: str, lookback_days: int = 90) -> dict[str,
 
                 except asyncio.TimeoutError:
                     logger.warning("[BACKFILL] %s page %d timed out", folder, page)
+                    if page == 0 and skip == 0:
+                        # First page timed out — retry with minimal params (no $skip)
+                        logger.info("[BACKFILL] %s: retrying page 0 with minimal params", folder)
+                        try:
+                            resp = await asyncio.wait_for(
+                                oauth.execute_action(
+                                    connection_id=conn_id,
+                                    action="OUTLOOK_LIST_MESSAGES",
+                                    params={"folder": folder, "top": 50},
+                                    user_id=user_id,
+                                    dangerously_skip_version_check=True,
+                                ),
+                                timeout=60.0,
+                            )
+                            if resp.get("successful") and resp.get("data"):
+                                data = resp["data"]
+                                if isinstance(data, dict) and "response_data" in data:
+                                    data = data["response_data"]
+                                fallback_msgs = (
+                                    data if isinstance(data, list) else data.get("value", [])
+                                )
+                                logger.info(
+                                    "[BACKFILL] %s fallback: got %d messages",
+                                    folder,
+                                    len(fallback_msgs),
+                                )
+                                for msg in fallback_msgs:
+                                    received = (
+                                        msg.get("receivedDateTime", "")
+                                        or msg.get("sentDateTime", "")
+                                    )
+                                    if received and received < cutoff_iso:
+                                        break
+
+                                    from_addr = msg.get("from", {}).get("emailAddress", {})
+                                    s_email = (from_addr.get("address", "") or "").lower()
+                                    s_name = from_addr.get("name", "") or ""
+                                    subj = msg.get("subject", "")
+                                    snip = (msg.get("bodyPreview", "") or "")[:500]
+                                    eid = msg.get("internetMessageId") or msg.get("id", "")
+                                    tid = msg.get("conversationId") or None
+
+                                    if not eid or not s_email:
+                                        continue
+                                    try:
+                                        existing = (
+                                            db.table("email_scan_log")
+                                            .select("id, snippet")
+                                            .eq("user_id", user_id)
+                                            .eq("email_id", eid)
+                                            .limit(1)
+                                            .execute()
+                                        )
+                                        if existing.data and existing.data[0].get("snippet"):
+                                            continue
+                                        if existing.data:
+                                            db.table("email_scan_log").update(
+                                                {
+                                                    "snippet": snip,
+                                                    "category": "FYI",
+                                                    "urgency": "LOW",
+                                                }
+                                            ).eq("id", existing.data[0]["id"]).execute()
+                                        else:
+                                            db.table("email_scan_log").insert(
+                                                {
+                                                    "id": str(uuid.uuid4()),
+                                                    "user_id": user_id,
+                                                    "email_id": eid,
+                                                    "thread_id": tid,
+                                                    "sender_email": s_email,
+                                                    "sender_name": s_name,
+                                                    "subject": subj[:500],
+                                                    "snippet": snip,
+                                                    "category": "FYI",
+                                                    "urgency": "LOW",
+                                                    "needs_draft": False,
+                                                    "reason": "backfill",
+                                                    "scanned_at": datetime.now(
+                                                        timezone.utc
+                                                    ).isoformat(),
+                                                }
+                                            ).execute()
+                                        folder_stored += 1
+                                    except Exception:
+                                        pass
+                                logger.info(
+                                    "[BACKFILL] %s fallback stored %d emails",
+                                    folder,
+                                    folder_stored,
+                                )
+                        except Exception as fallback_err:
+                            logger.warning(
+                                "[BACKFILL] %s fallback also failed: %s",
+                                folder,
+                                str(fallback_err)[:200],
+                            )
                     break
                 except Exception as e:
                     logger.warning("[BACKFILL] %s page %d error: %s", folder, page, str(e)[:200])
