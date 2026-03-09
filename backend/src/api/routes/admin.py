@@ -1055,3 +1055,32 @@ async def trigger_goal_execution(
             "status": "complete",
             "message": "Stalled goal kickstart executed for all active goals",
         }
+
+
+# --- Hunter Lead Generation Job (manual trigger) ---
+
+
+@router.post(
+    "/jobs/hunter-lead/run",
+    response_model=dict[str, Any],
+    status_code=status.HTTP_200_OK,
+)
+async def run_hunter_lead_job(
+    _current_user: AdminUser,
+) -> dict[str, Any]:
+    """Manually trigger the Hunter lead generation job.
+
+    Runs the same job that the scheduler executes every 30 minutes.
+    Useful for testing and immediate execution without waiting for
+    the next scheduled run.
+
+    Args:
+        _current_user: Authenticated admin user.
+
+    Returns:
+        Job result with users_checked, goals_processed, leads_found, errors.
+    """
+    from src.jobs.hunter_lead_job import run_hunter_lead_generation_job
+
+    result = await run_hunter_lead_generation_job()
+    return result

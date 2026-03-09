@@ -1765,14 +1765,21 @@ class GoalExecutionService:
                 conversation_id=conversation_id,
             )
 
-            # Store execution result
-            await self._store_execution(
-                user_id=user_id,
-                goal_id=goal["id"],
-                agent_type=agent_type,
-                content=content,
-                goal_agent_id=goal_agent_id,
-            )
+            # Store execution result (fail-open: don't block persistence)
+            try:
+                await self._store_execution(
+                    user_id=user_id,
+                    goal_id=goal["id"],
+                    agent_type=agent_type,
+                    content=content,
+                    goal_agent_id=goal_agent_id,
+                )
+            except Exception as store_err:
+                logger.error(
+                    "[GOAL-EXEC] _store_execution failed (skill-aware), continuing to persist: %s",
+                    store_err,
+                    exc_info=True,
+                )
 
             # Persist structured output to domain tables
             await self._persist_structured_output(
@@ -1946,14 +1953,21 @@ class GoalExecutionService:
                 conversation_id=conversation_id,
             )
 
-            # Store execution result
-            await self._store_execution(
-                user_id=user_id,
-                goal_id=goal["id"],
-                agent_type=agent_type,
-                content=content,
-                goal_agent_id=goal_agent_id,
-            )
+            # Store execution result (fail-open: don't block persistence)
+            try:
+                await self._store_execution(
+                    user_id=user_id,
+                    goal_id=goal["id"],
+                    agent_type=agent_type,
+                    content=content,
+                    goal_agent_id=goal_agent_id,
+                )
+            except Exception as store_err:
+                logger.error(
+                    "[GOAL-EXEC] _store_execution failed (prompt-based), continuing to persist: %s",
+                    store_err,
+                    exc_info=True,
+                )
 
             # Persist structured output to domain tables
             await self._persist_structured_output(
@@ -2273,6 +2287,12 @@ class GoalExecutionService:
         """Persist Hunter agent leads to discovered_leads table."""
         from uuid import uuid4
 
+        logger.warning(
+            "[PERSIST-HUNTER] content_type=%s, content_keys=%s",
+            type(content).__name__,
+            list(content.keys()) if isinstance(content, dict) else "N/A",
+        )
+
         # Content may be:
         # 1. A list of leads directly (from agent returning list)
         # 2. Wrapped in {"result": [...]} (from _try_skill_execution wrapping)
@@ -2290,24 +2310,39 @@ class GoalExecutionService:
                         "name": profile.get("company_name", profile.get("company_type", "Unknown")),
                     },
                     "contacts": [],
-                    "fit_score": 0.5,
+                    "fit_score": 50,
                     "fit_reasons": [profile.get("why_good_fit", "")],
                     "gaps": [],
-                    "source": "hunter_prompt_fallback",
+                    "source": "goal_execution",
                 })
         else:
+            logger.warning(
+                "[PERSIST-HUNTER] No recognized lead structure in content keys=%s (goal=%s)",
+                list(content.keys()) if isinstance(content, dict) else type(content).__name__,
+                goal_id,
+            )
             leads = []
 
         if not leads:
+            logger.warning(
+                "[PERSIST-HUNTER] Empty leads list, nothing to persist (goal=%s)",
+                goal_id,
+            )
             return
+
+        logger.warning(
+            "[PERSIST-HUNTER] Persisting %d leads for goal=%s",
+            len(leads),
+            goal_id,
+        )
 
         persisted = 0
         for lead_data in leads:
             company = lead_data.get("company", {})
             company_name = company.get("name", "Unknown")
             contacts = lead_data.get("contacts", [])
-            fit_score = lead_data.get("fit_score", 0.0)
-            source = lead_data.get("source", "hunter_pro")
+            raw_score = lead_data.get("fit_score", 0)
+            fit_score = int(raw_score) if raw_score else 0
 
             lead_id = str(uuid4())
             try:
@@ -2326,26 +2361,32 @@ class GoalExecutionService:
                         },
                         "signals": lead_data.get("gaps", []),
                         "review_status": "pending",
-                        "source": source,
+                        "source": "goal_execution",
                         "created_at": now,
                         "updated_at": now,
                     }
                 ).execute()
                 persisted += 1
+                logger.info(
+                    "[PERSIST-HUNTER] Persisted lead: %s (fit=%d, goal=%s)",
+                    company_name,
+                    fit_score,
+                    goal_id,
+                )
             except Exception as e:
                 logger.error(
-                    "Failed to persist discovered lead %s: %s",
+                    "[PERSIST-HUNTER] Failed to persist discovered lead %s: %s",
                     company_name,
                     e,
                     exc_info=True,
                 )
 
-        if persisted:
-            logger.info(
-                "Persisted %d discovered leads from Hunter agent (goal=%s)",
-                persisted,
-                goal_id,
-            )
+        logger.warning(
+            "[PERSIST-HUNTER] Persisted %d/%d discovered leads (goal=%s)",
+            persisted,
+            len(leads),
+            goal_id,
+        )
 
     async def _persist_market_signals(
         self,
