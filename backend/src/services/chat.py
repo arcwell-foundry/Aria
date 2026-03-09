@@ -1506,6 +1506,21 @@ class ChatService:
                                         elif isinstance(r, str) and r.strip():
                                             cc_addrs.append(r.strip())
 
+                                # Log extraction results for first 3 messages to trace parsing
+                                if len(results) < 3:
+                                    raw_from = msg.get("from")
+                                    logger.info(
+                                        "[DEBRIEF] Extraction trace msg#%d: "
+                                        "from_type=%s from_val=%.200s "
+                                        "sender_email=%s to_addrs=%s cc_addrs=%s",
+                                        len(results),
+                                        type(raw_from).__name__,
+                                        str(raw_from),
+                                        sender_email,
+                                        to_addrs[:3],
+                                        cc_addrs[:3],
+                                    )
+
                                 results.append({
                                     "subject": msg.get("subject", ""),
                                     "sender_email": sender_email,
@@ -1560,11 +1575,26 @@ class ChatService:
                         if results:
                             filtered: list[dict[str, Any]] = []
                             search_target = att_email.lower()
-                            for r in results:
+                            for _filter_idx, r in enumerate(results):
                                 sender = (r.get("sender_email") or "").lower()
                                 to_list = [a.lower() for a in (r.get("to_emails") or []) if a]
                                 cc_list = [a.lower() for a in (r.get("cc_emails") or []) if a]
                                 all_participants = [sender] + to_list + cc_list
+
+                                # Trace first 3 post-filter evaluations
+                                if _filter_idx < 3:
+                                    logger.info(
+                                        "[DEBRIEF] Post-filter trace #%d: "
+                                        "target=%s is_domain=%s sender=%s "
+                                        "to=%s cc=%s subject=%.60s",
+                                        _filter_idx,
+                                        search_target,
+                                        is_domain_search,
+                                        sender,
+                                        to_list[:2],
+                                        cc_list[:2],
+                                        r.get("subject", ""),
+                                    )
 
                                 # Defense-in-depth: if we couldn't parse any
                                 # participant addresses from this email, trust
