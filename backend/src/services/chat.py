@@ -1267,16 +1267,36 @@ class ChatService:
                 user_full_name = ""
                 user_domain = ""
                 try:
-                    user_result = db.table("user_profiles").select(
-                        "email, full_name"
+                    # Get full_name from user_profiles (no email column there)
+                    profile_result = db.table("user_profiles").select(
+                        "full_name"
                     ).eq("id", user_id).limit(1).execute()
-                    if user_result.data:
-                        user_email = user_result.data[0].get("email", "")
-                        user_full_name = user_result.data[0].get("full_name", "")
+                    if profile_result.data:
+                        user_full_name = profile_result.data[0].get("full_name", "")
+
+                    # Get email from user_integrations.account_email
+                    # (user_profiles has no email column; the email lives in
+                    # the auth token / user_integrations)
+                    email_result = db.table("user_integrations").select(
+                        "account_email"
+                    ).eq("user_id", user_id).neq(
+                        "account_email", ""
+                    ).limit(1).execute()
+                    if email_result.data:
+                        user_email = email_result.data[0].get("account_email", "")
+
                     if user_email and "@" in user_email:
                         user_domain = user_email.split("@")[1].lower()
                 except Exception:
                     pass
+
+                if not user_email:
+                    logger.warning(
+                        "[DEBRIEF] Could not resolve user email from "
+                        "user_integrations for user_id=%s — attendee "
+                        "filtering will be degraded",
+                        user_id,
+                    )
                 logger.info(
                     "[DEBRIEF] User context: email=%s domain=%s",
                     user_email or "(empty)", user_domain or "(empty)",
