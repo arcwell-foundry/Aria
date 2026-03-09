@@ -785,6 +785,25 @@ async def _run_debrief_prompt_checks() -> None:
         logger.exception("Debrief prompt scheduler run failed")
 
 
+async def _run_meeting_end_check() -> None:
+    """Check for meetings that just ended and send debrief prompts."""
+    try:
+        from src.jobs.meeting_end_check import run_meeting_end_check
+
+        result = await run_meeting_end_check()
+
+        if result["notifications_sent"] > 0:
+            logger.info(
+                "Meeting end check complete: %d notifications sent, "
+                "%d meetings found, %d errors",
+                result["notifications_sent"],
+                result["meetings_found"],
+                result["errors"],
+            )
+    except Exception:
+        logger.exception("Meeting end check scheduler run failed")
+
+
 async def _run_competitive_docs_refresh() -> None:
     """Monthly refresh of competitive intelligence docs in Tavus Knowledge Base.
 
@@ -2120,6 +2139,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(minute="*/15"),  # Every 15 minutes
             id="debrief_prompt_checks",
             name="Meeting debrief prompt scheduler",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_meeting_end_check,
+            trigger=CronTrigger(minute="*/5"),  # Every 5 minutes
+            id="meeting_end_check",
+            name="Check for ended meetings needing debrief",
             replace_existing=True,
         )
         _scheduler.add_job(

@@ -164,6 +164,33 @@ export function useDashboardEvents(): void {
       queryClient.invalidateQueries({ queryKey: ['activity'] });
     };
 
+    // --- Debrief prompt ---
+    const handleDebriefPrompt = (payload: unknown) => {
+      const data = payload as {
+        meeting_id: string;
+        meeting_title: string;
+        attendees: string;
+        link: string;
+      };
+
+      useNotificationsStore.getState().addNotification({
+        type: 'info',
+        title: `${data.meeting_title} just ended`,
+        message: `Debrief your meeting with ${data.attendees}?`,
+        duration: 0, // Persistent until dismissed
+        action: {
+          label: 'Debrief Now',
+          onClick: () => {
+            window.location.href = data.link;
+          },
+        },
+      });
+
+      // Invalidate pending debriefs so the banner refreshes
+      queryClient.invalidateQueries({ queryKey: ['debriefs'] });
+      queryClient.invalidateQueries({ queryKey: ['pending-debriefs'] });
+    };
+
     // --- Progress updates ---
     const handleProgressUpdate = (payload: unknown) => {
       const data = payload as ProgressUpdatePayload;
@@ -214,6 +241,7 @@ export function useDashboardEvents(): void {
     wsManager.on(WS_EVENTS.RECOMMENDATION_NEW, handleRecommendation);
     wsManager.on(WS_EVENTS.EXECUTION_COMPLETE, handleExecutionComplete);
     wsManager.on(WS_EVENTS.PROGRESS_UPDATE, handleProgressUpdate);
+    wsManager.on(WS_EVENTS.DEBRIEF_PROMPT, handleDebriefPrompt);
 
     return () => {
       wsManager.off(WS_EVENTS.STEP_STARTED, handleStepStarted);
@@ -224,6 +252,7 @@ export function useDashboardEvents(): void {
       wsManager.off(WS_EVENTS.RECOMMENDATION_NEW, handleRecommendation);
       wsManager.off(WS_EVENTS.EXECUTION_COMPLETE, handleExecutionComplete);
       wsManager.off(WS_EVENTS.PROGRESS_UPDATE, handleProgressUpdate);
+      wsManager.off(WS_EVENTS.DEBRIEF_PROMPT, handleDebriefPrompt);
     };
   }, [queryClient]);
 }

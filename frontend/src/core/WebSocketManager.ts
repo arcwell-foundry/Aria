@@ -166,8 +166,13 @@ class WebSocketManagerImpl {
 
     this.ws.onmessage = (event: MessageEvent) => {
       try {
-        const envelope = JSON.parse(event.data as string) as WSEnvelope;
-        this.emit(envelope.type, envelope.payload);
+        const raw = JSON.parse(event.data as string) as Record<string, unknown>;
+        const eventType = raw.type as string;
+        // Support both envelope formats:
+        // 1. {type, payload: {...}} — used by WSEvent.to_ws_dict()
+        // 2. {type, field1, field2, ...} — used by raw send_json() calls
+        const payload = 'payload' in raw ? raw.payload : raw;
+        this.emit(eventType, payload);
       } catch {
         // Ignore malformed messages
       }

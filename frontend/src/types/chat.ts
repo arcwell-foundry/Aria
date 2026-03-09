@@ -44,6 +44,7 @@ export const WS_EVENTS = {
   EXECUTION_COMPLETE: 'execution.complete',
   RECOMMENDATION_NEW: 'recommendation.new',
   INTEGRATION_CONNECTED: 'integration.connected',
+  DEBRIEF_PROMPT: 'debrief.prompt',
 
   // Client → Server
   USER_MESSAGE: 'user.message',

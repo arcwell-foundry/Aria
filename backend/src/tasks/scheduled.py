@@ -9,6 +9,7 @@ Tasks executed on each invocation:
   3. refresh_market_signals     — re-evaluate stale intelligence signals
   4. scout_signal_scan          — proactive Scout agent market signal detection
   5. stale_leads_check          — detect and alert on inactive leads
+  6. meeting_end_check          — prompt debrief for meetings ended in last 10 min
 
 Uses the same config, DB, and services as the main API.
 Results are logged and recorded in aria_activity.
@@ -157,6 +158,13 @@ async def _stale_leads_check() -> dict[str, Any]:
     return await run_stale_leads_job()
 
 
+async def _meeting_end_check() -> dict[str, Any]:
+    """Check for recently ended meetings and send debrief prompts."""
+    from src.jobs.meeting_end_check import run_meeting_end_check
+
+    return await run_meeting_end_check()
+
+
 async def _log_to_activity(task_name: str, result: dict[str, Any]) -> None:
     """Record cron execution in aria_activity for observability."""
     try:
@@ -191,6 +199,7 @@ async def run_all() -> None:
         ("refresh_market_signals", _refresh_market_signals),
         ("scout_signal_scan", _scout_signal_scan),
         ("stale_leads_check", _stale_leads_check),
+        ("meeting_end_check", _meeting_end_check),
     ]
 
     summary: dict[str, Any] = {}
