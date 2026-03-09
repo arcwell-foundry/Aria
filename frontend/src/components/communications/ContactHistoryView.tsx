@@ -23,6 +23,9 @@ import {
   ArrowRight,
   Inbox,
   AlertCircle,
+  Building2,
+  TrendingUp,
+  Heart,
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { fetchContactHistory, type ContactHistoryEntry, type ContactHistoryResponse } from "@/api/communications";
@@ -350,6 +353,54 @@ export function ContactHistoryView({ contactEmail, onBack }: ContactHistoryViewP
           </div>
         </div>
       </div>
+
+      {/* Pipeline context */}
+      {data?.pipeline_context && data.pipeline_context.company_name && (
+        <div
+          className="flex flex-wrap items-center gap-3 mb-4 p-3 rounded-lg border"
+          style={{ borderColor: 'var(--accent)', backgroundColor: 'color-mix(in srgb, var(--accent) 5%, var(--bg-elevated))' }}
+        >
+          <div className="flex items-center gap-2">
+            <Building2 className="w-4 h-4" style={{ color: 'var(--accent)' }} />
+            <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+              {data.pipeline_context.company_name}
+            </span>
+          </div>
+          {data.pipeline_context.relationship_type && (
+            <>
+              <div className="w-px h-4 bg-[var(--border)]" />
+              <span
+                className="text-xs px-2 py-0.5 rounded-full font-medium"
+                style={{ backgroundColor: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}
+              >
+                {data.pipeline_context.relationship_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
+              </span>
+            </>
+          )}
+          {data.pipeline_context.lifecycle_stage && (
+            <>
+              <div className="w-px h-4 bg-[var(--border)]" />
+              <div className="flex items-center gap-1">
+                <TrendingUp className="w-3.5 h-3.5" style={{ color: 'var(--text-secondary)' }} />
+                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  {data.pipeline_context.lifecycle_stage.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                </span>
+              </div>
+            </>
+          )}
+          {data.pipeline_context.health_score != null && (
+            <>
+              <div className="w-px h-4 bg-[var(--border)]" />
+              <div className="flex items-center gap-1">
+                <Heart className="w-3.5 h-3.5" style={{ color: data.pipeline_context.health_score >= 70 ? 'var(--success)' : data.pipeline_context.health_score >= 40 ? '#d97706' : 'var(--critical)' }} />
+                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  Health: {data.pipeline_context.health_score}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Stats bar */}
       {data && (

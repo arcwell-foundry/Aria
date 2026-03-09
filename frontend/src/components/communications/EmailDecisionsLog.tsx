@@ -133,6 +133,18 @@ function DecisionRow({ decision, onContactClick }: { decision: ScanDecisionInfo;
               >
                 {decision.sender_name || decision.sender_email}
               </button>
+              {decision.pipeline_context && decision.pipeline_context.company_name && (
+                <span
+                  className="text-xs px-1.5 py-0.5 rounded"
+                  style={{
+                    backgroundColor: 'var(--bg-subtle)',
+                    color: 'var(--text-secondary)',
+                  }}
+                  title={`Stage: ${decision.pipeline_context.lifecycle_stage || 'N/A'} | Health: ${decision.pipeline_context.health_score ?? 'N/A'}`}
+                >
+                  {decision.pipeline_context.company_name}
+                </span>
+              )}
               {decision.sender_name && (
                 <span
                   className="text-xs truncate hidden sm:inline"
