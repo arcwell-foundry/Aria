@@ -84,6 +84,7 @@ from src.api.routes import (
 from src.api.routes import (
     websocket as ws_route,
 )
+from src.api.routes.webhooks.meetingbaas import router as meetingbaas_webhook_router
 from src.api.routes.companion import (
     emotional_router as companion_emotional_router,  # US-804: Emotional Intelligence
 )
@@ -409,6 +410,7 @@ app.include_router(trust.router, prefix="/api/v1")  # Wave 4: Trust dashboard
 app.include_router(usage.router, prefix="/api/v1")  # Wave 0: Cost Governor
 app.include_router(video.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
+app.include_router(meetingbaas_webhook_router, prefix="/webhooks", tags=["webhooks"])
 app.include_router(composio_webhooks.router, prefix="/api/v1")
 app.include_router(websets.router, prefix="/api/v1")
 app.include_router(workflows.router, prefix="/api/v1")

@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from src.api.deps import CurrentUser
+from src.core.config import settings
 from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)
@@ -133,6 +134,7 @@ async def join_meeting(
         bot_response = await client.create_bot(
             meeting_url=meeting_url,
             bot_name=bot_name,
+            webhook_url=settings.MEETINGBAAS_WEBHOOK_URL,
         )
     except MeetingBaaSError as e:
         logger.error(

@@ -161,9 +161,12 @@ async def run_meeting_bot_dispatcher() -> dict:
             bot_name = f"ARIA — {user_first_name}'s AI Colleague"
 
             try:
+                from src.core.config import settings as _settings
+
                 bot_response = await client.create_bot(
                     meeting_url=meeting_url,
                     bot_name=bot_name,
+                    webhook_url=_settings.MEETINGBAAS_WEBHOOK_URL,
                 )
                 bot_id = bot_response.get("bot_id")
 

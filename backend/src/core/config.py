@@ -46,6 +46,7 @@ class Settings(BaseSettings):
 
     # MeetingBaaS (bot dispatch for meeting recording)
     MEETINGBAAS_API_KEY: SecretStr | None = None
+    MEETINGBAAS_WEBHOOK_URL: str | None = None
 
     # Daily.co (Phase 6)
     DAILY_API_KEY: SecretStr | None = None
