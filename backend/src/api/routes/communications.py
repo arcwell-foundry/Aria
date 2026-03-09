@@ -2,6 +2,7 @@
 
 User-facing endpoints for the Communications page, including:
 - Contact history: Unified timeline of all communications with a specific contact
+- Analytics: Communication metrics and response time analytics
 """
 
 import logging
@@ -52,6 +53,43 @@ class ContactHistoryResponse(BaseModel):
     received_count: int = Field(0, description="Number of emails received from contact")
     sent_count: int = Field(0, description="Number of emails sent to contact")
     draft_count: int = Field(0, description="Number of pending drafts to contact")
+
+
+class CommunicationAnalyticsResponse(BaseModel):
+    """Response model for communications analytics endpoint."""
+
+    has_data: bool = Field(..., description="Whether user has enough data for analytics")
+    avg_response_hours: float | None = Field(None, description="Average response time in hours")
+    fastest_response_hours: float | None = Field(None, description="Fastest response time in hours")
+    slowest_response_hours: float | None = Field(None, description="Slowest response time in hours")
+    draft_coverage_pct: float | None = Field(None, description="Percentage of NEEDS_REPLY emails with drafts (0-100)")
+    draft_coverage_count: int = Field(0, description="Number of NEEDS_REPLY emails with drafts")
+    needs_reply_count: int = Field(0, description="Total NEEDS_REPLY emails")
+    volume_7d: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="7-day email volume trends (received, drafted, sent)",
+    )
+    classification: dict[str, int] = Field(
+        default_factory=lambda: {"NEEDS_REPLY": 0, "FYI": 0, "SKIP": 0},
+        description="Email classification distribution counts",
+    )
+    classification_pct: dict[str, float] = Field(
+        default_factory=lambda: {"NEEDS_REPLY": 0.0, "FYI": 0.0, "SKIP": 0.0},
+        description="Email classification distribution percentages",
+    )
+    response_by_contact_type: dict[str, float] = Field(
+        default_factory=dict,
+        description="Average response time by contact type (investor, partner, etc.)",
+    )
+
+
+class VolumeDayEntry(BaseModel):
+    """A single day's volume data."""
+
+    date: str = Field(..., description="Date (YYYY-MM-DD)")
+    received: int = Field(0, description="Number of emails received")
+    drafted: int = Field(0, description="Number of drafts created")
+    sent: int = Field(0, description="Number of emails sent")
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +255,74 @@ async def get_contact_history(
         ) from e
 
 
+@router.get("/analytics", response_model=CommunicationAnalyticsResponse)
+async def get_communications_analytics(
+    current_user: CurrentUser,
+    days_back: int = Query(
+        7,
+        ge=1,
+        le=90,
+        description="Number of days to look back for analytics (default: 7)",
+    ),
+) -> dict[str, Any]:
+    """Get communication analytics metrics for the authenticated user.
+
+    Provides comprehensive email communication analytics including:
+    - Response time analytics (avg, fastest, slowest hours)
+    - Draft coverage rate (% NEEDS_REPLY emails with drafts)
+    - Email volume trends (7-day: received, drafted, sent counts)
+    - Classification distribution (NEEDS_REPLY/FYI/SKIP counts and percentages)
+    - Response time by contact type (using monitored_entities)
+
+    Args:
+        current_user: The authenticated user.
+        days_back: Number of days to look back (default: 7, max: 90).
+
+    Returns:
+        CommunicationAnalyticsResponse with all analytics metrics.
+        Returns has_data=False if user has no email scan logs.
+
+    Raises:
+        HTTPException: If database query fails.
+    """
+    user_id = current_user.id
+
+    logger.info(
+        "COMMUNICATIONS_API: Fetching analytics for user %s, days_back=%d",
+        user_id,
+        days_back,
+    )
+
+    try:
+        from src.services.analytics_service import AnalyticsService
+
+        service = AnalyticsService()
+        metrics = await service.get_communications_analytics(
+            user_id=user_id,
+            days_back=days_back,
+        )
+
+        logger.info(
+            "COMMUNICATIONS_API: Analytics calculated for user %s (has_data=%s)",
+            user_id,
+            metrics.get("has_data", False),
+        )
+
+        return CommunicationAnalyticsResponse(**metrics)
+
+    except Exception as e:
+        logger.error(
+            "COMMUNICATIONS_API: Failed to get analytics for user %s: %s",
+            user_id,
+            e,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve communication analytics. Please try again.",
+        ) from e
+
+
 def _generate_snippet(body: str | None, max_length: int = 150) -> str | None:
     """Generate a clean snippet from email body.
 
@@ -232,6 +338,7 @@ def _generate_snippet(body: str | None, max_length: int = 150) -> str | None:
 
     # Strip HTML tags
     import re
+
     text = re.sub(r"<[^>]*>", " ", body)
 
     # Decode common HTML entities

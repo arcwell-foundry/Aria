@@ -679,4 +679,334 @@ class AnalyticsService:
                 "Error comparing periods",
                 extra={"user_id": user_id},
             )
-            raise DatabaseError(f"Failed to compare periods: {e}") from e
+
+    async def get_communications_analytics(
+        self,
+        user_id: str,
+        days_back: int = 7,
+    ) -> dict[str, Any]:
+        """Get communication analytics metrics for email_scan_log and email_drafts.
+
+        Calculates:
+        - Response time analytics (avg, fastest, slowest hours)
+        - Draft coverage rate (% NEEDS_REPLY emails with drafts)
+        - Email volume trends (7-day: received, drafted, sent counts)
+        - Classification distribution (NEEDS_REPLY/FYI/SKIP counts)
+        - Response time by contact type (using monitored_entities)
+
+        Args:
+            user_id: The user's UUID.
+            days_back: Number of days to look back (default: 7).
+
+        Returns:
+            Dict with all communication analytics metrics.
+            Returns has_data=False if no scan logs exist for the user.
+
+        Raises:
+            DatabaseError: If database operation fails.
+        """
+        try:
+            now = datetime.now(UTC)
+            start_date = now - timedelta(days=days_back)
+            start_iso = start_date.isoformat()
+
+            # 1. Check if user has any scan logs (has_data flag)
+            scan_check = (
+                self.db.table("email_scan_log")
+                .select("id")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            has_data = len(scan_check.data or []) > 0
+
+            if not has_data:
+                return {
+                    "has_data": False,
+                    "avg_response_hours": None,
+                    "fastest_response_hours": None,
+                    "slowest_response_hours": None,
+                    "draft_coverage_pct": None,
+                    "draft_coverage_count": 0,
+                    "needs_reply_count": 0,
+                    "volume_7d": [],
+                    "classification": {"NEEDS_REPLY": 0, "FYI": 0, "SKIP": 0},
+                    "classification_pct": {"NEEDS_REPLY": 0.0, "FYI": 0.0, "SKIP": 0.0},
+                    "response_by_contact_type": {},
+                }
+
+            # 2. Get reply drafts with original_email_id for response time calculation
+            reply_drafts = (
+                self.db.table("email_drafts")
+                .select("original_email_id, created_at")
+                .eq("user_id", user_id)
+                .eq("email_purpose", "reply")
+                .not_.is_("original_email_id", "null")
+                .execute()
+            )
+
+            # Get scan logs for those original emails
+            original_ids = [
+                d["original_email_id"]
+                for d in (reply_drafts.data or [])
+                if d.get("original_email_id")
+            ]
+
+            response_times: list[float] = []
+            if original_ids:
+                scan_logs = (
+                    self.db.table("email_scan_log")
+                    .select("email_id, scanned_at")
+                    .eq("user_id", user_id)
+                    .in_("email_id", original_ids)
+                    .execute()
+                )
+
+                scan_lookup = {
+                    row["email_id"]: row["scanned_at"]
+                    for row in (scan_logs.data or [])
+                    if row.get("scanned_at")
+                }
+
+                for draft in reply_drafts.data or []:
+                    original_id = draft.get("original_email_id")
+                    if original_id and scan_lookup.get(original_id):
+                        try:
+                            scanned = datetime.fromisoformat(
+                                scan_lookup[original_id].replace("Z", "+00:00")
+                            )
+                            drafted = datetime.fromisoformat(
+                                draft["created_at"].replace("Z", "+00:00")
+                            )
+                            if drafted >= scanned:
+                                diff_hours = (drafted - scanned).total_seconds() / 3600
+                                response_times.append(diff_hours)
+                        except (ValueError, TypeError):
+                            pass
+
+            avg_response_hours = (
+                round(sum(response_times) / len(response_times), 1)
+                if response_times else None
+            )
+            fastest_response_hours = (
+                round(min(response_times), 1)
+                if response_times else None
+            )
+            slowest_response_hours = (
+                round(max(response_times), 1)
+                if response_times else None
+            )
+
+            # 3. Get classification distribution
+            all_scans = (
+                self.db.table("email_scan_log")
+                .select("category, email_id")
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+            classification = {"NEEDS_REPLY": 0, "FYI": 0, "SKIP": 0}
+            needs_reply_email_ids: list[str] = []
+            total_classified = 0
+
+            for row in all_scans.data or []:
+                cat = row.get("category")
+                if cat in classification:
+                    classification[cat] += 1
+                    total_classified += 1
+                    if cat == "NEEDS_REPLY" and row.get("email_id"):
+                        needs_reply_email_ids.append(row["email_id"])
+
+            # Calculate percentages
+            classification_pct = {}
+            for cat, count in classification.items():
+                classification_pct[cat] = (
+                    round((count / total_classified) * 100, 1)
+                    if total_classified > 0 else 0.0
+                )
+
+            # 4. Calculate draft coverage (NEEDS_REPLY emails with drafts)
+            needs_reply_count = classification.get("NEEDS_REPLY", 0)
+            draft_coverage_count = 0
+
+            if needs_reply_email_ids:
+                # Check which NEEDS_REPLY emails have drafts
+                drafts_for_needs_reply = (
+                    self.db.table("email_drafts")
+                    .select("original_email_id")
+                    .eq("user_id", user_id)
+                    .in_("original_email_id", needs_reply_email_ids)
+                    .execute()
+                )
+
+                covered_ids = set(
+                    d.get("original_email_id")
+                    for d in (drafts_for_needs_reply.data or [])
+                    if d.get("original_email_id")
+                )
+                draft_coverage_count = len(covered_ids)
+
+            draft_coverage_pct = (
+                round((draft_coverage_count / needs_reply_count) * 100, 1)
+                if needs_reply_count > 0 else 0.0
+            )
+
+            # 5. Calculate 7-day volume trends
+            volume_7d: list[dict[str, Any]] = []
+            for i in range(6, -1, -1):
+                day_date = start_date + timedelta(days=i)
+                day_str = day_date.strftime("%Y-%m-%d")
+                next_day_str = (day_date + timedelta(days=1)).strftime("%Y-%m-%d")
+
+                # Received count (scanned emails)
+                received_resp = (
+                    self.db.table("email_scan_log")
+                    .select("id")
+                    .eq("user_id", user_id)
+                    .gte("scanned_at", day_str)
+                    .lt("scanned_at", next_day_str)
+                    .execute()
+                )
+                received = len(received_resp.data or [])
+
+                # Drafted count
+                drafted_resp = (
+                    self.db.table("email_drafts")
+                    .select("id")
+                    .eq("user_id", user_id)
+                    .gte("created_at", day_str)
+                    .lt("created_at", next_day_str)
+                    .execute()
+                )
+                drafted = len(drafted_resp.data or [])
+
+                # Sent count
+                sent_resp = (
+                    self.db.table("email_drafts")
+                    .select("id")
+                    .eq("user_id", user_id)
+                    .eq("status", "sent")
+                    .gte("created_at", day_str)
+                    .lt("created_at", next_day_str)
+                    .execute()
+                )
+                sent = len(sent_resp.data or [])
+
+                volume_7d.append({
+                    "date": day_str,
+                    "received": received,
+                    "drafted": drafted,
+                    "sent": sent,
+                })
+
+            # 6. Calculate response time by contact type (optional)
+            response_by_contact_type: dict[str, float] = {}
+
+            try:
+                # Get monitored entities for contact type classification
+                entities_resp = (
+                    self.db.table("monitored_entities")
+                    .select("entity_type, domains")
+                    .eq("user_id", user_id)
+                    .eq("is_active", True)
+                    .execute()
+                )
+
+                if entities_resp.data and response_times:
+                    # Build domain to entity_type mapping
+                    domain_to_type: dict[str, str] = {}
+                    for entity in entities_resp.data:
+                        entity_type = entity.get("entity_type")
+                        domains = entity.get("domains") or []
+                        if entity_type and domains:
+                            for domain in domains:
+                                domain_to_type[domain.lower()] = entity_type
+
+                    # Get scan logs with sender_email for response time calculation
+                    if original_ids:
+                        scans_with_sender = (
+                            self.db.table("email_scan_log")
+                            .select("email_id, sender_email, scanned_at")
+                            .eq("user_id", user_id)
+                            .in_("email_id", original_ids)
+                            .execute()
+                        )
+
+                        # Calculate response time per contact type
+                        type_response_times: dict[str, list[float]] = {}
+                        for scan in scans_with_sender.data or []:
+                            sender_email = (scan.get("sender_email") or "").lower()
+                            if "@" in sender_email:
+                                sender_domain = sender_email.split("@")[-1]
+
+                                # Find matching entity type
+                                entity_type = "other"
+                                for domain, etype in domain_to_type.items():
+                                    if sender_domain.endswith(domain):
+                                        entity_type = etype
+                                        break
+
+                                # Find corresponding draft
+                                for draft in reply_drafts.data or []:
+                                    if draft.get("original_email_id") == scan.get("email_id"):
+                                        try:
+                                            scanned = datetime.fromisoformat(
+                                                scan["scanned_at"].replace("Z", "+00:00")
+                                            )
+                                            drafted = datetime.fromisoformat(
+                                                draft["created_at"].replace("Z", "+00:00")
+                                            )
+                                            if drafted >= scanned:
+                                                diff_hours = (drafted - scanned).total_seconds() / 3600
+                                                if entity_type not in type_response_times:
+                                                    type_response_times[entity_type] = []
+                                                type_response_times[entity_type].append(diff_hours)
+                                        except (ValueError, TypeError):
+                                            pass
+
+                        # Average response times by type
+                        for entity_type, times in type_response_times.items():
+                            if times:
+                                response_by_contact_type[entity_type] = round(
+                                    sum(times) / len(times), 1
+                                )
+
+            except Exception as e:
+                logger.warning(
+                    "Error calculating response by contact type: %s",
+                    extra={"user_id": user_id},
+                    exc_info=True,
+                )
+
+            logger.info(
+                "Communications analytics calculated",
+                extra={
+                    "user_id": user_id,
+                    "response_times_count": len(response_times),
+                    "needs_reply_count": needs_reply_count,
+                    "draft_coverage_pct": draft_coverage_pct,
+                }
+            )
+
+            return {
+                "has_data": True,
+                "avg_response_hours": avg_response_hours,
+                "fastest_response_hours": fastest_response_hours,
+                "slowest_response_hours": slowest_response_hours,
+                "draft_coverage_pct": draft_coverage_pct,
+                "draft_coverage_count": draft_coverage_count,
+                "needs_reply_count": needs_reply_count,
+                "volume_7d": volume_7d,
+                "classification": classification,
+                "classification_pct": classification_pct,
+                "response_by_contact_type": response_by_contact_type,
+            }
+
+        except Exception as e:
+            logger.exception(
+                "Error calculating communications analytics",
+                extra={"user_id": user_id},
+            )
+            raise DatabaseError(
+                f"Failed to calculate communications analytics: {e}"
+            ) from e

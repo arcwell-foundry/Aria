@@ -40,6 +40,41 @@ export interface ContactHistoryResponse {
   draft_count: number;
 }
 
+/**
+ * Single day's email volume data for the 7-day trend.
+ */
+export interface VolumeDay {
+  date: string;
+  received: number;
+  drafted: number;
+  sent: number;
+}
+
+/**
+ * Response from the communications analytics endpoint.
+ */
+export interface CommunicationsAnalyticsResponse {
+  has_data: boolean;
+  avg_response_hours: number | null;
+  fastest_response_hours: number | null;
+  slowest_response_hours: number | null;
+  draft_coverage_pct: number | null;
+  draft_coverage_count: number;
+  needs_reply_count: number;
+  volume_7d: VolumeDay[];
+  classification: {
+    NEEDS_REPLY: number;
+    FYI: number;
+    SKIP: number;
+  };
+  classification_pct: {
+    NEEDS_REPLY: number;
+    FYI: number;
+    SKIP: number;
+  };
+  response_by_contact_type: Record<string, number>;
+}
+
 // ---------------------------------------------------------------------------
 // API Functions
 // ---------------------------------------------------------------------------
@@ -65,6 +100,33 @@ export async function fetchContactHistory(
 
   const response = await apiClient.get<ContactHistoryResponse>(
     `/communications/contact-history?${params.toString()}`
+  );
+
+  return response.data;
+}
+
+/**
+ * Fetch communication analytics metrics for the authenticated user.
+ *
+ * Provides comprehensive email analytics including:
+ * - Response time analytics (avg, fastest, slowest in hours)
+ * - Draft coverage rate (% NEEDS_REPLY emails with drafts)
+ * - Email volume trends (7-day: received, drafted, sent counts)
+ * - Classification distribution (NEEDS_REPLY/FYI/SKIP counts and percentages)
+ * - Response time by contact type
+ *
+ * @param daysBack - Number of days to look back (default: 7, max: 90)
+ * @returns Analytics metrics or has_data=false if no data available
+ */
+export async function fetchCommunicationsAnalytics(
+  daysBack: number = 7
+): Promise<CommunicationsAnalyticsResponse> {
+  const params = new URLSearchParams({
+    days_back: daysBack.toString(),
+  });
+
+  const response = await apiClient.get<CommunicationsAnalyticsResponse>(
+    `/communications/analytics?${params.toString()}`
   );
 
   return response.data;
