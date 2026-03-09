@@ -309,12 +309,15 @@ class HunterAgent(SkillAwareAgent):
     ) -> list[dict[str, Any]]:
         """Search for companies using the ExaEnrichmentProvider.
 
+        Searches Exa for relevant web pages, then uses the LLM to extract
+        actual company names and details from the search results.
+
         Args:
             query: Search query string.
             limit: Maximum number of results.
 
         Returns:
-            List of company dicts parsed from Exa results.
+            List of company dicts extracted from Exa results.
 
         Raises:
             Exception: If Exa API call fails.
@@ -325,28 +328,82 @@ class HunterAgent(SkillAwareAgent):
 
         results = await exa.search_fast(
             query=f"{query} companies life sciences commercial",
-            num_results=limit,
+            num_results=limit * 2,
         )
 
-        companies: list[dict[str, Any]] = []
-        for result in results:
-            url = result.url
-            # Extract domain from URL
-            domain = ""
-            if url:
-                parts = url.split("/")
-                if len(parts) > 2:
-                    domain = parts[2].removeprefix("www.")
+        if not results:
+            return []
 
+        # Build context from raw Exa results for LLM extraction
+        search_context_parts: list[str] = []
+        for i, result in enumerate(results, 1):
+            snippet = (result.text or "")[:600]
+            search_context_parts.append(
+                f"--- Result {i} ---\n"
+                f"Title: {result.title or 'N/A'}\n"
+                f"URL: {result.url or 'N/A'}\n"
+                f"Content: {snippet}\n"
+            )
+        search_context = "\n".join(search_context_parts)
+
+        # Use LLM to extract real companies from the search results
+        prompt = (
+            f"Below are web search results about '{query}' companies.\n\n"
+            f"{search_context}\n\n"
+            f"From these search results, identify up to {limit} distinct REAL companies "
+            f"that are mentioned. Extract the actual company name — NOT the article title.\n\n"
+            f"For each company, provide:\n"
+            f'- "name": the real company name (e.g. "Nautilus Biotechnology", not an article headline)\n'
+            f'- "domain": company website domain if visible in the URL/content\n'
+            f'- "description": brief description of what the company does based on the content\n'
+            f'- "industry": specific industry segment\n'
+            f'- "size": employee range if mentioned (e.g. "51-200", "Enterprise (500+)")\n'
+            f'- "geography": headquarters location if mentioned\n'
+            f'- "website": company website URL if found\n\n'
+            f"Return ONLY a JSON array of company objects. No duplicates. "
+            f"Skip any entry where you cannot determine a real company name."
+        )
+
+        response = await self.llm.generate_response(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt=(
+                "You are a life sciences market intelligence analyst. "
+                "Extract real company names and details from search results. "
+                "Return only valid JSON arrays. No markdown fences, no explanation."
+            ),
+            temperature=0.2,
+            user_id=self.user_id,
+            task=TaskType.HUNTER_ENRICH,
+            agent_id="hunter",
+        )
+
+        try:
+            companies_raw = _extract_json_from_text(response)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse LLM company extraction response")
+            return []
+
+        if not isinstance(companies_raw, list):
+            return []
+
+        companies: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
+        for c in companies_raw:
+            if not isinstance(c, dict):
+                continue
+            name = c.get("name", "").strip()
+            if not name or name.lower() in seen_names:
+                continue
+            seen_names.add(name.lower())
             companies.append(
                 {
-                    "name": result.title or "Unknown Company",
-                    "domain": domain,
-                    "description": (result.text or "")[:500],
-                    "industry": query,  # Use query as initial industry tag
-                    "size": "",
-                    "geography": "",
-                    "website": url,
+                    "name": name,
+                    "domain": c.get("domain", ""),
+                    "description": c.get("description", ""),
+                    "industry": c.get("industry", query),
+                    "size": c.get("size", ""),
+                    "geography": c.get("geography", ""),
+                    "website": c.get("website", ""),
                 }
             )
 

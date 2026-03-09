@@ -25,7 +25,7 @@ from src.db.supabase import SupabaseClient
 from src.integrations.domain import IntegrationType
 from src.integrations.service import IntegrationService
 from src.services.email_client_writer import EmailClientWriter
-from src.services.lead_generation import LeadGenerationService
+from src.core.lead_generation import LeadGenerationService
 from src.models.lead_generation import ICPDefinition
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ async def run_hunter_lead_generation_job() -> dict[str, Any]:
     # Query lead generation goals: active or plan_ready
     goals_result = (
         db.table("goals")
-        .select("id, user_id, title, description, progress, metadata, goal_type, status")
+        .select("id, user_id, title, description, progress, config, goal_type, status")
         .in_("status", ["active", "plan_ready"])
         .execute()
     )
@@ -115,7 +115,7 @@ async def run_hunter_lead_generation_job() -> dict[str, Any]:
                 continue
 
             # Get target count from goal metadata
-            metadata = goal.get("metadata", {}) or {}
+            metadata = goal.get("config", {}) or {}
             target_count = metadata.get("target_count", 3)
 
             logger.info(
@@ -138,7 +138,7 @@ async def run_hunter_lead_generation_job() -> dict[str, Any]:
             hunter_task = {
                 "icp": {
                     "industry": icp_data.industry[0] if icp_data.industry else "Biotechnology",
-                    "size": _build_size_str(icp_data.size),
+                    "size": _build_size_str(icp_data.company_size),
                     "geography": icp_data.geographies[0] if icp_data.geographies else "",
                 },
                 "target_count": target_count,
@@ -327,7 +327,7 @@ def _filter_lead_gen_goals(query_result: Any) -> list[dict[str, Any]]:
         # Check if it's a lead generation goal
         title = row.get("title", "").lower()
         description = row.get("description", "") or ""
-        metadata = row.get("metadata", {}) or {}
+        metadata = row.get("config", {}) or {}
         goal_type = row.get("goal_type", "") or ""
 
         is_lead_gen = (
