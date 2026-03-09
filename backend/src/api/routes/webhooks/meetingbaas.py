@@ -155,9 +155,17 @@ async def _process_transcript(payload: dict[str, Any], db: Any) -> None:
         )
 
         # Generate debrief
-        debrief_data = await _generate_debrief(
-            session, transcript_text
-        )
+        try:
+            debrief_data = await _generate_debrief(
+                session, transcript_text
+            )
+        except Exception:
+            logger.exception(
+                "Debrief generation failed for session %s (bot_id=%s)",
+                session_id,
+                bot_id,
+            )
+            return
 
         # Store debrief
         debrief_id = str(uuid.uuid4())
@@ -237,9 +245,14 @@ def _flatten_transcript(
     lines: list[str] = []
     for entry in transcript:
         speaker = entry.get("speaker", "Unknown")
-        words = entry.get("words", "")
+        words = entry.get("words", [])
         if words:
-            lines.append(f"{speaker}: {words}")
+            if isinstance(words, list):
+                text = " ".join(w["text"] for w in words if isinstance(w, dict) and "text" in w)
+            else:
+                text = str(words)
+            if text:
+                lines.append(f"{speaker}: {text}")
     return "\n".join(lines)
 
 
@@ -285,17 +298,18 @@ async def _generate_debrief(
             agent_id="meeting_debrief",
         )
 
-        # Parse JSON from response
+        # Parse JSON from response — strip markdown code fences if present
         cleaned = response.strip()
         if cleaned.startswith("```"):
-            # Strip markdown code fences
-            lines = cleaned.split("\n")
-            cleaned = "\n".join(lines[1:-1]) if len(lines) > 2 else cleaned
+            # Remove opening fence (with optional language tag) and closing fence
+            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned
+            if cleaned.rstrip().endswith("```"):
+                cleaned = cleaned.rstrip()[:-3].rstrip()
         return json.loads(cleaned)
 
-    except (json.JSONDecodeError, Exception) as exc:
-        logger.warning(
-            "Failed to parse debrief JSON, returning defaults: %s", exc
+    except Exception:
+        logger.exception(
+            "Failed to parse debrief JSON, returning defaults"
         )
         return {
             "summary": "Debrief generation failed — transcript stored for manual review.",
