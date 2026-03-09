@@ -44,10 +44,19 @@ async def run_email_backfill(user_id: str, lookback_days: int = 90) -> dict[str,
     Returns:
         Status dict with count of emails stored.
     """
+    logger.info("[BACKFILL] Starting %d-day email backfill for user %s", lookback_days, user_id)
+
+    try:
+        return await _run_email_backfill_inner(user_id, lookback_days)
+    except Exception:
+        logger.exception("[BACKFILL] Unhandled error during backfill for user %s", user_id)
+        return {"status": "error", "emails_stored": 0}
+
+
+async def _run_email_backfill_inner(user_id: str, lookback_days: int) -> dict[str, Any]:
+    """Inner backfill logic, called from run_email_backfill with top-level guard."""
     from src.db.supabase import SupabaseClient
     from src.integrations.oauth import get_oauth_client
-
-    logger.info("[BACKFILL] Starting %d-day email backfill for user %s", lookback_days, user_id)
 
     oauth = get_oauth_client()
     db = SupabaseClient.get_client()
