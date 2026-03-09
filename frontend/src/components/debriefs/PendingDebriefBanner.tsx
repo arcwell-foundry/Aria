@@ -108,7 +108,7 @@ function PendingDebriefItem({
       </div>
 
       <button
-        onClick={() => meeting.meeting_id && onStartDebrief(meeting)}
+        onClick={() => onStartDebrief(meeting)}
         className={cn(
           "flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium",
           "bg-amber-600 text-white hover:bg-amber-700 transition-colors",
@@ -133,8 +133,9 @@ export function PendingDebriefBanner() {
   };
 
   const handleStartDebrief = (meeting: PendingDebrief) => {
+    const meetingId = meeting.meeting_id || meeting.id;
     const params = new URLSearchParams();
-    params.set("debrief", meeting.meeting_id!);
+    params.set("debrief", meetingId);
     if (meeting.title) {
       params.set("title", meeting.title);
     }
@@ -218,7 +219,7 @@ export function PendingDebriefBanner() {
         <div className="p-3 space-y-2">
           {pendingMeetings.slice(0, 5).map((meeting) => (
             <PendingDebriefItem
-              key={meeting.meeting_id}
+              key={meeting.id}
               meeting={meeting}
               onStartDebrief={handleStartDebrief}
             />
