@@ -27,6 +27,7 @@ from src.services.draft_service import get_draft_service
 from src.services.email_client_writer import DraftSaveError, get_email_client_writer
 from src.services.followup_tracker import get_followup_tracker
 from src.utils.company_aliases import normalize_company_name
+from src.utils.email_pipeline_linker import get_pipeline_context_for_email
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +198,20 @@ async def list_drafts(
     """
     service = get_draft_service()
     drafts = await service.list_drafts(current_user.id, limit, status, include_dismissed)
+
+    # Enrich drafts with pipeline context
+    try:
+        db = SupabaseClient.get_client()
+        recipient_emails = list({d.get("recipient_email", "").lower() for d in drafts if d.get("recipient_email")})
+        pipeline_cache: dict[str, dict[str, Any] | None] = {}
+        for email in recipient_emails:
+            pipeline_cache[email] = await get_pipeline_context_for_email(db, current_user.id, email)
+        for draft in drafts:
+            email = draft.get("recipient_email", "").lower()
+            draft["pipeline_context"] = pipeline_cache.get(email)
+    except Exception as e:
+        logger.warning("DRAFTS_API: Pipeline context enrichment failed: %s", e)
+
     logger.info("Drafts listed", extra={"user_id": current_user.id, "count": len(drafts)})
     return drafts
 

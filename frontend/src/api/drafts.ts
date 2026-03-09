@@ -70,6 +70,16 @@ export interface EmailDraft {
   original_email?: OriginalEmail;
 }
 
+export interface PipelineContext {
+  company_name: string | null;
+  lead_name: string | null;
+  lead_id: string | null;
+  lifecycle_stage: string | null;
+  health_score: number | null;
+  relationship_type: string | null;
+  source: string;
+}
+
 export interface EmailDraftListItem {
   id: string;
   recipient_email: string;
@@ -90,6 +100,8 @@ export interface EmailDraftListItem {
   previous_versions_count?: number; // Number of older draft versions for the same thread
   // Priority scoring
   priority_score?: number;
+  // Pipeline context linking recipient to a lead/account
+  pipeline_context?: PipelineContext | null;
 }
 
 // Request types
