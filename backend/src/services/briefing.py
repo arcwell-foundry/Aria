@@ -1940,6 +1940,28 @@ class BriefingService:
                     "due_at": due_date,
                 }
 
+        # 2b. Refresh sent-folder reply flags before checking prospective memories.
+        # This ensures user_replied is up-to-date even if scan_inbox skipped
+        # the sent folder scan (e.g., no new inbox emails arrived).
+        try:
+            from src.services.email_analyzer import EmailAnalyzer
+
+            analyzer = EmailAnalyzer()
+            sent_updated = await analyzer._scan_sent_folder_for_replies(user_id)
+            if sent_updated > 0:
+                logger.info(
+                    "BRIEFING: Sent folder pre-scan marked %d threads as "
+                    "user_replied for user %s",
+                    sent_updated,
+                    user_id,
+                )
+        except Exception as sent_e:
+            logger.debug(
+                "BRIEFING: Sent folder pre-scan failed for user %s: %s",
+                user_id,
+                sent_e,
+            )
+
         # 3. Overdue tasks from prospective_memories (legacy support)
         # Also fetch metadata to check for email thread reply evidence
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1956,10 +1978,15 @@ class BriefingService:
             if not isinstance(t, dict):
                 continue
 
-            # Check if user already replied to this email thread
+            # Check if user already replied to this email thread.
+            # Only auto-resolve tasks where who='user' (commitments the
+            # user made).  Tasks where who='sender' are things someone
+            # else promised — those stay pending until the sender
+            # delivers, regardless of whether the user replied.
             metadata = t.get("metadata") or {}
             thread_id = metadata.get("thread_id")
-            if thread_id and metadata.get("source") == "email_commitment":
+            who = metadata.get("who")
+            if thread_id and who == "user":
                 try:
                     reply_check = (
                         self._db.table("email_scan_log")

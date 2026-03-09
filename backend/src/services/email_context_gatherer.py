@@ -2308,6 +2308,7 @@ Return ONLY the JSON array, nothing else."""
 
         memory = ProspectiveMemory()
         stored = 0
+        skipped = 0
         contact = sender_name or sender_email
 
         for commitment in commitments:
@@ -2324,6 +2325,31 @@ Return ONLY the JSON array, nothing else."""
                 else:
                     description = f"{contact} committed: {what}"
                     task_label = f"Track: {contact} — {what}"
+
+                truncated_label = task_label[:500]
+
+                # ----------------------------------------------------------
+                # Dedup: skip if identical (user_id, task, thread_id) exists
+                # ----------------------------------------------------------
+                try:
+                    existing = (
+                        self._db.table("prospective_memories")
+                        .select("id")
+                        .eq("user_id", user_id)
+                        .eq("task", truncated_label)
+                        .eq("metadata->>thread_id", thread_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    if existing.data:
+                        skipped += 1
+                        continue
+                except Exception as dedup_e:
+                    logger.debug(
+                        "COMMITMENT_STORE: Dedup check failed, "
+                        "proceeding with insert: %s",
+                        dedup_e,
+                    )
 
                 # Parse priority
                 urgency = commitment.get("urgency", "normal")
@@ -2350,7 +2376,7 @@ Return ONLY the JSON array, nothing else."""
                 task = ProspectiveTask(
                     id=str(uuid4()),
                     user_id=user_id,
-                    task=task_label[:500],
+                    task=truncated_label,
                     description=description[:2000],
                     trigger_type=TriggerType.TIME,
                     trigger_config=trigger_config,
@@ -2375,9 +2401,11 @@ Return ONLY the JSON array, nothing else."""
                 continue
 
         logger.info(
-            "COMMITMENT_STORE: Stored %d/%d commitments for user=%s thread=%s",
+            "COMMITMENT_STORE: Stored %d/%d commitments (skipped %d dupes) "
+            "for user=%s thread=%s",
             stored,
             len(commitments),
+            skipped,
             user_id,
             thread_id[:40] if thread_id else "NONE",
         )

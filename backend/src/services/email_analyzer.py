@@ -220,6 +220,23 @@ class EmailAnalyzer:
 
             if not emails:
                 logger.info("EMAIL_ANALYZER: No emails found for user %s", user_id)
+                # Still scan sent folder even when no new inbox emails arrive,
+                # so user_replied gets set for threads the user has responded to.
+                try:
+                    sent_updated = await self._scan_sent_folder_for_replies(user_id)
+                    if sent_updated > 0:
+                        logger.info(
+                            "EMAIL_ANALYZER: Sent folder scan (no-inbox path) marked %d "
+                            "threads as user_replied for user %s",
+                            sent_updated,
+                            user_id,
+                        )
+                except Exception as sent_e:
+                    logger.warning(
+                        "EMAIL_ANALYZER: Sent folder scan failed for user %s: %s",
+                        user_id,
+                        sent_e,
+                    )
                 return result
 
             # 2b. Batch dedup: fetch already-scanned email_ids to skip re-classification
@@ -238,6 +255,23 @@ class EmailAnalyzer:
 
             if not emails:
                 logger.info("EMAIL_ANALYZER: All emails already scanned for user %s", user_id)
+                # Still scan sent folder even when all inbox emails were deduped,
+                # so user_replied gets set for threads the user has responded to.
+                try:
+                    sent_updated = await self._scan_sent_folder_for_replies(user_id)
+                    if sent_updated > 0:
+                        logger.info(
+                            "EMAIL_ANALYZER: Sent folder scan (dedup path) marked %d "
+                            "threads as user_replied for user %s",
+                            sent_updated,
+                            user_id,
+                        )
+                except Exception as sent_e:
+                    logger.warning(
+                        "EMAIL_ANALYZER: Sent folder scan failed for user %s: %s",
+                        user_id,
+                        sent_e,
+                    )
                 return result
 
             # Track newest email for watermark
