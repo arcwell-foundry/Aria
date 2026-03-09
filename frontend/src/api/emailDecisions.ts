@@ -5,6 +5,16 @@ import { apiClient } from "./client";
 export type EmailCategory = "NEEDS_REPLY" | "FYI" | "SKIP";
 export type EmailUrgency = "URGENT" | "NORMAL" | "LOW";
 
+export interface PipelineContext {
+  company_name: string | null;
+  lead_name: string | null;
+  lead_id: string | null;
+  lifecycle_stage: string | null;
+  health_score: number | null;
+  relationship_type: string | null;
+  source: string;
+}
+
 export interface ScanDecisionInfo {
   email_id: string;
   thread_id: string | null;
@@ -17,6 +27,7 @@ export interface ScanDecisionInfo {
   reason: string;
   scanned_at: string;
   confidence: number | null;
+  pipeline_context?: PipelineContext | null;
 }
 
 export interface ScanDecisionsResponse {

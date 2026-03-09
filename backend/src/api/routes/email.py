@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
 from src.services.autonomous_draft_engine import get_autonomous_draft_engine
+from src.utils.email_pipeline_linker import get_pipeline_context_for_email
 
 logger = logging.getLogger(__name__)
 
@@ -433,6 +434,22 @@ async def get_scan_decisions(
             for row in (result.data or [])
         ]
 
+        # Enrich decisions with pipeline context
+        try:
+            sender_emails = list({d.sender_email.lower() for d in decisions if d.sender_email})
+            pipeline_cache: dict[str, dict[str, Any] | None] = {}
+            for email in sender_emails:
+                pipeline_cache[email] = await get_pipeline_context_for_email(db, user_id, email)
+
+            enriched_decisions = []
+            for d in decisions:
+                d_dict = d.model_dump()
+                d_dict["pipeline_context"] = pipeline_cache.get(d.sender_email.lower())
+                enriched_decisions.append(d_dict)
+        except Exception as e:
+            logger.warning("EMAIL_API: Pipeline context enrichment failed: %s", e)
+            enriched_decisions = [d.model_dump() for d in decisions]
+
         logger.info(
             "EMAIL_API: Returned %d scan decisions for user %s",
             len(decisions),
@@ -440,7 +457,7 @@ async def get_scan_decisions(
         )
 
         return {
-            "decisions": decisions,
+            "decisions": enriched_decisions,
             "total_count": len(decisions),
             "filters_applied": {"since_hours": since_hours, "category": category},
             "scanned_after": since,
