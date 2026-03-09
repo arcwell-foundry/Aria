@@ -1359,331 +1359,157 @@ class ChatService:
                     ) -> list[dict[str, Any]]:
                         """Search user's mailbox via Composio for emails to/from attendee.
 
+                        Uses OUTLOOK_GET_MAIL_DELTA (the same proven action that
+                        email_analyzer.py uses successfully) instead of the broken
+                        OUTLOOK_LIST_MESSAGES / OUTLOOK_SEARCH_MESSAGES actions.
+                        Fetches recent emails in bulk and filters client-side.
+
                         Args:
                             att_email: The attendee's email address or @domain for domain search.
                         """
                         if not _oauth or not conn_id:
                             return []
-                        results: list[dict[str, Any]] = []
-                        # Determine if this is a domain search (@domain) vs exact email
+
                         is_domain_search = att_email.startswith("@")
+                        search_domain = att_email[1:].lower() if is_domain_search else (
+                            att_email.split("@")[1].lower() if "@" in att_email else ""
+                        )
+                        search_email = att_email.lower() if not is_domain_search else ""
+
+                        results: list[dict[str, Any]] = []
 
                         if provider == "outlook":
-                            # Search both Inbox and SentItems for full
-                            # debrief context (received + sent emails).
-                            all_msgs: list[dict[str, Any]] = []
+                            # Use OUTLOOK_GET_MAIL_DELTA — the SAME action that
+                            # email_analyzer.py uses successfully dozens of times
+                            # daily. Fetch last 6 months, filter client-side.
+                            from datetime import datetime as _dt, timedelta as _td
+                            six_months_ago = (_dt.utcnow() - _td(days=180)).strftime("%Y-%m-%dT00:00:00Z")
 
-                            if is_domain_search:
-                                # Domain search (e.g. "@launch.co"):
-                                # OData $filter can't do contains() on nested
-                                # emailAddress properties, so use the dedicated
-                                # OUTLOOK_SEARCH_MESSAGES action with KQL.
-                                try:
-                                    search_query = f"from:{att_email}"
+                            try:
+                                logger.info(
+                                    "[DEBRIEF] Composio fetch: action=OUTLOOK_GET_MAIL_DELTA $top=200 since=%s",
+                                    six_months_ago,
+                                )
+                                search_resp = await asyncio.wait_for(
+                                    _oauth.execute_action(
+                                        connection_id=conn_id,
+                                        action="OUTLOOK_GET_MAIL_DELTA",
+                                        params={
+                                            "$top": 200,
+                                            "$filter": f"receivedDateTime ge {six_months_ago}",
+                                        },
+                                        user_id=user_id,
+                                        dangerously_skip_version_check=True,
+                                    ),
+                                    timeout=15.0,
+                                )
+
+                                if search_resp.get("successful") and search_resp.get("data"):
+                                    raw_emails = search_resp["data"].get("value", [])
                                     logger.info(
-                                        "[DEBRIEF] Composio domain search: action=OUTLOOK_SEARCH_MESSAGES query=%s connection=%s",
-                                        search_query,
-                                        conn_id[:12] + "..." if conn_id else "NONE",
+                                        "[DEBRIEF] OUTLOOK_GET_MAIL_DELTA returned %d total emails",
+                                        len(raw_emails),
                                     )
-                                    search_resp = await asyncio.wait_for(
-                                        _oauth.execute_action(
-                                            connection_id=conn_id,
-                                            action="OUTLOOK_SEARCH_MESSAGES",
-                                            params={
-                                                "search_query": search_query,
-                                                "top": 15,
-                                            },
-                                            user_id=user_id,
-                                            dangerously_skip_version_check=True,
-                                        ),
-                                        timeout=10.0,
-                                    )
-                                    if search_resp.get("successful") and search_resp.get("data"):
-                                        data = search_resp["data"]
-                                        if "response_data" in data:
-                                            msgs = data["response_data"].get("value", [])
+
+                                    # Filter client-side for the target attendee
+                                    for msg in raw_emails:
+                                        # Extract sender — EXACT same pattern as email_analyzer.py
+                                        from_addr = msg.get("from", {}).get("emailAddress", {})
+                                        sender_email_val = (from_addr.get("address", "") or "").lower()
+                                        sender_name_val = from_addr.get("name", "") or ""
+
+                                        # Extract recipients
+                                        to_emails: list[str] = []
+                                        for r in (msg.get("toRecipients") or []):
+                                            addr = (r.get("emailAddress", {}).get("address", "") or "").lower()
+                                            if addr:
+                                                to_emails.append(addr)
+
+                                        cc_emails: list[str] = []
+                                        for r in (msg.get("ccRecipients") or []):
+                                            addr = (r.get("emailAddress", {}).get("address", "") or "").lower()
+                                            if addr:
+                                                cc_emails.append(addr)
+
+                                        # Check if this email involves the target attendee
+                                        all_addresses = [sender_email_val] + to_emails + cc_emails
+
+                                        match = False
+                                        if is_domain_search:
+                                            match = any(search_domain in addr for addr in all_addresses if addr)
                                         else:
-                                            msgs = data.get("value", [])
-                                        logger.info(
-                                            "[DEBRIEF] Composio SEARCH_MESSAGES returned %d emails for %s",
-                                            len(msgs or []),
-                                            att_email,
-                                        )
-                                        all_msgs.extend(msgs or [])
-                                    else:
-                                        logger.warning(
-                                            "[DEBRIEF] Composio SEARCH_MESSAGES unsuccessful for %s: %s",
-                                            att_email,
-                                            search_resp.get("error", "no error detail"),
-                                        )
-                                except asyncio.TimeoutError:
-                                    logger.warning(
-                                        "[DEBRIEF] Composio SEARCH_MESSAGES timed out for %s",
+                                            match = search_email in all_addresses
+
+                                        if match:
+                                            results.append({
+                                                "sender_email": sender_email_val,
+                                                "sender_name": sender_name_val,
+                                                "subject": msg.get("subject", "(no subject)"),
+                                                "snippet": (msg.get("bodyPreview", "") or "")[:300],
+                                                "date": (msg.get("receivedDateTime", "") or msg.get("sentDateTime", ""))[:10],
+                                                "to_emails": ",".join(to_emails),
+                                                "cc_emails": ",".join(cc_emails),
+                                                "source": "mailbox",
+                                            })
+
+                                    logger.info(
+                                        "[DEBRIEF] Filtered to %d emails matching %s",
+                                        len(results),
                                         att_email,
                                     )
-                                except Exception as _search_err:
+                                else:
                                     logger.warning(
-                                        "[DEBRIEF] Composio SEARCH_MESSAGES failed for %s: %s",
-                                        att_email, _search_err,
-                                    )
-                            else:
-                                # Exact email search: use $filter on
-                                # OUTLOOK_LIST_MESSAGES for precise matching.
-                                # $search is unreliable (ignores the query
-                                # and returns random recent emails).
-                                for folder in ("Inbox", "SentItems"):
-                                    try:
-                                        if folder == "Inbox":
-                                            odata_filter = f"from/emailAddress/address eq '{att_email}'"
-                                            order_by = "receivedDateTime desc"
-                                        else:
-                                            odata_filter = f"toRecipients/any(r:r/emailAddress/address eq '{att_email}')"
-                                            order_by = "sentDateTime desc"
-                                        logger.info(
-                                            "[DEBRIEF] Composio mailbox search: folder=%s $filter=%s connection=%s",
-                                            folder,
-                                            odata_filter,
-                                            conn_id[:12] + "..." if conn_id else "NONE",
-                                        )
-                                        search_resp = await asyncio.wait_for(
-                                            _oauth.execute_action(
-                                                connection_id=conn_id,
-                                                action="OUTLOOK_LIST_MESSAGES",
-                                                params={
-                                                    "folder": folder,
-                                                    "top": 15,
-                                                    "$filter": odata_filter,
-                                                    "$orderby": order_by,
-                                                },
-                                                user_id=user_id,
-                                                dangerously_skip_version_check=True,
-                                            ),
-                                            timeout=10.0,
-                                        )
-                                        if search_resp.get("successful") and search_resp.get("data"):
-                                            data = search_resp["data"]
-                                            if "response_data" in data:
-                                                msgs = data["response_data"].get("value", [])
-                                            else:
-                                                msgs = data.get("value", [])
-                                            logger.info(
-                                                "[DEBRIEF] Composio returned %d emails from %s for %s",
-                                                len(msgs or []),
-                                                folder,
-                                                att_email,
-                                            )
-                                            all_msgs.extend(msgs or [])
-                                        else:
-                                            logger.warning(
-                                                "[DEBRIEF] Composio search unsuccessful for %s in %s: %s",
-                                                att_email,
-                                                folder,
-                                                search_resp.get("error", "no error detail"),
-                                            )
-                                    except asyncio.TimeoutError:
-                                        logger.warning(
-                                            "[DEBRIEF] Composio email search timed out for %s in %s",
-                                            att_email, folder,
-                                        )
-                                    except Exception as _folder_err:
-                                        logger.warning(
-                                            "[DEBRIEF] Composio email search failed for %s in %s: %s",
-                                            att_email, folder, _folder_err,
-                                        )
-                            # Log sample message structure for debugging
-                            if all_msgs:
-                                import json as _json
-                                sample = all_msgs[0] if isinstance(all_msgs[0], dict) else {}
-                                logger.info(
-                                    "[DEBRIEF] Sample Composio message keys: %s",
-                                    list(sample.keys()) if sample else "NOT_A_DICT",
-                                )
-                                logger.info(
-                                    "[DEBRIEF] Sample Composio message (first 500 chars): %s",
-                                    _json.dumps(sample, default=str)[:500],
-                                )
-
-                            for msg in all_msgs[:20]:
-                                # Extract sender from multiple possible paths
-                                sender_email = ""
-                                sender_name = ""
-                                if isinstance(msg, dict):
-                                    # Path 1: Outlook Graph API nested structure
-                                    # {"from": {"emailAddress": {"name": "...", "address": "..."}}}
-                                    from_obj = msg.get("from") or msg.get("sender") or {}
-                                    if isinstance(from_obj, dict):
-                                        email_addr_obj = from_obj.get("emailAddress", {})
-                                        if isinstance(email_addr_obj, dict):
-                                            sender_email = email_addr_obj.get("address", "")
-                                            sender_name = email_addr_obj.get("name", "")
-                                        # Path 2: flat dict {"from": {"address": "...", "name": "..."}}
-                                        if not sender_email:
-                                            sender_email = from_obj.get("address", "")
-                                            sender_name = sender_name or from_obj.get("name", "")
-                                    # Path 3: "from" is a string (some normalizations)
-                                    if not sender_email and isinstance(msg.get("from"), str):
-                                        sender_email = msg["from"]
-                                    # Path 4: flat keys from some Composio normalizations
-                                    if not sender_email:
-                                        sender_email = (
-                                            msg.get("from_email", "")
-                                            or msg.get("senderEmail", "")
-                                            or msg.get("sender_email", "")
-                                        )
-
-                                # Extract to/cc from multiple possible paths
-                                to_addrs: list[str] = []
-                                to_recipients = msg.get("toRecipients") or msg.get("to_recipients") or msg.get("to") or []
-                                if isinstance(to_recipients, list):
-                                    for r in to_recipients:
-                                        if isinstance(r, dict):
-                                            ea = r.get("emailAddress", {})
-                                            addr = ea.get("address", "") if isinstance(ea, dict) else ""
-                                            if not addr:
-                                                addr = r.get("address", "") or r.get("email", "")
-                                            if addr:
-                                                to_addrs.append(addr)
-                                        elif isinstance(r, str) and r.strip():
-                                            to_addrs.append(r.strip())
-
-                                cc_addrs: list[str] = []
-                                cc_recipients = msg.get("ccRecipients") or msg.get("cc_recipients") or msg.get("cc") or []
-                                if isinstance(cc_recipients, list):
-                                    for r in cc_recipients:
-                                        if isinstance(r, dict):
-                                            ea = r.get("emailAddress", {})
-                                            addr = ea.get("address", "") if isinstance(ea, dict) else ""
-                                            if not addr:
-                                                addr = r.get("address", "") or r.get("email", "")
-                                            if addr:
-                                                cc_addrs.append(addr)
-                                        elif isinstance(r, str) and r.strip():
-                                            cc_addrs.append(r.strip())
-
-                                # Log extraction results for first 3 messages to trace parsing
-                                if len(results) < 3:
-                                    raw_from = msg.get("from")
-                                    logger.info(
-                                        "[DEBRIEF] Extraction trace msg#%d: "
-                                        "from_type=%s from_val=%.200s "
-                                        "sender_email=%s to_addrs=%s cc_addrs=%s",
-                                        len(results),
-                                        type(raw_from).__name__,
-                                        str(raw_from),
-                                        sender_email,
-                                        to_addrs[:3],
-                                        cc_addrs[:3],
+                                        "[DEBRIEF] OUTLOOK_GET_MAIL_DELTA unsuccessful: %s",
+                                        str(search_resp)[:200],
                                     )
 
-                                results.append({
-                                    "subject": msg.get("subject", ""),
-                                    "sender_email": sender_email,
-                                    "sender_name": sender_name,
-                                    "to_emails": to_addrs,
-                                    "cc_emails": cc_addrs,
-                                    "snippet": (msg.get("bodyPreview", "") or "")[:300],
-                                    "date": msg.get("receivedDateTime", ""),
-                                    "source": "mailbox",
-                                })
-                        else:
+                            except asyncio.TimeoutError:
+                                logger.warning("[DEBRIEF] OUTLOOK_GET_MAIL_DELTA timed out after 15s")
+                            except Exception as e:
+                                logger.warning(
+                                    "[DEBRIEF] OUTLOOK_GET_MAIL_DELTA failed: %s",
+                                    str(e)[:200],
+                                )
+
+                        elif provider == "gmail":
+                            # Use GMAIL_FETCH_EMAILS — same action as email_analyzer.py
                             try:
-                                # Gmail
+                                query = f"from:{att_email}" if not is_domain_search else f"from:{att_email[1:]}"
                                 search_resp = await asyncio.wait_for(
                                     _oauth.execute_action(
                                         connection_id=conn_id,
                                         action="GMAIL_FETCH_EMAILS",
                                         params={
-                                            "query": f"from:{att_email} OR to:{att_email}",
-                                            "max_results": 10,
+                                            "label": "INBOX",
+                                            "max_results": 50,
+                                            "query": query,
                                         },
                                         user_id=user_id,
+                                        dangerously_skip_version_check=True,
                                     ),
-                                    timeout=10.0,
+                                    timeout=15.0,
                                 )
+
                                 if search_resp.get("successful") and search_resp.get("data"):
-                                    msgs = search_resp["data"].get("emails", [])
-                                    for msg in (msgs or [])[:10]:
+                                    raw_emails = search_resp["data"]
+                                    if isinstance(raw_emails, dict):
+                                        raw_emails = raw_emails.get("messages", []) or raw_emails.get("value", [])
+                                    for msg in (raw_emails or [])[:20]:
                                         results.append({
+                                            "sender_email": (msg.get("sender", "") or "").lower(),
+                                            "sender_name": msg.get("sender_name", ""),
                                             "subject": msg.get("subject", ""),
-                                            "sender_email": msg.get("sender", msg.get("from", "")),
-                                            "to_emails": [a for a in (msg.get("to", "").split(",") if msg.get("to") else []) if a.strip()],
-                                            "cc_emails": [a for a in (msg.get("cc", "").split(",") if msg.get("cc") else []) if a.strip()],
-                                            "snippet": (msg.get("snippet", msg.get("preview", "")) or "")[:300],
-                                            "date": msg.get("date", msg.get("internalDate", "")),
+                                            "snippet": (msg.get("snippet", "") or msg.get("bodyPreview", ""))[:300],
+                                            "date": (msg.get("date", "") or msg.get("receivedDateTime", ""))[:10],
+                                            "to_emails": "",
+                                            "cc_emails": "",
                                             "source": "mailbox",
                                         })
-                            except asyncio.TimeoutError:
+                            except Exception as e:
                                 logger.warning(
-                                    "[DEBRIEF] Composio email search timed out for %s", att_email,
+                                    "[DEBRIEF] Gmail fetch failed: %s",
+                                    str(e)[:200],
                                 )
-                            except Exception as _comp_err:
-                                logger.warning(
-                                    "[DEBRIEF] Composio email search failed for %s: %s",
-                                    att_email, _comp_err,
-                                )
-
-                        # --- POST-FILTER: defense-in-depth validation ---
-                        # $filter should return exact matches, but validate
-                        # that sender or recipients actually match the search target.
-                        pre_filter_count = len(results)
-                        if results:
-                            filtered: list[dict[str, Any]] = []
-                            search_target = att_email.lower()
-                            for _filter_idx, r in enumerate(results):
-                                sender = (r.get("sender_email") or "").lower()
-                                to_list = [a.lower() for a in (r.get("to_emails") or []) if a]
-                                cc_list = [a.lower() for a in (r.get("cc_emails") or []) if a]
-                                all_participants = [sender] + to_list + cc_list
-
-                                # Trace first 3 post-filter evaluations
-                                if _filter_idx < 3:
-                                    logger.info(
-                                        "[DEBRIEF] Post-filter trace #%d: "
-                                        "target=%s is_domain=%s sender=%s "
-                                        "to=%s cc=%s subject=%.60s",
-                                        _filter_idx,
-                                        search_target,
-                                        is_domain_search,
-                                        sender,
-                                        to_list[:2],
-                                        cc_list[:2],
-                                        r.get("subject", ""),
-                                    )
-
-                                # If we couldn't parse any participant addresses
-                                # from this email, keep it rather than discarding
-                                # (the $filter query should have matched it).
-                                has_any_addr = any(a for a in all_participants if a)
-                                if not has_any_addr:
-                                    logger.info(
-                                        "[DEBRIEF] Post-filter keeping email with no parsed addresses "
-                                        "(trusting search engine): subject=%s",
-                                        r.get("subject", "")[:80],
-                                    )
-                                    filtered.append(r)
-                                    continue
-
-                                if is_domain_search:
-                                    # Domain search: check if any participant's email
-                                    # ends with this domain (e.g., "@launch.co")
-                                    if any(addr.endswith(search_target) for addr in all_participants):
-                                        filtered.append(r)
-                                else:
-                                    # Exact email: match address directly or inside
-                                    # "Display Name <email>" format (Gmail)
-                                    if any(
-                                        search_target == addr or f"<{search_target}>" in addr
-                                        for addr in all_participants
-                                    ):
-                                        filtered.append(r)
-                            results = filtered[:10]
-                            logger.info(
-                                "[DEBRIEF] Post-filter for %s: %d → %d emails (removed %d irrelevant)",
-                                att_email,
-                                pre_filter_count,
-                                len(results),
-                                pre_filter_count - len(results),
-                            )
 
                         return results
 
