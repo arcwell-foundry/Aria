@@ -325,14 +325,19 @@ class DebriefService:
     # Check for Pending Debriefs
     # =========================================================================
 
-    async def check_pending_debriefs(self, user_id: str) -> list[dict[str, Any]]:
+    async def check_pending_debriefs(
+        self, user_id: str, user_email: str | None = None
+    ) -> list[dict[str, Any]]:
         """Check for meetings that ended but have no debrief.
 
         Queries calendar_events where end_time < now() and no matching
-        meeting_debrief exists.
+        meeting_debrief exists. Filters out system-generated events
+        (bracket-prefixed titles) and events with no external attendees.
 
         Args:
             user_id: The user's UUID.
+            user_email: The user's email address, used to identify
+                external attendees. If None, attendee filtering is skipped.
 
         Returns:
             List of meetings needing debrief.
@@ -353,8 +358,42 @@ class DebriefService:
         events = cast(list[dict[str, Any]], result.data or [])
         meetings_needing_debrief = []
 
-        # Check which events don't have debriefs
+        # Platform email domains to exclude from attendee checks
+        platform_domains = {"@lu.ma", "@calendar.google.com", "@resource.calendar.google.com"}
+
         for event in events:
+            title = event.get("title") or ""
+
+            # Skip bracket-prefixed system events (buffers, padding)
+            if title.startswith("["):
+                continue
+
+            # Skip events with no external attendees
+            attendees = event.get("attendees") or []
+            if isinstance(attendees, str):
+                import json as _json
+
+                try:
+                    attendees = _json.loads(attendees)
+                except (ValueError, TypeError):
+                    attendees = []
+
+            if user_email:
+                user_email_lower = user_email.lower()
+                has_external = False
+                for att in attendees:
+                    att_str = str(att).lower().strip()
+                    if att_str == user_email_lower:
+                        continue
+                    if any(att_str.endswith(domain) for domain in platform_domains):
+                        continue
+                    has_external = True
+                    break
+
+                if not has_external:
+                    continue
+
+            # Check if event already has a debrief
             debrief_result = (
                 self.db.table("meeting_debriefs")
                 .select("id")
@@ -363,7 +402,11 @@ class DebriefService:
                 .limit(1)
                 .execute()
             )
-            debrief_record = debrief_result.data[0] if debrief_result and debrief_result.data else None
+            debrief_record = (
+                debrief_result.data[0]
+                if debrief_result and debrief_result.data
+                else None
+            )
 
             if not debrief_record:
                 meetings_needing_debrief.append(event)

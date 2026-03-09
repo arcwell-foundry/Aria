@@ -394,7 +394,8 @@ async def get_pending_debriefs(
     """
     service = _get_service()
 
-    pending_meetings = await service.check_pending_debriefs(current_user.id)
+    user_email = getattr(current_user, "email", None)
+    pending_meetings = await service.check_pending_debriefs(current_user.id, user_email=user_email)
 
     # Apply limit
     pending_meetings = pending_meetings[:limit]

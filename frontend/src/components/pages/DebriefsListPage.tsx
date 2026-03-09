@@ -222,7 +222,7 @@ export function DebriefsListPage() {
                 title="No debriefs yet."
                 description="ARIA will help you debrief after your first meeting. Debriefs capture key takeaways, action items, and insights."
                 suggestion="Go to ARIA Workspace"
-                onSuggestion={() => navigate("/")}
+                onSuggestion={() => navigate("/?action=debrief")}
                 icon={<FileText className="w-8 h-8" />}
               />
             ) : (

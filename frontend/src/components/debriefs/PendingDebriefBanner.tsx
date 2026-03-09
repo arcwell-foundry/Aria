@@ -9,10 +9,10 @@
  */
 
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { X, Clock, Users } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { usePendingDebriefs } from "@/hooks/useDebriefs";
-import { wsManager } from "@/core/WebSocketManager";
 import type { PendingDebrief } from "@/api/debriefs";
 
 const STORAGE_KEY = "aria:pending-debriefs-dismissed";
@@ -74,7 +74,7 @@ function PendingDebriefItem({
   onStartDebrief,
 }: {
   meeting: PendingDebrief;
-  onStartDebrief: (meetingId: string) => void;
+  onStartDebrief: (meeting: PendingDebrief) => void;
 }) {
   return (
     <div
@@ -108,7 +108,7 @@ function PendingDebriefItem({
       </div>
 
       <button
-        onClick={() => meeting.meeting_id && onStartDebrief(meeting.meeting_id)}
+        onClick={() => meeting.meeting_id && onStartDebrief(meeting)}
         className={cn(
           "flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium",
           "bg-amber-600 text-white hover:bg-amber-700 transition-colors",
@@ -122,6 +122,7 @@ function PendingDebriefItem({
 }
 
 export function PendingDebriefBanner() {
+  const navigate = useNavigate();
   const { data: pendingMeetings, isLoading } = usePendingDebriefs();
   const [isDismissed, setIsDismissed] = useState(() => !!getStoredDismissal());
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -131,9 +132,23 @@ export function PendingDebriefBanner() {
     setIsDismissed(true);
   };
 
-  const handleStartDebrief = (meetingId: string) => {
-    // Send WebSocket event to trigger ARIA conversation
-    wsManager.send("debrief:start", { meeting_id: meetingId });
+  const handleStartDebrief = (meeting: PendingDebrief) => {
+    const params = new URLSearchParams();
+    params.set("debrief", meeting.meeting_id!);
+    if (meeting.title) {
+      params.set("title", meeting.title);
+    }
+    if (meeting.attendees?.length) {
+      const names = (meeting.attendees as string[])
+        .map((a) => {
+          // Extract name from email (before @) or use as-is
+          const atIndex = a.indexOf("@");
+          return atIndex > 0 ? a.substring(0, atIndex).replace(/[._]/g, " ") : a;
+        })
+        .join(", ");
+      params.set("attendees", names);
+    }
+    navigate(`/?${params.toString()}`);
   };
 
   // Don't render if dismissed, loading, or no pending meetings

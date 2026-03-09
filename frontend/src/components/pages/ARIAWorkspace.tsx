@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Video } from 'lucide-react';
 import { ConversationThread } from '@/components/conversation/ConversationThread';
 import { InputBar } from '@/components/conversation/InputBar';
@@ -47,6 +47,51 @@ export function ARIAWorkspace() {
 
   // Get user info for greeting personalization
   const { user } = useAuth();
+
+  // Handle debrief query params (?debrief=meetingId&title=...&attendees=... or ?action=debrief)
+  const [searchParams, setSearchParams] = useSearchParams();
+  const debriefHandledRef = useRef(false);
+
+  useEffect(() => {
+    if (debriefHandledRef.current) return;
+
+    const debriefMeetingId = searchParams.get('debrief');
+    const action = searchParams.get('action');
+
+    if (debriefMeetingId) {
+      debriefHandledRef.current = true;
+      const title = searchParams.get('title');
+      const attendees = searchParams.get('attendees');
+
+      let prompt = "Let's debrief my meeting";
+      if (title) {
+        prompt += `: "${title}"`;
+      }
+      if (attendees) {
+        prompt += ` with ${attendees}`;
+      }
+
+      const store = useConversationStore.getState();
+      store.setInputValue(prompt);
+      setSearchParams({}, { replace: true });
+
+      // Focus the input after a tick
+      setTimeout(() => {
+        const textarea = document.querySelector('[data-aria-id="message-input"]') as HTMLTextAreaElement | null;
+        textarea?.focus();
+      }, 100);
+    } else if (action === 'debrief') {
+      debriefHandledRef.current = true;
+      const store = useConversationStore.getState();
+      store.setInputValue("I just finished some meetings. Help me debrief.");
+      setSearchParams({}, { replace: true });
+
+      setTimeout(() => {
+        const textarea = document.querySelector('[data-aria-id="message-input"]') as HTMLTextAreaElement | null;
+        textarea?.focus();
+      }, 100);
+    }
+  }, [searchParams, setSearchParams]);
 
   // Briefing card state - gate C1 stream behind user action
   const [briefingStreamRequested, setBriefingStreamRequested] = useState(false);
