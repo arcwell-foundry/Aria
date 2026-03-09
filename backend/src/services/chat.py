@@ -1365,7 +1365,8 @@ class ChatService:
                         if not _oauth or not conn_id:
                             return []
                         results: list[dict[str, Any]] = []
-                        query = f'"from:{att_email} OR to:{att_email}"'
+                        # Determine if this is a domain search (@domain) vs exact email
+                        is_domain_search = att_email.startswith("@")
 
                         if provider == "outlook":
                             # Search both Inbox and SentItems for full
@@ -1375,10 +1376,18 @@ class ChatService:
                             all_msgs: list[dict[str, Any]] = []
                             for folder in ("Inbox", "SentItems"):
                                 try:
+                                    # Build folder-specific search query.
+                                    # Graph $search supports from: operator but NOT to:.
+                                    # For Inbox: use from: to match sender.
+                                    # For SentItems: search plain email text (post-filter validates).
+                                    if folder == "Inbox":
+                                        search_query = f'"from:{att_email}"'
+                                    else:
+                                        search_query = f'"{att_email}"'
                                     logger.info(
                                         "[DEBRIEF] Composio mailbox search: folder=%s query=%s connection=%s",
                                         folder,
-                                        att_email,
+                                        search_query,
                                         conn_id[:12] + "..." if conn_id else "NONE",
                                     )
                                     search_resp = await asyncio.wait_for(
@@ -1387,8 +1396,8 @@ class ChatService:
                                             action="OUTLOOK_LIST_MESSAGES",
                                             params={
                                                 "folder": folder,
-                                                "top": 10,
-                                                "$search": query,
+                                                "top": 15,
+                                                "$search": search_query,
                                                 "orderby": ["receivedDateTime desc"],
                                             },
                                             user_id=user_id,
@@ -1427,17 +1436,22 @@ class ChatService:
                                         "[DEBRIEF] Composio email search failed for %s in %s: %s",
                                         att_email, folder, _folder_err,
                                     )
-                            for msg in all_msgs[:10]:
+                            for msg in all_msgs[:20]:
                                 from_addr = msg.get("from", {}).get("emailAddress", {})
                                 to_addrs = [
                                     r.get("emailAddress", {}).get("address", "")
                                     for r in (msg.get("toRecipients") or [])
+                                ]
+                                cc_addrs = [
+                                    r.get("emailAddress", {}).get("address", "")
+                                    for r in (msg.get("ccRecipients") or [])
                                 ]
                                 results.append({
                                     "subject": msg.get("subject", ""),
                                     "sender_email": from_addr.get("address", ""),
                                     "sender_name": from_addr.get("name", ""),
                                     "to_emails": to_addrs,
+                                    "cc_emails": cc_addrs,
                                     "snippet": (msg.get("bodyPreview", "") or "")[:300],
                                     "date": msg.get("receivedDateTime", ""),
                                     "source": "mailbox",
@@ -1463,7 +1477,8 @@ class ChatService:
                                         results.append({
                                             "subject": msg.get("subject", ""),
                                             "sender_email": msg.get("sender", msg.get("from", "")),
-                                            "to_emails": [],
+                                            "to_emails": [a for a in (msg.get("to", "").split(",") if msg.get("to") else []) if a.strip()],
+                                            "cc_emails": [a for a in (msg.get("cc", "").split(",") if msg.get("cc") else []) if a.strip()],
                                             "snippet": (msg.get("snippet", msg.get("preview", "")) or "")[:300],
                                             "date": msg.get("date", msg.get("internalDate", "")),
                                             "source": "mailbox",
@@ -1477,6 +1492,42 @@ class ChatService:
                                     "[DEBRIEF] Composio email search failed for %s: %s",
                                     att_email, _comp_err,
                                 )
+
+                        # --- POST-FILTER: Only keep emails that actually involve the attendee ---
+                        # $search does broad full-text matching and returns irrelevant results.
+                        # Validate that sender or recipients actually match the search target.
+                        pre_filter_count = len(results)
+                        if results:
+                            filtered: list[dict[str, Any]] = []
+                            search_target = att_email.lower()
+                            for r in results:
+                                sender = (r.get("sender_email") or "").lower()
+                                to_list = [a.lower() for a in (r.get("to_emails") or []) if a]
+                                cc_list = [a.lower() for a in (r.get("cc_emails") or []) if a]
+                                all_participants = [sender] + to_list + cc_list
+
+                                if is_domain_search:
+                                    # Domain search: check if any participant's email
+                                    # ends with this domain (e.g., "@launch.co")
+                                    if any(addr.endswith(search_target) for addr in all_participants):
+                                        filtered.append(r)
+                                else:
+                                    # Exact email: match address directly or inside
+                                    # "Display Name <email>" format (Gmail)
+                                    if any(
+                                        search_target == addr or f"<{search_target}>" in addr
+                                        for addr in all_participants
+                                    ):
+                                        filtered.append(r)
+                            results = filtered[:10]
+                            logger.info(
+                                "[DEBRIEF] Post-filter for %s: %d → %d emails (removed %d irrelevant)",
+                                att_email,
+                                pre_filter_count,
+                                len(results),
+                                pre_filter_count - len(results),
+                            )
+
                         return results
 
                     # Launch Composio searches for all attendees in parallel
@@ -1547,7 +1598,7 @@ class ChatService:
                             "[DEBRIEF] Email in context #%d: [%s] %s - %s",
                             _idx + 1,
                             (_em.get("date", "") or "")[:10],
-                            (_em.get("sender", "") or "")[:60],
+                            (_em.get("sender_email", "") or "")[:60],
                             (_em.get("subject", "") or "")[:80],
                         )
 
