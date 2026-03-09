@@ -6,7 +6,7 @@ lead performance, conversion funnel, activity trends, response times, and ARIA i
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.core.cache import cached
@@ -974,6 +974,7 @@ class AnalyticsService:
             except Exception as e:
                 logger.warning(
                     "Error calculating response by contact type: %s",
+                    e,
                     extra={"user_id": user_id},
                     exc_info=True,
                 )

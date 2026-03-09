@@ -546,13 +546,22 @@ function DraftsList({ onContactClick }: { onContactClick: (email: string) => voi
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-0.5">
                           {/* Recipient name - clickable to view contact history */}
-                          <button
+                          <span
+                            role="button"
+                            tabIndex={0}
                             onClick={(e) => {
                               e.stopPropagation();
                               onContactClick(draft.recipient_email);
                             }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onContactClick(draft.recipient_email);
+                              }
+                            }}
                             className={cn(
-                              "text-sm truncate hover:underline",
+                              "text-sm truncate hover:underline cursor-pointer",
                               isPlaceholderDraft(draft)
                                 ? "font-normal italic"
                                 : "font-medium"
@@ -562,7 +571,7 @@ function DraftsList({ onContactClick }: { onContactClick: (email: string) => voi
                             {isPlaceholderDraft(draft)
                               ? 'Outreach Opportunity'
                               : draft.recipient_name || draft.recipient_email}
-                          </button>
+                          </span>
                           <span
                             className="font-mono text-xs"
                             style={{ color: 'var(--text-secondary)' }}
