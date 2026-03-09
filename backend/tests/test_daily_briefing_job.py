@@ -210,6 +210,9 @@ async def test_run_daily_briefing_job_generates_and_sends_email() -> None:
 
     mock_briefing_service = MagicMock()
     mock_briefing_service.generate_briefing = AsyncMock(return_value={"summary": "Good morning!"})
+    mock_briefing_service.deliver_briefing = AsyncMock(
+        return_value={"success": True, "delivery_method": "websocket"}
+    )
 
     with (
         patch(
@@ -243,6 +246,10 @@ async def test_run_daily_briefing_job_generates_and_sends_email() -> None:
             new_callable=AsyncMock,
             return_value=[],
         ),
+        patch(
+            "src.jobs.daily_briefing_job._maybe_create_video_briefing",
+            new_callable=AsyncMock,
+        ),
     ):
         result = await run_daily_briefing_job()
 
@@ -256,6 +263,9 @@ async def test_run_daily_briefing_job_generates_and_sends_email() -> None:
             briefing_date=date(2026, 2, 8),
             queued_insights=None,
         )
+
+        # Verify delivery was called
+        mock_briefing_service.deliver_briefing.assert_called_once()
 
         # Verify email was sent
         mock_email.assert_called_once_with(
@@ -280,6 +290,9 @@ async def test_run_daily_briefing_job_skips_email_when_disabled() -> None:
 
     mock_briefing_service = MagicMock()
     mock_briefing_service.generate_briefing = AsyncMock(return_value={"summary": "Good morning!"})
+    mock_briefing_service.deliver_briefing = AsyncMock(
+        return_value={"success": True, "delivery_method": "websocket"}
+    )
 
     with (
         patch(
@@ -308,6 +321,15 @@ async def test_run_daily_briefing_job_skips_email_when_disabled() -> None:
             "src.jobs.daily_briefing_job._send_briefing_email",
             new_callable=AsyncMock,
         ) as mock_email,
+        patch(
+            "src.jobs.daily_briefing_job._consume_briefing_queue",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "src.jobs.daily_briefing_job._maybe_create_video_briefing",
+            new_callable=AsyncMock,
+        ),
     ):
         result = await run_daily_briefing_job()
 
@@ -339,6 +361,9 @@ async def test_run_daily_briefing_job_continues_on_user_error() -> None:
     mock_briefing_service.generate_briefing = AsyncMock(
         side_effect=[Exception("LLM timeout"), {"summary": "Good morning!"}]
     )
+    mock_briefing_service.deliver_briefing = AsyncMock(
+        return_value={"success": True, "delivery_method": "websocket"}
+    )
 
     with (
         patch(
@@ -362,6 +387,15 @@ async def test_run_daily_briefing_job_continues_on_user_error() -> None:
         patch(
             "src.jobs.daily_briefing_job.BriefingService",
             return_value=mock_briefing_service,
+        ),
+        patch(
+            "src.jobs.daily_briefing_job._consume_briefing_queue",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "src.jobs.daily_briefing_job._maybe_create_video_briefing",
+            new_callable=AsyncMock,
         ),
     ):
         result = await run_daily_briefing_job()
@@ -393,6 +427,9 @@ async def test_run_daily_briefing_job_handles_multiple_timezones() -> None:
 
     mock_briefing_service = MagicMock()
     mock_briefing_service.generate_briefing = AsyncMock(return_value={"summary": "Good morning!"})
+    mock_briefing_service.deliver_briefing = AsyncMock(
+        return_value={"success": True, "delivery_method": "websocket"}
+    )
 
     # East coast is due, west coast is not
     due_calls = iter([True, False])
@@ -419,6 +456,15 @@ async def test_run_daily_briefing_job_handles_multiple_timezones() -> None:
         patch(
             "src.jobs.daily_briefing_job.BriefingService",
             return_value=mock_briefing_service,
+        ),
+        patch(
+            "src.jobs.daily_briefing_job._consume_briefing_queue",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "src.jobs.daily_briefing_job._maybe_create_video_briefing",
+            new_callable=AsyncMock,
         ),
     ):
         result = await run_daily_briefing_job()
