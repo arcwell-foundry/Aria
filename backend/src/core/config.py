@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     TAVUS_GUARDRAILS_ID: str = ""
     TAVUS_WEBHOOK_SECRET: str = ""  # Webhook signature verification secret
 
+    # MeetingBaaS (bot dispatch for meeting recording)
+    MEETINGBAAS_API_KEY: SecretStr | None = None
+
     # Daily.co (Phase 6)
     DAILY_API_KEY: SecretStr | None = None
 

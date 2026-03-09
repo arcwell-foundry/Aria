@@ -941,6 +941,27 @@ async def _run_weekly_digest() -> None:
         logger.exception("Weekly digest scheduler run failed")
 
 
+async def _run_meeting_bot_dispatcher() -> None:
+    """Dispatch MeetingBaaS bots to join upcoming meetings."""
+    try:
+        from src.jobs.meeting_bot_dispatcher import run_meeting_bot_dispatcher
+
+        result = await run_meeting_bot_dispatcher()
+
+        if result["events_checked"] > 0 or result["bots_dispatched"] > 0:
+            logger.info(
+                "Meeting bot dispatcher: %d events checked, %d bots dispatched, "
+                "%d no URL, %d existing, %d errors",
+                result["events_checked"],
+                result["bots_dispatched"],
+                result["skipped_no_url"],
+                result["skipped_existing"],
+                result["errors"],
+            )
+    except Exception:
+        logger.exception("Meeting bot dispatcher scheduler run failed")
+
+
 async def _run_meeting_brief_generation() -> None:
     """Scan calendar_events, create brief stubs, enrich attendees, generate content.
 
@@ -2061,6 +2082,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(minute="*/15"),  # Every 15 minutes
             id="meeting_brief_generation",
             name="Process pending meeting briefs",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_meeting_bot_dispatcher,
+            trigger=CronTrigger(minute="*/5"),  # Every 5 minutes
+            id="meeting_bot_dispatcher",
+            name="Dispatch MeetingBaaS bots for upcoming meetings",
             replace_existing=True,
         )
         _scheduler.add_job(

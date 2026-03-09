@@ -51,6 +51,7 @@ from src.api.routes import (
     integrations,
     intelligence,  # Phase 7: Causal intelligence routes
     leads,
+    meeting_sessions,
     meetings,
     memory,
     notifications,
@@ -382,6 +383,7 @@ app.include_router(intelligence.router, prefix="/api/v1")  # Phase 7: Causal int
 app.include_router(intelligence_panel.router, prefix="/api/v1")  # Chat page right panel
 app.include_router(watch_topics.router, prefix="/api/v1")  # Custom watch topics
 app.include_router(leads.router, prefix="/api/v1")
+app.include_router(meeting_sessions.router, prefix="/api/v1")
 app.include_router(meetings.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
