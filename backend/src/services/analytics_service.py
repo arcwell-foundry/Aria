@@ -740,7 +740,7 @@ class AnalyticsService:
                 self.db.table("email_drafts")
                 .select("original_email_id, created_at")
                 .eq("user_id", user_id)
-                .eq("email_purpose", "reply")
+                .eq("purpose", "reply")
                 .not_.is_("original_email_id", "null")
                 .execute()
             )
