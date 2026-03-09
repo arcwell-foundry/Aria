@@ -1277,9 +1277,11 @@ class ChatService:
 
                 # Gather email history and memory context for attendees
                 email_context: list[dict[str, Any]] = []
+                mailbox_emails: list[dict[str, Any]] = []
                 memory_facts: list[dict[str, Any]] = []
                 draft_history: list[dict[str, Any]] = []
                 company_intel: list[dict[str, Any]] = []
+                composio_warning: str = ""
 
                 if meetings:
                     meeting = meetings[0]
@@ -1298,11 +1300,171 @@ class ChatService:
                     # Collect all search terms across attendees for deduplication
                     all_domains_searched: set[str] = set()
 
+                    # --- PRIMARY SOURCE: Search user's actual mailbox via Composio ---
+                    # Always search the mailbox for each attendee. The email_scan_log
+                    # is an incomplete cache that only covers emails since the scanner
+                    # first ran. Composio searches the full mailbox.
+                    conn_id: str | None = None
+                    provider: str = ""
+                    _oauth: Any = None
+                    try:
+                        integ_result = db.table("user_integrations").select(
+                            "composio_connection_id, integration_type"
+                        ).eq("user_id", user_id).in_(
+                            "integration_type", ["outlook", "gmail"]
+                        ).eq("status", "active").limit(1).execute()
+
+                        if integ_result.data:
+                            conn_id = integ_result.data[0].get("composio_connection_id")
+                            provider = integ_result.data[0].get("integration_type", "").lower()
+                            if conn_id:
+                                from src.integrations.oauth import get_oauth_client as _get_oauth
+                                _oauth = _get_oauth()
+                    except Exception as _integ_err:
+                        logger.warning(
+                            "Composio integration lookup failed for debrief: %s",
+                            _integ_err,
+                        )
+
+                    # Helper to search mailbox for a single attendee
+                    async def _search_mailbox_for_attendee(
+                        att_email: str,
+                    ) -> list[dict[str, Any]]:
+                        """Search user's mailbox via Composio for emails to/from attendee.
+
+                        Args:
+                            att_email: The attendee's email address or @domain for domain search.
+                        """
+                        if not _oauth or not conn_id:
+                            return []
+                        results: list[dict[str, Any]] = []
+                        try:
+                            query = f'"from:{att_email} OR to:{att_email}"'
+
+                            if provider == "outlook":
+                                search_resp = await asyncio.wait_for(
+                                    _oauth.execute_action(
+                                        connection_id=conn_id,
+                                        action="OUTLOOK_LIST_MESSAGES",
+                                        params={
+                                            "folder": "AllItems",
+                                            "top": 10,
+                                            "$search": query,
+                                            "orderby": ["receivedDateTime desc"],
+                                        },
+                                        user_id=user_id,
+                                        dangerously_skip_version_check=True,
+                                    ),
+                                    timeout=10.0,
+                                )
+                                if search_resp.get("successful") and search_resp.get("data"):
+                                    msgs = search_resp["data"].get("value", [])
+                                    if not msgs:
+                                        msgs = search_resp["data"].get("response_data", {}).get("value", [])
+                                    for msg in (msgs or [])[:10]:
+                                        from_addr = msg.get("from", {}).get("emailAddress", {})
+                                        to_addrs = [
+                                            r.get("emailAddress", {}).get("address", "")
+                                            for r in (msg.get("toRecipients") or [])
+                                        ]
+                                        results.append({
+                                            "subject": msg.get("subject", ""),
+                                            "sender_email": from_addr.get("address", ""),
+                                            "to_emails": to_addrs,
+                                            "snippet": (msg.get("bodyPreview", "") or "")[:300],
+                                            "date": msg.get("receivedDateTime", ""),
+                                            "source": "mailbox",
+                                        })
+                            else:
+                                # Gmail
+                                search_resp = await asyncio.wait_for(
+                                    _oauth.execute_action(
+                                        connection_id=conn_id,
+                                        action="GMAIL_FETCH_EMAILS",
+                                        params={
+                                            "query": f"from:{att_email} OR to:{att_email}",
+                                            "max_results": 10,
+                                        },
+                                        user_id=user_id,
+                                    ),
+                                    timeout=10.0,
+                                )
+                                if search_resp.get("successful") and search_resp.get("data"):
+                                    msgs = search_resp["data"].get("emails", [])
+                                    for msg in (msgs or [])[:10]:
+                                        results.append({
+                                            "subject": msg.get("subject", ""),
+                                            "sender_email": msg.get("sender", msg.get("from", "")),
+                                            "to_emails": [],
+                                            "snippet": (msg.get("snippet", msg.get("preview", "")) or "")[:300],
+                                            "date": msg.get("date", msg.get("internalDate", "")),
+                                            "source": "mailbox",
+                                        })
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "Composio email search timed out for %s", att_email,
+                            )
+                        except Exception as _comp_err:
+                            logger.warning(
+                                "Composio email search failed for debrief attendee %s: %s",
+                                att_email, _comp_err,
+                            )
+                        return results
+
+                    # Launch Composio searches for all attendees in parallel
+                    if _oauth and conn_id and external_attendees:
+                        search_tasks: list[Any] = []
+                        searched_domains: set[str] = set()
+                        for att_email in external_attendees[:5]:
+                            # Per-attendee exact email search
+                            search_tasks.append(
+                                _search_mailbox_for_attendee(att_email)
+                            )
+                            # Domain-level search (catches other people at same company)
+                            _, att_domain, _ = _extract_search_terms(att_email)
+                            if att_domain and att_domain not in _GENERIC_DOMAINS and att_domain not in searched_domains:
+                                searched_domains.add(att_domain)
+                                search_tasks.append(
+                                    _search_mailbox_for_attendee(f"@{att_domain}")
+                                )
+
+                        try:
+                            all_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+                            for result in all_results:
+                                if isinstance(result, list):
+                                    mailbox_emails.extend(result)
+                                elif isinstance(result, Exception):
+                                    logger.warning("Composio parallel search error: %s", result)
+                        except Exception as _gather_err:
+                            composio_warning = "Note: I couldn't access your full email history for this search. The context below is from my cached records."
+                            logger.warning(
+                                "Composio parallel gather failed for debrief: %s",
+                                _gather_err,
+                            )
+                    elif not conn_id and external_attendees:
+                        # No email integration connected -- skip gracefully
+                        logger.info(
+                            "No active email integration for user %s, skipping Composio mailbox search",
+                            user_id,
+                        )
+
+                    # Deduplicate mailbox_emails by subject + date (same day)
+                    seen_mailbox: set[str] = set()
+                    deduped_mailbox: list[dict[str, Any]] = []
+                    for e in mailbox_emails:
+                        subj = (e.get("subject") or "").strip().lower()
+                        date_str = (e.get("date") or "")[:10]  # YYYY-MM-DD
+                        key = f"{subj}|{date_str}"
+                        if key not in seen_mailbox:
+                            seen_mailbox.add(key)
+                            deduped_mailbox.append(e)
+                    mailbox_emails = deduped_mailbox[:20]  # Cap at 20 total
+
+                    # --- SUPPLEMENTARY: email_scan_log for classification context ---
                     for att_email in external_attendees[:3]:
                         name_part, domain, company_name = _extract_search_terms(att_email)
                         is_generic = domain in _GENERIC_DOMAINS
 
-                        # --- FIX 1: Broad email search by domain + name ---
                         try:
                             or_conditions: list[str] = []
                             if not is_generic and domain:
@@ -1316,11 +1478,13 @@ class ChatService:
 
                             if or_conditions:
                                 email_result = db.table("email_scan_log").select(
-                                    "subject, sender_email, snippet, scanned_at"
+                                    "subject, sender_email, snippet, scanned_at, category, urgency, reason"
                                 ).eq("user_id", user_id).or_(
                                     ",".join(or_conditions)
                                 ).order("scanned_at", desc=True).limit(5).execute()
                                 if email_result.data:
+                                    for row in email_result.data:
+                                        row["source"] = "scan_log"
                                     email_context.extend(email_result.data)
                         except Exception:
                             pass
@@ -1367,7 +1531,7 @@ class ChatService:
                             except Exception:
                                 pass
 
-                        # --- FIX 2: Correct memory_semantic columns ---
+                        # Memory semantic search
                         try:
                             search_terms = [t for t in [name_part, company_name] if t]
                             if is_generic:
@@ -1414,83 +1578,7 @@ class ChatService:
                         except Exception:
                             pass
 
-                    # --- FIX 4: Composio fallback for scan gaps ---
-                    # If we found very few emails from the scan log, try
-                    # searching the user's actual mailbox via Composio
-                    if len(email_context) < 2 and external_attendees:
-                        try:
-                            integ_result = db.table("user_integrations").select(
-                                "composio_connection_id, integration_type"
-                            ).eq("user_id", user_id).in_(
-                                "integration_type", ["outlook", "gmail"]
-                            ).eq("status", "active").limit(1).execute()
-
-                            if integ_result.data:
-                                conn_id = integ_result.data[0].get("composio_connection_id")
-                                provider = integ_result.data[0].get("integration_type", "").lower()
-                                if conn_id:
-                                    from src.integrations.oauth import get_oauth_client as _get_oauth
-
-                                    _oauth = _get_oauth()
-                                    # Search for each attendee
-                                    for att_email in external_attendees[:2]:
-                                        try:
-                                            if provider == "outlook":
-                                                search_resp = await _oauth.execute_action(
-                                                    connection_id=conn_id,
-                                                    action="OUTLOOK_LIST_MESSAGES",
-                                                    params={
-                                                        "folder": "AllItems",
-                                                        "top": 5,
-                                                        "$search": f'"from:{att_email} OR to:{att_email}"',
-                                                        "orderby": ["receivedDateTime desc"],
-                                                    },
-                                                    user_id=user_id,
-                                                    dangerously_skip_version_check=True,
-                                                )
-                                                if search_resp.get("successful") and search_resp.get("data"):
-                                                    msgs = search_resp["data"].get("value", [])
-                                                    if not msgs:
-                                                        msgs = search_resp["data"].get("response_data", {}).get("value", [])
-                                                    for msg in (msgs or [])[:5]:
-                                                        from_addr = msg.get("from", {}).get("emailAddress", {})
-                                                        email_context.append({
-                                                            "subject": msg.get("subject", ""),
-                                                            "sender_email": from_addr.get("address", ""),
-                                                            "snippet": (msg.get("bodyPreview", "") or "")[:200],
-                                                            "scanned_at": msg.get("receivedDateTime", ""),
-                                                        })
-                                            else:
-                                                search_resp = await _oauth.execute_action(
-                                                    connection_id=conn_id,
-                                                    action="GMAIL_FETCH_EMAILS",
-                                                    params={
-                                                        "query": f"from:{att_email} OR to:{att_email}",
-                                                        "max_results": 5,
-                                                    },
-                                                    user_id=user_id,
-                                                )
-                                                if search_resp.get("successful") and search_resp.get("data"):
-                                                    msgs = search_resp["data"].get("emails", [])
-                                                    for msg in (msgs or [])[:5]:
-                                                        email_context.append({
-                                                            "subject": msg.get("subject", ""),
-                                                            "sender_email": msg.get("sender", msg.get("from", "")),
-                                                            "snippet": (msg.get("snippet", msg.get("preview", "")) or "")[:200],
-                                                            "scanned_at": msg.get("date", msg.get("internalDate", "")),
-                                                        })
-                                        except Exception as _comp_err:
-                                            logger.warning(
-                                                "Composio email search failed for debrief attendee %s: %s",
-                                                att_email, _comp_err,
-                                            )
-                        except Exception as _integ_err:
-                            logger.warning(
-                                "Composio integration lookup failed for debrief: %s",
-                                _integ_err,
-                            )
-
-                    # Deduplicate email_context by subject
+                    # Deduplicate scan_log email_context by subject
                     seen_subjects: set[str] = set()
                     deduped_emails: list[dict[str, Any]] = []
                     for e in email_context:
@@ -1510,10 +1598,14 @@ class ChatService:
                             deduped_facts.append(f)
                     memory_facts = deduped_facts
 
-                data["email_history"] = email_context
+                data["mailbox_emails"] = mailbox_emails
+                data["scan_log_emails"] = email_context
+                data["email_history"] = email_context  # backward compat
                 data["memory_facts"] = memory_facts
                 data["draft_history"] = draft_history
                 data["company_intel"] = company_intel
+                if composio_warning:
+                    data["composio_warning"] = composio_warning
 
             return data
         except Exception as e:
@@ -1577,14 +1669,22 @@ class ChatService:
             ),
             "debrief": (
                 "The user wants to debrief a meeting. You have the full meeting details, "
-                "email history with attendees/company (including domain-matched and keyword-matched emails), "
-                "draft history, known facts from memory, and company intelligence below.\n\n"
+                "direct email history from the user's mailbox (mailbox_emails), supplementary email "
+                "intelligence from the scan log (scan_log_emails), draft history, known facts from "
+                "memory, and company intelligence below.\n\n"
                 "INSTRUCTIONS:\n"
                 "- Acknowledge the meeting with specific details (title, date, time, duration, who attended).\n"
+                "- CRITICAL: If mailbox_emails contains direct email exchanges with attendees, you MUST\n"
+                "  reference them specifically. Cite dates, senders, and quote or paraphrase key content.\n"
+                "  Example: 'I can see Ismael reached out on Feb 19 expressing interest in ARIA and\n"
+                "  inviting you for a call.' This shows you understand the relationship history.\n"
+                "- mailbox_emails are from the user's actual mailbox and are the primary source of truth.\n"
+                "  scan_log_emails add classification context (category, urgency) but may be incomplete.\n"
                 "- Reference any relevant email history or known facts about the attendees or their company.\n"
                 "  Even if an email is not directly from the attendee, if it is from the same company domain\n"
                 "  or mentions the attendee by name, reference it as relevant context.\n"
                 "- Reference any company intelligence insights if available.\n"
+                "- If there is a composio_warning in the data, mention it briefly at the end.\n"
                 "- Ask the user to walk you through the debrief with these structured questions:\n"
                 "  1. Overall outcome: Was this meeting positive, neutral, or concerning?\n"
                 "  2. Key discussion points: What were the main topics covered?\n"
