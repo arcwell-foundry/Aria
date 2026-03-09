@@ -1371,34 +1371,27 @@ class ChatService:
                         if provider == "outlook":
                             # Search both Inbox and SentItems for full
                             # debrief context (received + sent emails).
-                            # "AllItems" is not a valid Outlook folder name
-                            # for the Composio OUTLOOK_LIST_MESSAGES action.
                             all_msgs: list[dict[str, Any]] = []
-                            for folder in ("Inbox", "SentItems"):
+
+                            if is_domain_search:
+                                # Domain search (e.g. "@launch.co"):
+                                # OData $filter can't do contains() on nested
+                                # emailAddress properties, so use the dedicated
+                                # OUTLOOK_SEARCH_MESSAGES action with KQL.
                                 try:
-                                    # Build folder-specific search query.
-                                    # Graph $search supports from: operator but NOT to:.
-                                    # For Inbox: use from: to match sender.
-                                    # For SentItems: search plain email text (post-filter validates).
-                                    if folder == "Inbox":
-                                        search_query = f'"from:{att_email}"'
-                                    else:
-                                        search_query = f'"{att_email}"'
+                                    search_query = f"from:{att_email}"
                                     logger.info(
-                                        "[DEBRIEF] Composio mailbox search: folder=%s query=%s connection=%s",
-                                        folder,
+                                        "[DEBRIEF] Composio domain search: action=OUTLOOK_SEARCH_MESSAGES query=%s connection=%s",
                                         search_query,
                                         conn_id[:12] + "..." if conn_id else "NONE",
                                     )
                                     search_resp = await asyncio.wait_for(
                                         _oauth.execute_action(
                                             connection_id=conn_id,
-                                            action="OUTLOOK_LIST_MESSAGES",
+                                            action="OUTLOOK_SEARCH_MESSAGES",
                                             params={
-                                                "folder": folder,
+                                                "search_query": search_query,
                                                 "top": 15,
-                                                "$search": search_query,
-                                                "orderby": ["receivedDateTime desc"],
                                             },
                                             user_id=user_id,
                                             dangerously_skip_version_check=True,
@@ -1406,36 +1399,97 @@ class ChatService:
                                         timeout=10.0,
                                     )
                                     if search_resp.get("successful") and search_resp.get("data"):
-                                        # New Composio API wraps data in response_data
                                         data = search_resp["data"]
                                         if "response_data" in data:
                                             msgs = data["response_data"].get("value", [])
                                         else:
                                             msgs = data.get("value", [])
                                         logger.info(
-                                            "[DEBRIEF] Composio returned %d emails from %s for %s",
+                                            "[DEBRIEF] Composio SEARCH_MESSAGES returned %d emails for %s",
                                             len(msgs or []),
-                                            folder,
                                             att_email,
                                         )
                                         all_msgs.extend(msgs or [])
                                     else:
                                         logger.warning(
-                                            "[DEBRIEF] Composio search unsuccessful for %s in %s: %s",
+                                            "[DEBRIEF] Composio SEARCH_MESSAGES unsuccessful for %s: %s",
                                             att_email,
-                                            folder,
                                             search_resp.get("error", "no error detail"),
                                         )
                                 except asyncio.TimeoutError:
                                     logger.warning(
-                                        "[DEBRIEF] Composio email search timed out for %s in %s",
-                                        att_email, folder,
+                                        "[DEBRIEF] Composio SEARCH_MESSAGES timed out for %s",
+                                        att_email,
                                     )
-                                except Exception as _folder_err:
+                                except Exception as _search_err:
                                     logger.warning(
-                                        "[DEBRIEF] Composio email search failed for %s in %s: %s",
-                                        att_email, folder, _folder_err,
+                                        "[DEBRIEF] Composio SEARCH_MESSAGES failed for %s: %s",
+                                        att_email, _search_err,
                                     )
+                            else:
+                                # Exact email search: use $filter on
+                                # OUTLOOK_LIST_MESSAGES for precise matching.
+                                # $search is unreliable (ignores the query
+                                # and returns random recent emails).
+                                for folder in ("Inbox", "SentItems"):
+                                    try:
+                                        if folder == "Inbox":
+                                            odata_filter = f"from/emailAddress/address eq '{att_email}'"
+                                            order_by = "receivedDateTime desc"
+                                        else:
+                                            odata_filter = f"toRecipients/any(r:r/emailAddress/address eq '{att_email}')"
+                                            order_by = "sentDateTime desc"
+                                        logger.info(
+                                            "[DEBRIEF] Composio mailbox search: folder=%s $filter=%s connection=%s",
+                                            folder,
+                                            odata_filter,
+                                            conn_id[:12] + "..." if conn_id else "NONE",
+                                        )
+                                        search_resp = await asyncio.wait_for(
+                                            _oauth.execute_action(
+                                                connection_id=conn_id,
+                                                action="OUTLOOK_LIST_MESSAGES",
+                                                params={
+                                                    "folder": folder,
+                                                    "top": 15,
+                                                    "$filter": odata_filter,
+                                                    "$orderby": order_by,
+                                                },
+                                                user_id=user_id,
+                                                dangerously_skip_version_check=True,
+                                            ),
+                                            timeout=10.0,
+                                        )
+                                        if search_resp.get("successful") and search_resp.get("data"):
+                                            data = search_resp["data"]
+                                            if "response_data" in data:
+                                                msgs = data["response_data"].get("value", [])
+                                            else:
+                                                msgs = data.get("value", [])
+                                            logger.info(
+                                                "[DEBRIEF] Composio returned %d emails from %s for %s",
+                                                len(msgs or []),
+                                                folder,
+                                                att_email,
+                                            )
+                                            all_msgs.extend(msgs or [])
+                                        else:
+                                            logger.warning(
+                                                "[DEBRIEF] Composio search unsuccessful for %s in %s: %s",
+                                                att_email,
+                                                folder,
+                                                search_resp.get("error", "no error detail"),
+                                            )
+                                    except asyncio.TimeoutError:
+                                        logger.warning(
+                                            "[DEBRIEF] Composio email search timed out for %s in %s",
+                                            att_email, folder,
+                                        )
+                                    except Exception as _folder_err:
+                                        logger.warning(
+                                            "[DEBRIEF] Composio email search failed for %s in %s: %s",
+                                            att_email, folder, _folder_err,
+                                        )
                             # Log sample message structure for debugging
                             if all_msgs:
                                 import json as _json
@@ -1568,9 +1622,9 @@ class ChatService:
                                     att_email, _comp_err,
                                 )
 
-                        # --- POST-FILTER: Only keep emails that actually involve the attendee ---
-                        # $search does broad full-text matching and returns irrelevant results.
-                        # Validate that sender or recipients actually match the search target.
+                        # --- POST-FILTER: defense-in-depth validation ---
+                        # $filter should return exact matches, but validate
+                        # that sender or recipients actually match the search target.
                         pre_filter_count = len(results)
                         if results:
                             filtered: list[dict[str, Any]] = []
@@ -1596,10 +1650,9 @@ class ChatService:
                                         r.get("subject", ""),
                                     )
 
-                                # Defense-in-depth: if we couldn't parse any
-                                # participant addresses from this email, trust
-                                # the Outlook search engine result rather than
-                                # discarding it (the KQL query already filtered).
+                                # If we couldn't parse any participant addresses
+                                # from this email, keep it rather than discarding
+                                # (the $filter query should have matched it).
                                 has_any_addr = any(a for a in all_participants if a)
                                 if not has_any_addr:
                                     logger.info(
