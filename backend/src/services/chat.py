@@ -1338,16 +1338,16 @@ class ChatService:
                         if not _oauth or not conn_id:
                             return []
                         results: list[dict[str, Any]] = []
-                        try:
-                            query = f'"from:{att_email} OR to:{att_email}"'
+                        query = f'"from:{att_email} OR to:{att_email}"'
 
-                            if provider == "outlook":
-                                # Search both Inbox and SentItems for full
-                                # debrief context (received + sent emails).
-                                # "AllItems" is not a valid Outlook folder name
-                                # for the Composio OUTLOOK_LIST_MESSAGES action.
-                                all_msgs: list[dict[str, Any]] = []
-                                for folder in ("Inbox", "SentItems"):
+                        if provider == "outlook":
+                            # Search both Inbox and SentItems for full
+                            # debrief context (received + sent emails).
+                            # "AllItems" is not a valid Outlook folder name
+                            # for the Composio OUTLOOK_LIST_MESSAGES action.
+                            all_msgs: list[dict[str, Any]] = []
+                            for folder in ("Inbox", "SentItems"):
+                                try:
                                     logger.info(
                                         "[DEBRIEF] Composio mailbox search: folder=%s query=%s connection=%s",
                                         folder,
@@ -1370,9 +1370,12 @@ class ChatService:
                                         timeout=10.0,
                                     )
                                     if search_resp.get("successful") and search_resp.get("data"):
-                                        msgs = search_resp["data"].get("value", [])
-                                        if not msgs:
-                                            msgs = search_resp["data"].get("response_data", {}).get("value", [])
+                                        # New Composio API wraps data in response_data
+                                        data = search_resp["data"]
+                                        if "response_data" in data:
+                                            msgs = data["response_data"].get("value", [])
+                                        else:
+                                            msgs = data.get("value", [])
                                         logger.info(
                                             "[DEBRIEF] Composio returned %d emails from %s for %s",
                                             len(msgs or []),
@@ -1387,21 +1390,33 @@ class ChatService:
                                             folder,
                                             search_resp.get("error", "no error detail"),
                                         )
-                                for msg in all_msgs[:10]:
-                                    from_addr = msg.get("from", {}).get("emailAddress", {})
-                                    to_addrs = [
-                                        r.get("emailAddress", {}).get("address", "")
-                                        for r in (msg.get("toRecipients") or [])
-                                    ]
-                                    results.append({
-                                        "subject": msg.get("subject", ""),
-                                        "sender_email": from_addr.get("address", ""),
-                                        "to_emails": to_addrs,
-                                        "snippet": (msg.get("bodyPreview", "") or "")[:300],
-                                        "date": msg.get("receivedDateTime", ""),
-                                        "source": "mailbox",
-                                    })
-                            else:
+                                except asyncio.TimeoutError:
+                                    logger.warning(
+                                        "[DEBRIEF] Composio email search timed out for %s in %s",
+                                        att_email, folder,
+                                    )
+                                except Exception as _folder_err:
+                                    logger.warning(
+                                        "[DEBRIEF] Composio email search failed for %s in %s: %s",
+                                        att_email, folder, _folder_err,
+                                    )
+                            for msg in all_msgs[:10]:
+                                from_addr = msg.get("from", {}).get("emailAddress", {})
+                                to_addrs = [
+                                    r.get("emailAddress", {}).get("address", "")
+                                    for r in (msg.get("toRecipients") or [])
+                                ]
+                                results.append({
+                                    "subject": msg.get("subject", ""),
+                                    "sender_email": from_addr.get("address", ""),
+                                    "sender_name": from_addr.get("name", ""),
+                                    "to_emails": to_addrs,
+                                    "snippet": (msg.get("bodyPreview", "") or "")[:300],
+                                    "date": msg.get("receivedDateTime", ""),
+                                    "source": "mailbox",
+                                })
+                        else:
+                            try:
                                 # Gmail
                                 search_resp = await asyncio.wait_for(
                                     _oauth.execute_action(
@@ -1426,15 +1441,15 @@ class ChatService:
                                             "date": msg.get("date", msg.get("internalDate", "")),
                                             "source": "mailbox",
                                         })
-                        except asyncio.TimeoutError:
-                            logger.warning(
-                                "[DEBRIEF] Composio email search timed out for %s", att_email,
-                            )
-                        except Exception as _comp_err:
-                            logger.warning(
-                                "[DEBRIEF] Composio email search failed for %s: %s",
-                                att_email, _comp_err,
-                            )
+                            except asyncio.TimeoutError:
+                                logger.warning(
+                                    "[DEBRIEF] Composio email search timed out for %s", att_email,
+                                )
+                            except Exception as _comp_err:
+                                logger.warning(
+                                    "[DEBRIEF] Composio email search failed for %s: %s",
+                                    att_email, _comp_err,
+                                )
                         return results
 
                     # Launch Composio searches for all attendees in parallel
@@ -1636,6 +1651,23 @@ class ChatService:
                             deduped_facts.append(f)
                     memory_facts = deduped_facts
 
+                # Sort mailbox emails by date and label relative to meeting
+                if mailbox_emails and meetings:
+                    meeting_start = meetings[0].get("start_time", "")
+                    if meeting_start:
+                        # Sort emails chronologically (oldest first)
+                        mailbox_emails.sort(key=lambda e: e.get("date", "") or "")
+                        # Label each email as BEFORE or AFTER the meeting
+                        for email in mailbox_emails:
+                            email_date = (email.get("date") or "")[:10]
+                            meeting_date_str = meeting_start[:10]
+                            if email_date and meeting_date_str:
+                                email["relative_to_meeting"] = (
+                                    "BEFORE" if email_date < meeting_date_str
+                                    else "AFTER" if email_date > meeting_date_str
+                                    else "SAME DAY"
+                                )
+
                 data["mailbox_emails"] = mailbox_emails
                 data["scan_log_emails"] = email_context
                 data["email_history"] = email_context  # backward compat
@@ -1716,6 +1748,17 @@ class ChatService:
                 "  reference them specifically. Cite dates, senders, and quote or paraphrase key content.\n"
                 "  Example: 'I can see Ismael reached out on Feb 19 expressing interest in ARIA and\n"
                 "  inviting you for a call.' This shows you understand the relationship history.\n"
+                "- CRITICAL: When presenting email history, organize it as a TIMELINE relative to the meeting date.\n"
+                "  Each email in mailbox_emails has a 'relative_to_meeting' field ('BEFORE', 'AFTER', or 'SAME DAY').\n"
+                "  Use this to build a chronological narrative:\n"
+                "  * Emails BEFORE the meeting tell you what led to this meeting, what the original ask was,\n"
+                "    and what context the user had going in.\n"
+                "  * Emails AFTER the meeting tell you about follow-up, feedback requests, and next steps.\n"
+                "  * Present the timeline clearly and draw inferences from the sequence of events:\n"
+                "    who reached out first, what was proposed, how the meeting came about, and what followed.\n"
+                "  * Example: 'Looking at the email trail: Ismael first reached out on Feb 19 expressing interest\n"
+                "    in ARIA and inviting you for a call. That led to your March 5 meeting. Then on March 9,\n"
+                "    Jason Calacanis followed up asking for feedback on the call.'\n"
                 "- mailbox_emails are from the user's actual mailbox and are the primary source of truth.\n"
                 "  scan_log_emails add classification context (category, urgency) but may be incomplete.\n"
                 "- Reference any relevant email history or known facts about the attendees or their company.\n"

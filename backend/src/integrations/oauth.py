@@ -436,6 +436,12 @@ class ComposioOAuthClient:
                         version = versions[0]
             except Exception as e:
                 logger.debug("Could not preload tool schema for %s: %s", resolved_action, e)
+        elif version is None:
+            # Schema already cached from a prior call — extract version from it
+            cached_schema = self._client.tools._tool_schemas[resolved_action]
+            versions = getattr(cached_schema, "available_versions", None)
+            if versions:
+                version = versions[0]
 
         # Execute Composio action via SDK
         def _execute() -> Any:
@@ -505,12 +511,21 @@ class ComposioOAuthClient:
                 version = self._resolve_tool_version(resolved_action)
         else:
             # Even when skipping version check, preload schema to avoid KeyError
+            # and extract version from cached/new schema so the SDK doesn't fail
             if resolved_action not in self._client.tools._tool_schemas:
                 try:
                     tool = self._client.client.tools.retrieve(tool_slug=resolved_action)
                     self._client.tools._tool_schemas[resolved_action] = tool
+                    versions = getattr(tool, "available_versions", None)
+                    if versions:
+                        version = versions[0]
                 except Exception as e:
                     logger.debug("Could not preload tool schema for %s: %s", resolved_action, e)
+            else:
+                cached_schema = self._client.tools._tool_schemas[resolved_action]
+                versions = getattr(cached_schema, "available_versions", None)
+                if versions:
+                    version = versions[0]
 
         # Execute Composio action via SDK
         result = self._client.tools.execute(
