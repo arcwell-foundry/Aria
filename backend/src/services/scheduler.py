@@ -942,20 +942,22 @@ async def _run_weekly_digest() -> None:
 
 
 async def _run_meeting_brief_generation() -> None:
-    """Process pending meeting briefs and generate content.
+    """Scan calendar_events, create brief stubs, enrich attendees, generate content.
 
-    Picks up briefs created by calendar meeting checks (status=pending)
-    and generates research content via MeetingBriefService.
+    Single-stage pipeline that directly scans calendar_events table for ALL users,
+    looks ahead 48h and back 2h, skips buffer events, enriches attendees via Exa,
+    and generates brief content via Claude.
     """
     try:
         from src.jobs.meeting_brief_generator import run_meeting_brief_job
 
-        result = await run_meeting_brief_job()
+        result = await run_meeting_brief_job(hours_ahead=48, hours_back=2)
 
-        if result["meetings_found"] > 0:
+        if result["events_found"] > 0:
             logger.info(
-                "Meeting brief generation: %d found, %d generated, %d errors",
-                result["meetings_found"],
+                "Meeting brief generation: %d events, %d briefs created, %d generated, %d errors",
+                result["events_found"],
+                result["briefs_created"],
                 result["briefs_generated"],
                 result["errors"],
             )

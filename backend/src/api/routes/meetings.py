@@ -1,6 +1,7 @@
 """Meeting brief API routes for pre-meeting research."""
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
@@ -174,3 +175,31 @@ async def generate_meeting_brief(
         generated_at=updated_brief.get("generated_at"),
         error_message=updated_brief.get("error_message"),
     )
+
+
+@router.post("/briefs/backfill", status_code=202)
+async def backfill_briefs(
+    current_user: CurrentUser,  # noqa: ARG001 — auth required
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    """Trigger a one-time backfill of meeting briefs for all calendar events.
+
+    Scans all calendar events with external attendees that don't already
+    have briefs. Enriches attendee profiles and generates brief content.
+    Runs in the background — returns 202 immediately.
+    """
+    async def _run_backfill() -> None:
+        try:
+            from src.jobs.meeting_brief_generator import backfill_meeting_briefs
+
+            result = await backfill_meeting_briefs()
+            logger.info(
+                "Backfill completed",
+                extra=result,
+            )
+        except Exception:
+            logger.exception("Backfill meeting briefs failed")
+
+    background_tasks.add_task(_run_backfill)
+
+    return {"status": "backfill_started", "message": "Meeting brief backfill is running in the background."}
