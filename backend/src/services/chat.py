@@ -1265,15 +1265,22 @@ class ChatService:
                 # Get user email and name for attendee filtering
                 user_email = ""
                 user_full_name = ""
+                user_domain = ""
                 try:
                     user_result = db.table("user_profiles").select(
                         "email, full_name"
-                    ).eq("user_id", user_id).limit(1).execute()
+                    ).eq("id", user_id).limit(1).execute()
                     if user_result.data:
                         user_email = user_result.data[0].get("email", "")
                         user_full_name = user_result.data[0].get("full_name", "")
+                    if user_email and "@" in user_email:
+                        user_domain = user_email.split("@")[1].lower()
                 except Exception:
                     pass
+                logger.info(
+                    "[DEBRIEF] User context: email=%s domain=%s",
+                    user_email or "(empty)", user_domain or "(empty)",
+                )
 
                 # Gather email history and memory context for attendees
                 email_context: list[dict[str, Any]] = []
@@ -1469,8 +1476,9 @@ class ChatService:
                                 _search_mailbox_for_attendee(att_email)
                             )
                             # Domain-level search (catches other people at same company)
+                            # Skip the user's own domain to avoid returning all their emails
                             _, att_domain, _ = _extract_search_terms(att_email)
-                            if att_domain and att_domain not in _GENERIC_DOMAINS and att_domain not in searched_domains:
+                            if att_domain and att_domain not in _GENERIC_DOMAINS and att_domain not in searched_domains and att_domain != user_domain:
                                 searched_domains.add(att_domain)
                                 search_tasks.append(
                                     _search_mailbox_for_attendee(f"@{att_domain}")
@@ -1512,6 +1520,16 @@ class ChatService:
                             seen_mailbox.add(key)
                             deduped_mailbox.append(e)
                     mailbox_emails = deduped_mailbox[:20]  # Cap at 20 total
+
+                    # Log emails being passed to LLM for debugging
+                    for _idx, _em in enumerate(mailbox_emails[:10]):
+                        logger.info(
+                            "[DEBRIEF] Email in context #%d: [%s] %s - %s",
+                            _idx + 1,
+                            (_em.get("date", "") or "")[:10],
+                            (_em.get("sender", "") or "")[:60],
+                            (_em.get("subject", "") or "")[:80],
+                        )
 
                     # --- SUPPLEMENTARY: email_scan_log for classification context ---
                     for att_email in external_attendees[:3]:
