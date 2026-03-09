@@ -2001,6 +2001,31 @@ async def _run_pre_conference_briefings() -> None:
         logger.warning("Pre-conference briefing job failed", exc_info=True)
 
 
+async def _run_hunter_lead_generation() -> None:
+    """Run Hunter agent lead generation for all active lead gen goals.
+
+    Queries all active lead generation goals across all users,
+    runs Hunter agent for each goal, creates discovered leads,
+    generates outbound email drafts, and saves drafts to email client.
+    Updates goal progress incrementally after each lead batch.
+    """
+    try:
+        from src.jobs.hunter_lead_job import run_hunter_lead_generation_job
+
+        result = await run_hunter_lead_generation_job()
+
+        if result["leads_found"] > 0 or result["goals_processed"] > 0:
+            logger.info(
+                "Hunter lead generation: users=%d, goals=%d, leads=%d, errors=%d",
+                result["users_checked"],
+                result["goals_processed"],
+                result["leads_found"],
+                result["errors"],
+            )
+    except Exception:
+        logger.exception("Hunter lead generation scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -2324,6 +2349,13 @@ async def start_scheduler() -> None:
             name="Monthly battle card product enrichment via Exa",
             replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_hunter_lead_generation,
+            trigger=CronTrigger(minute="*/30"),  # Every 30 minutes
+            id="hunter_lead_generation",
+            name="Hunter agent lead generation for active goals",
+            replace_existing=True,
+        )
         _scheduler.start()
         logger.info(
             "Background scheduler started with %d jobs — "
@@ -2334,7 +2366,8 @@ async def start_scheduler() -> None:
             "weekly digest Monday 07:00, "
             "battle card refresh Monday 07:30, "
             "conversion score batch Monday 08:00, "
-            "email check every 15 min",
+            "email check every 15 min, "
+            "hunter lead generation every 30 min",
             len(_scheduler.get_jobs()),
         )
     except ImportError:
