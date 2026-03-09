@@ -348,8 +348,8 @@ export function ARIAWorkspace() {
         setCurrentSuggestions(data.suggestions);
       }
 
-      if (data.conversation_id && !activeConversationId) {
-        setActiveConversation(data.conversation_id);
+      if (data.conversation_id && !useConversationStore.getState().activeConversationId) {
+        useConversationStore.getState().setActiveConversation(data.conversation_id);
       }
     };
 
@@ -545,14 +545,15 @@ export function ARIAWorkspace() {
       wsManager.off(WS_EVENTS.ARIA_STREAM_COMPLETE, handleStreamComplete);
       wsManager.off('aria.c1_render', handleC1Render);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- activeConversationId
+  // intentionally excluded: handleAriaMessage reads it from the store directly to
+  // avoid re-registering all WS handlers when conversationId changes (drops tokens).
   }, [
     addMessage,
     appendToMessage,
     updateMessageMetadata,
     setStreaming,
     setCurrentSuggestions,
-    activeConversationId,
-    setActiveConversation,
   ]);
 
   const handleSend = useCallback(
