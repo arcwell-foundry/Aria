@@ -41,7 +41,8 @@ async def meetingbaas_webhook(request: Request) -> JSONResponse:
         return JSONResponse({"ok": True}, status_code=200)
 
     event = payload.get("event", "")
-    bot_id = payload.get("bot_id", "")
+    data = payload.get("data", {}) or {}
+    bot_id = data.get("bot_id") or payload.get("bot_id", "")
 
     logger.info(
         "MeetingBaaS webhook received",
@@ -51,7 +52,7 @@ async def meetingbaas_webhook(request: Request) -> JSONResponse:
     db = get_supabase_client()
 
     if event == "bot.status_change":
-        status = payload.get("status", "")
+        status = data.get("status") or payload.get("status", "")
         _handle_status_change(bot_id, status, db)
     elif event == "complete":
         asyncio.create_task(_process_transcript(payload, db))
@@ -105,11 +106,12 @@ async def _process_transcript(payload: dict[str, Any], db: Any) -> None:
     Called as a background task after receiving a 'complete' event.
     Stores the transcript, generates an AI debrief, and queues a review action.
     """
-    bot_id = payload.get("bot_id", "")
+    data = payload.get("data", {}) or {}
+    bot_id = data.get("bot_id") or payload.get("bot_id", "")
 
     try:
         # Extract transcript from payload
-        raw_transcript: list[dict[str, Any]] = payload.get("transcript", [])
+        raw_transcript: list[dict[str, Any]] = data.get("transcript") or payload.get("transcript", [])
         transcript_text = _flatten_transcript(raw_transcript)
 
         # Look up the meeting session
