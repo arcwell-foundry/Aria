@@ -578,6 +578,21 @@ function DraftsList({ onContactClick }: { onContactClick: (email: string) => voi
                           >
                             {PURPOSE_LABELS[draft.purpose]}
                           </span>
+                          {draft.pipeline_context && draft.pipeline_context.company_name && (
+                            <span
+                              className="text-xs px-1.5 py-0.5 rounded"
+                              style={{
+                                backgroundColor: 'var(--bg-subtle)',
+                                color: 'var(--text-secondary)',
+                              }}
+                              title={`Lead: ${draft.pipeline_context.lead_name || 'N/A'} | Stage: ${draft.pipeline_context.lifecycle_stage || 'N/A'} | Health: ${draft.pipeline_context.health_score ?? 'N/A'}`}
+                            >
+                              {draft.pipeline_context.company_name}
+                              {draft.pipeline_context.relationship_type && (
+                                <> ({draft.pipeline_context.relationship_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())})</>
+                              )}
+                            </span>
+                          )}
                         </div>
                         <p
                           className="text-sm truncate"
