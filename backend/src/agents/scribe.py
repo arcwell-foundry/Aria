@@ -15,6 +15,7 @@ from src.agents.skill_aware_agent import SkillAwareAgent
 from src.core.config import settings
 from src.core.task_types import TaskType
 from src.prompts.email_writing_framework import ELITE_EMAIL_FRAMEWORK
+from src.security.prompt_security import wrap_external_data
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -510,16 +511,21 @@ class ScribeAgent(SkillAwareAgent):
         if recipient_company:
             recipient_info_parts.append(f"Company: {recipient_company}")
 
-        # Add research context if available
+        # Add research context if available (wrapped as external data for security)
         if recipient_research:
+            research_parts: list[str] = []
             if recipient_research.get("bio"):
-                recipient_info_parts.append(f"Background: {recipient_research['bio'][:300]}")
+                research_parts.append(f"Background: {recipient_research['bio'][:300]}")
             if recipient_research.get("recent_news"):
                 news_items = recipient_research["recent_news"][:2]
                 news_summary = "; ".join([n.get("title", "") for n in news_items])
-                recipient_info_parts.append(f"Recent Company News: {news_summary}")
+                research_parts.append(f"Recent Company News: {news_summary}")
             if recipient_research.get("linkedin_url"):
-                recipient_info_parts.append(f"LinkedIn: {recipient_research['linkedin_url']}")
+                research_parts.append(f"LinkedIn: {recipient_research['linkedin_url']}")
+            if research_parts:
+                recipient_info_parts.append(
+                    wrap_external_data("\n".join(research_parts), "exa_people_search")
+                )
 
         # Add ARIA memory context if available
         if memory_context:

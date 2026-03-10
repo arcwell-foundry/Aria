@@ -15,6 +15,7 @@ from urllib.parse import urlencode
 import httpx
 
 from src.agents.skill_aware_agent import SkillAwareAgent
+from src.security.prompt_security import wrap_external_data
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -743,12 +744,13 @@ class AnalystAgent(SkillAwareAgent):
                 for r in results[:max_results]
             ]
 
-            # Generate a brief summary of findings
+            # Generate a brief summary of findings (wrapped for injection safety)
             if formatted_results:
-                summary_text = "\n".join([
+                raw_summary = "\n".join([
                     f"- {r['title']}: {r['snippet'][:200]}"
                     for r in formatted_results[:5]
                 ])
+                summary_text = wrap_external_data(raw_summary, "exa_research")
             else:
                 summary_text = "No results found."
 

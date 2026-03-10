@@ -15,6 +15,7 @@ from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import SkillAwareAgent
 from src.core.config import settings
 from src.core.task_types import TaskType
+from src.security.prompt_security import get_security_context, wrap_external_data
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -681,10 +682,11 @@ class ScoutAgent(SkillAwareAgent):
 
             # Use Claude to classify signals from gathered intelligence
             try:
+                gathered_json = json.dumps(gathered_data, indent=2, default=str)
                 prompt = (
                     f'Analyze the following intelligence data about "{entity}" and '
                     "classify each item into market signals.\n\n"
-                    f"Intelligence data:\n{json.dumps(gathered_data, indent=2, default=str)}\n\n"
+                    f"Intelligence data:\n{wrap_external_data(gathered_json, 'exa_news_search')}\n\n"
                     "For each meaningful signal, classify it into one of these types:\n"
                     "- funding_round: New funding, investment, or financial events\n"
                     "- leadership_change: Executive appointments, departures, reorgs\n"
@@ -711,7 +713,8 @@ class ScoutAgent(SkillAwareAgent):
                 response_text = await self.llm.generate_response(
                     messages=[{"role": "user", "content": prompt}],
                     system_prompt=(
-                        "You are a market intelligence signal detection system for life sciences. "
+                        get_security_context()
+                        + "\nYou are a market intelligence signal detection system for life sciences. "
                         "Analyze raw intelligence data and extract structured market signals. "
                         "Be precise with relevance scoring. Return only valid JSON arrays."
                     ),

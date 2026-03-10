@@ -175,6 +175,9 @@ class BaseAgent(ABC):
         Returns None if no persona_builder is set, allowing the caller
         to fall back to its hardcoded prompt.
 
+        The security context block is automatically prepended to harden the
+        prompt against injection attacks from external data sources.
+
         Args:
             task_description: What this agent is currently doing.
             output_format: Expected output format.
@@ -191,6 +194,7 @@ class BaseAgent(ABC):
 
         try:
             from src.core.persona import PersonaRequest
+            from src.security.prompt_security import get_security_context
 
             request = PersonaRequest(
                 user_id=self.user_id,
@@ -204,7 +208,8 @@ class BaseAgent(ABC):
                 recipient_name=recipient_name,
             )
             ctx = await self.persona_builder.build(request)
-            return ctx.to_system_prompt()
+            persona_prompt = ctx.to_system_prompt()
+            return get_security_context() + "\n\n" + persona_prompt
         except Exception as e:
             logger.warning("PersonaBuilder failed, falling back to hardcoded prompt: %s", e)
             return None

@@ -12,6 +12,7 @@ from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import SkillAwareAgent
 from src.core.config import settings
 from src.core.task_types import TaskType
+from src.security.prompt_security import get_security_context, wrap_external_data
 
 if TYPE_CHECKING:
     from src.core.llm import LLMClient
@@ -349,7 +350,7 @@ class HunterAgent(SkillAwareAgent):
         # Use LLM to extract real companies from the search results
         prompt = (
             f"Below are web search results about '{query}' companies.\n\n"
-            f"{search_context}\n\n"
+            f"{wrap_external_data(search_context, 'exa_company_search')}\n\n"
             f"From these search results, identify up to {limit} distinct REAL companies "
             f"that are mentioned. Extract the actual company name — NOT the article title.\n\n"
             f"For each company, provide:\n"
@@ -367,7 +368,8 @@ class HunterAgent(SkillAwareAgent):
         response = await self.llm.generate_response(
             messages=[{"role": "user", "content": prompt}],
             system_prompt=(
-                "You are a life sciences market intelligence analyst. "
+                get_security_context()
+                + "\nYou are a life sciences market intelligence analyst. "
                 "Extract real company names and details from search results. "
                 "Return only valid JSON arrays. No markdown fences, no explanation."
             ),

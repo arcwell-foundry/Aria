@@ -77,15 +77,23 @@ class SkillDefinition(BaseModel):
     """Parsed, validated representation of a ``skill.yaml`` file.
 
     All fields correspond to top-level keys in the YAML document.
+    Supports both simple skills (flat agent_assignment list, inline system_prompt)
+    and rich skill definitions (nested agent_assignment dict, external
+    knowledge_files, output_schemas, etc.).
     """
+
+    model_config = {"extra": "allow"}
 
     name: str = Field(..., description="Unique skill identifier")
     description: str = Field(..., description="One-line human description")
-    agent_assignment: list[str] = Field(
+    agent_assignment: list[str] | dict[str, Any] = Field(
         default_factory=list,
-        description="Agent types that may use this skill",
+        description="Agent types that may use this skill (list or dict with primary/supporting)",
     )
-    system_prompt: str = Field(..., description="System prompt sent to the LLM")
+    system_prompt: str = Field(
+        default="",
+        description="System prompt sent to the LLM (empty for knowledge-file-based skills)",
+    )
     output_schema: dict[str, Any] = Field(
         default_factory=dict,
         description="JSON Schema for validating structured output",
@@ -98,14 +106,46 @@ class SkillDefinition(BaseModel):
         default="community",
         description="Skill trust level (core, verified, community, user)",
     )
-    estimated_seconds: int = Field(
+    estimated_seconds: int | str = Field(
         default=30,
-        description="Expected wall-clock execution time in seconds",
+        description="Expected wall-clock execution time in seconds (or range like '5-300')",
     )
     templates: dict[str, TemplateDefinition] = Field(
         default_factory=dict,
         description="Named prompt templates for multi-template skills",
     )
+    knowledge_files: list[str] = Field(
+        default_factory=list,
+        description="Knowledge file names loaded on demand (e.g. knowledge_base.md)",
+    )
+    display_name: str = Field(
+        default="",
+        description="Human-friendly display name",
+    )
+    version: str = Field(
+        default="1.0",
+        description="Skill version string",
+    )
+
+    def get_agent_types(self) -> list[str]:
+        """Return a flat list of agent types regardless of YAML format.
+
+        Handles both ``agent_assignment: [hunter, scout]`` and the richer
+        ``agent_assignment: {primary: hunter, supporting: [scout, analyst]}``
+        format.
+        """
+        if isinstance(self.agent_assignment, list):
+            return list(self.agent_assignment)
+        if isinstance(self.agent_assignment, dict):
+            agents: list[str] = []
+            primary = self.agent_assignment.get("primary")
+            if primary:
+                agents.append(primary)
+            supporting = self.agent_assignment.get("supporting", [])
+            if isinstance(supporting, list):
+                agents.extend(supporting)
+            return agents
+        return []
 
 
 # ---------------------------------------------------------------------------

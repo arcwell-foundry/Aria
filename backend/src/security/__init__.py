@@ -25,6 +25,17 @@ from src.security.skill_audit import (
     SkillAuditEntry,
     SkillAuditService,
 )
+from src.security.instruction_detector import (
+    DetectionResult,
+    InstructionDetector,
+    QuarantineRecord,
+    SourceTrustLevel,
+)
+from src.security.prompt_security import (
+    SECURITY_CONTEXT,
+    get_security_context,
+    wrap_external_data,
+)
 from src.security.trust_levels import (
     TRUST_DATA_ACCESS,
     TRUSTED_SKILL_SOURCES,
@@ -48,6 +59,15 @@ __all__ = [
     "TokenMap",
     "LeakageReport",
     "DataSanitizer",
+    # Instruction detection
+    "InstructionDetector",
+    "DetectionResult",
+    "QuarantineRecord",
+    "SourceTrustLevel",
+    # Prompt security
+    "SECURITY_CONTEXT",
+    "get_security_context",
+    "wrap_external_data",
     # Sandbox
     "SandboxConfig",
     "SandboxViolation",

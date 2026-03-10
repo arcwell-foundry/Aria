@@ -77,6 +77,63 @@ class DataSanitizer:
         """Initialize DataSanitizer with a classifier."""
         self.classifier = classifier
 
+    async def classify_all(
+        self, data: Any, context: dict[str, Any] | None = None
+    ) -> list[ClassifiedData]:
+        """Classify all sensitive fragments in a data structure.
+
+        Walks strings, dicts, and lists to find every sensitive pattern match
+        and returns a ClassifiedData for each.
+
+        Args:
+            data: The data to scan (string, dict, list, or scalar).
+            context: Optional context about the data source.
+
+        Returns:
+            List of ClassifiedData, one per sensitive fragment found.
+        """
+        if context is None:
+            context = {}
+        results: list[ClassifiedData] = []
+        await self._classify_all_recursive(data, context, results)
+        return results
+
+    async def _classify_all_recursive(
+        self,
+        data: Any,
+        context: dict[str, Any],
+        results: list[ClassifiedData],
+    ) -> None:
+        """Recursively find all sensitive fragments."""
+        if isinstance(data, str):
+            for classification in [
+                DataClass.REGULATED,
+                DataClass.RESTRICTED,
+                DataClass.CONFIDENTIAL,
+            ]:
+                patterns = self.classifier.PATTERNS.get(classification, [])
+                for pattern in patterns:
+                    for match in re.finditer(pattern, data, re.IGNORECASE):
+                        results.append(
+                            ClassifiedData(
+                                data=match.group(),
+                                classification=classification,
+                                data_type=self.classifier._infer_data_type(pattern),
+                                source=context.get("source", "unknown"),
+                                can_be_tokenized=self.classifier._can_be_tokenized(pattern),
+                            )
+                        )
+        elif isinstance(data, dict):
+            for value in data.values():
+                await self._classify_all_recursive(value, context, results)
+        elif isinstance(data, list):
+            for item in data:
+                await self._classify_all_recursive(item, context, results)
+        elif data is not None:
+            classified = await self.classifier.classify(data, context)
+            if classified.classification not in (DataClass.PUBLIC, DataClass.INTERNAL):
+                results.append(classified)
+
     def tokenize_value(self, value: Any, data_type: str, token_map: TokenMap) -> str:
         """Replace a sensitive value with a token."""
         return token_map.add_token(data_type, value)

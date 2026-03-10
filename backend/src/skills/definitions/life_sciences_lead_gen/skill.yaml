@@ -1,0 +1,154 @@
+---
+name: life-sciences-lead-gen
+display_name: "Life Sciences Lead Generation Intelligence"
+version: "2.0"
+description: >
+  Comprehensive lead generation intelligence for life sciences commercial teams.
+  Covers all sub-industries dynamically: pharma, biotech, CDMOs, CROs, medtech,
+  diagnostics, lab equipment, digital health. Handles the full lifecycle from
+  ICP definition through discovery, enrichment, scoring, outreach, nurturing,
+  and CRM sync. Adapts to user's specific sub-industry, modality, and
+  competitive context via dynamic SubIndustryContext.
+
+# Which agents can use this skill
+agent_assignment:
+  primary: hunter
+  supporting:
+    - scout      # Signal monitoring, trigger event detection
+    - analyst    # Scientific/regulatory enrichment, competitive intel
+    - scribe     # Outreach drafting, persona-specific messaging
+    - strategist # Pipeline strategy, account planning, ICP refinement
+    - operator   # CRM sync, calendar management, email send execution
+
+# Trust and security
+trust_level: verified  # Auto-trusted after setup (Layer 2 internal skill)
+data_classes_accessed:
+  - PUBLIC       # Company names, public financials, published research
+  - INTERNAL     # ICP criteria, strategies, health scores
+  - CONFIDENTIAL # Contact data, deal details, outreach content
+  - RESTRICTED   # Revenue data, pricing intel, competitive strategy
+security_profile: enterprise  # Full sanitization pipeline, audit trail
+
+# Execution characteristics
+estimated_seconds: 5-300  # Varies: 5s for scoring, 300s for territory discovery
+requires_approval:
+  always_manual:
+    - send_email
+    - delete_lead
+    - export_data
+    - share_cross_user
+  configurable:
+    - push_to_crm
+    - stage_transition_opportunity
+  autonomous:
+    - discover_lead
+    - enrich_lead
+    - create_draft
+    - score_lead
+    - detect_signal
+    - create_battle_card
+
+# Data sources used
+data_sources:
+  scientific_apis:
+    - clinicaltrials_gov  # v2 API
+    - pubmed_ncbi         # E-utilities
+    - openfda             # Drug/device data
+    - chembl              # Chemical data
+  web_intelligence:
+    - exa_company_search
+    - exa_people_search
+    - exa_research
+    - exa_find_similar
+    - exa_news_search
+    - exa_websets          # Async bulk lead gen
+    - perplexity_api       # Private beta, real-time web intel
+  integrations:
+    - gmail_outlook        # Via Composio
+    - salesforce_hubspot   # Via Composio (Direct OAuth planned)
+    - google_calendar      # Via Composio
+    - linkedin             # Via Composio
+  public_data:
+    - sec_edgar            # Earnings, 10-K/10-Q
+
+# ARIA tables this skill reads/writes
+tables_accessed:
+  read_write:
+    - lead_memories
+    - lead_memory_events
+    - lead_memory_stakeholders
+    - lead_memory_insights
+    - lead_memory_crm_sync
+    - lead_memory_contributions
+    - lead_icp_profiles
+    - discovered_leads
+    - memory_semantic
+    - market_signals
+    - monitored_entities
+    - battle_cards
+    - email_drafts
+    - aria_activity
+    - integration_push_queue
+    - health_score_history
+  read_only:
+    - corporate_facts
+    - calendar_events
+    - user_profiles
+    - companies
+    - goals
+
+# Knowledge files (loaded on demand by SkillContextManager)
+knowledge_files:
+  - knowledge_base.md     # Domain expertise: life sciences lead gen best practices
+  - execution_spec.md     # ARIA-native: agent orchestration, DB writes, workflows
+  - security.md           # Enterprise: prompt injection defense, compliance, audit
+
+# Output schemas for structured results
+output_schemas:
+  lead_discovery:
+    type: object
+    properties:
+      company_name: { type: string }
+      icp_match_score: { type: number, minimum: 0, maximum: 100 }
+      trigger_events: { type: array, items: { type: object } }
+      contacts_found: { type: array, items: { type: object } }
+      recommended_action: { type: string, enum: [create_lead, monitor, skip] }
+      reasoning: { type: string }
+  lead_scoring:
+    type: object
+    properties:
+      total_score: { type: number, minimum: 0, maximum: 100 }
+      icp_fit: { type: object }
+      trigger_relevance: { type: object }
+      relationship: { type: object }
+      buying_readiness: { type: object }
+      scoring_context: { type: object }
+  outreach_draft:
+    type: object
+    properties:
+      recipient_email: { type: string }
+      subject: { type: string }
+      body: { type: string }
+      persona_type: { type: string }
+      sequence_position: { type: integer }
+      compliance_scan: { type: object }
+
+# Tags for SkillRegistry search
+tags:
+  - lead_generation
+  - life_sciences
+  - pipeline
+  - prospecting
+  - enrichment
+  - outreach
+  - scoring
+  - crm_sync
+  - competitive_intelligence
+  - signal_monitoring
+
+# Performance tracking
+performance_metrics:
+  target_lead_discovery_rate: "20+ qualified leads per month"
+  target_enrichment_quality: "60+ enrichment score per lead"
+  target_outreach_response_rate: "15-25%"
+  target_meeting_conversion: "30%+ of responded leads"

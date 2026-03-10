@@ -88,6 +88,7 @@ class SkillEntry:
     agent_types: list[str]
     trust_level: SkillTrustLevel
     data_classes: list[str]
+    knowledge_files: list[str] = field(default_factory=list)
     performance_metrics: PerformanceMetrics = field(
         default_factory=PerformanceMetrics,
     )
@@ -203,9 +204,10 @@ class SkillRegistry:
             name=defn.name,
             description=defn.description,
             skill_type=SkillType.DEFINITION,
-            agent_types=list(defn.agent_assignment),
+            agent_types=defn.get_agent_types(),
             trust_level=definition.trust_level,
             data_classes=[],
+            knowledge_files=list(defn.knowledge_files),
         )
         self._entries[entry_id] = entry
         logger.debug("Registered skill definition: %s", defn.name)
@@ -317,14 +319,17 @@ class SkillRegistry:
         results.sort(key=lambda e: e.priority)
         return results
 
-    async def get_all_available(self, user_id: str) -> list[SkillEntry]:
-        """Get everything this user can access.
+    async def get_all_available(self, user_id: str | None = None) -> list[SkillEntry]:
+        """Get everything accessible, optionally scoped to a user.
 
-        Includes all native, definition, and external skills plus
-        custom skills belonging to the user's tenant.
+        Includes all native, definition, and external skills. When
+        ``user_id`` is provided, also loads custom skills belonging
+        to the user's tenant.
 
         Args:
-            user_id: Authenticated user UUID.
+            user_id: Optional authenticated user UUID. When ``None``,
+                returns only non-user-scoped skills (native, definitions,
+                external).
 
         Returns:
             All accessible SkillEntry objects sorted by priority.
@@ -332,10 +337,52 @@ class SkillRegistry:
         results = list(self._entries.values())
 
         # Ensure custom skills for this user's tenant are loaded
-        await self._ensure_custom_skills_for_user(user_id, results)
+        if user_id:
+            await self._ensure_custom_skills_for_user(user_id, results)
 
         results.sort(key=lambda e: e.priority)
         return results
+
+    def get_skill_knowledge(self, skill_name: str, file_name: str) -> str:
+        """Read and return the content of a knowledge file for a skill.
+
+        Knowledge files (e.g. ``knowledge_base.md``, ``execution_spec.md``,
+        ``security.md``) are loaded on demand rather than at startup to
+        keep memory usage low.
+
+        Args:
+            skill_name: The skill's name as it appears in the registry
+                (e.g. ``"life-sciences-lead-gen"``).
+            file_name: The knowledge file to read (e.g. ``"knowledge_base.md"``).
+
+        Returns:
+            The file content as a string.
+
+        Raises:
+            FileNotFoundError: If the skill or knowledge file does not exist.
+            ValueError: If the skill is not a definition-type skill.
+        """
+        # Look up the definition by name
+        entry_id = f"definition:{skill_name}"
+        defn = self._definitions.get(entry_id)
+        if defn is None:
+            raise ValueError(
+                f"Skill '{skill_name}' is not a registered definition skill. "
+                f"Available definitions: {[e.name for e in self._entries.values() if e.skill_type == SkillType.DEFINITION]}"
+            )
+
+        # Resolve the directory for this skill
+        skill_dir = defn._base_dir / defn._skill_name
+        knowledge_path = skill_dir / file_name
+
+        if not knowledge_path.exists():
+            available = [f.name for f in skill_dir.iterdir() if f.suffix == ".md"]
+            raise FileNotFoundError(
+                f"Knowledge file '{file_name}' not found for skill '{skill_name}'. "
+                f"Available files: {available}"
+            )
+
+        return knowledge_path.read_text(encoding="utf-8")
 
     # ------------------------------------------------------------------
     # Auto-discovery: native capabilities
@@ -398,6 +445,8 @@ class SkillRegistry:
 
         Each subdirectory containing a ``skill.yaml`` is loaded as a
         BaseSkillDefinition (without an LLM client — metadata only).
+        Supports both simple YAML (flat agent_assignment, inline system_prompt)
+        and rich definitions (nested agent_assignment, knowledge_files).
         """
         if not _DEFINITIONS_DIR.is_dir():
             logger.debug("Definitions directory not found: %s", _DEFINITIONS_DIR)
@@ -418,20 +467,28 @@ class SkillRegistry:
                 defn._base_dir = _DEFINITIONS_DIR
                 defn._definition = defn._load_definition()
 
-                entry_id = f"definition:{defn._definition.name}"
+                sd: SkillDefinition = defn._definition
+                entry_id = f"definition:{sd.name}"
                 self._definitions[entry_id] = defn
+
+                # Extract data_classes if present in the raw YAML extras
+                data_classes: list[str] = []
+                raw_dc = getattr(sd, "data_classes_accessed", None)
+                if isinstance(raw_dc, list):
+                    data_classes = raw_dc
 
                 entry = SkillEntry(
                     id=entry_id,
-                    name=defn._definition.name,
-                    description=defn._definition.description,
+                    name=sd.name,
+                    description=sd.description,
                     skill_type=SkillType.DEFINITION,
-                    agent_types=list(defn._definition.agent_assignment),
+                    agent_types=sd.get_agent_types(),
                     trust_level=defn.trust_level,
-                    data_classes=[],
+                    data_classes=data_classes,
+                    knowledge_files=list(sd.knowledge_files),
                 )
                 self._entries[entry_id] = entry
-                logger.debug("Discovered skill definition: %s", defn._definition.name)
+                logger.debug("Discovered skill definition: %s", sd.name)
 
             except Exception as exc:
                 logger.warning(
