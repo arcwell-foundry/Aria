@@ -936,6 +936,78 @@ class ChatService:
                 }
         return None
 
+    # ------------------------------------------------------------------
+    # Direct Execute Patterns — single-tool-call requests that return
+    # a result immediately without creating a goal or execution plan.
+    # These take priority over goal triggers.
+    # ------------------------------------------------------------------
+    _DIRECT_EXECUTE_PATTERNS: ClassVar[list[tuple[re.Pattern[str], str, str]]] = [
+        # Deck / presentation / slides creation
+        (re.compile(
+            r"\b(?:create|make|build|generate|prepare)\b.{0,40}"
+            r"\b(?:deck|presentation|slides?|slide\s*deck|ppt|powerpoint)\b",
+            re.I,
+        ), "create_deck", "Create a presentation deck"),
+
+        # Email drafting (single email, not campaign)
+        (re.compile(
+            r"\b(?:draft|write|compose|send)\b.{0,30}"
+            r"\b(?:an?\s+)?(?:email|message|note|follow[- ]?up)\b"
+            r".{0,30}\b(?:to|for)\b",
+            re.I,
+        ), "draft_email", "Draft an email"),
+
+        # Contact / person lookup
+        (re.compile(
+            r"\b(?:find|search|look\s*up|get|who\s+is)\b.{0,30}"
+            r"\b(?:contact|info|email|phone|linkedin|person|people)\b"
+            r"(?:.{0,30}\b(?:for|about|of)\b)?",
+            re.I,
+        ), "search_contact", "Look up contact information"),
+
+        # Company lookup / quick research (single company)
+        (re.compile(
+            r"\b(?:research|look\s*up|tell\s+me\s+about|what\s+(?:is|does|about))\b"
+            r".{0,30}\b(?:company|firm|startup|org)\b",
+            re.I,
+        ), "search_company", "Research a company"),
+
+        # Market news / what's happening
+        (re.compile(
+            r"\b(?:what(?:'s|\s+is)\s+(?:happening|going\s+on|new)|latest\s+news|market\s+update)\b"
+            r".{0,30}\b(?:in\s+(?:my\s+)?(?:market|industry|space|sector)|this\s+week|today)\b",
+            re.I,
+        ), "market_news", "Get market news and updates"),
+
+        # Summarize something specific
+        (re.compile(
+            r"\b(?:summarize|sum\s+up|give\s+me\s+a\s+summary|recap|tldr)\b"
+            r".{0,60}\b(?:meeting|call|email|thread|conversation|report|article)\b",
+            re.I,
+        ), "summarize", "Summarize content"),
+    ]
+
+    @staticmethod
+    def _match_direct_execute(message: str) -> dict[str, Any] | None:
+        """Check message against direct execution patterns.
+
+        Direct execute requests are single-tool-call actions that produce
+        a complete output without needing a multi-step goal plan.
+        Takes priority over goal triggers.
+
+        Returns a pre-filled intent dict if a pattern matches, else None.
+        """
+        for pattern, action_type, description in ChatService._DIRECT_EXECUTE_PATTERNS:
+            if pattern.search(message):
+                return {
+                    "is_goal": False,
+                    "is_quick_action": False,
+                    "is_direct_execute": True,
+                    "action_type": action_type,
+                    "description": description,
+                }
+        return None
+
     @staticmethod
     def _match_goal_trigger(message: str) -> dict[str, Any] | None:
         """Check message against deterministic goal-trigger patterns.
@@ -948,6 +1020,11 @@ class ChatService:
         quick_match = ChatService._match_quick_action(message)
         if quick_match:
             return None  # Don't match as a goal if it's a quick action
+
+        # Check direct execute patterns - they take priority over goals
+        direct_match = ChatService._match_direct_execute(message)
+        if direct_match:
+            return None  # Don't match as a goal if it's a direct execute
 
         for pattern, goal_type, desc_template in ChatService._GOAL_TRIGGER_PATTERNS:
             m = pattern.search(message)
@@ -963,16 +1040,17 @@ class ChatService:
         return None
 
     async def _classify_intent(self, user_id: str, message: str) -> dict[str, Any] | None:
-        """Classify user message into one of three intent categories.
+        """Classify user message into one of four intent categories.
 
         Uses a two-tier approach:
-        1. Deterministic pattern matching for obvious goal/quick_action triggers (fast, reliable)
-        2. LLM classification for ambiguous messages (max_tokens=256, temperature=0.1)
+        1. Deterministic pattern matching for obvious triggers (fast, reliable)
+        2. LLM classification for ambiguous messages (Haiku, max_tokens=256, temperature=0.1)
 
-        Three categories:
+        Four categories:
+        - is_direct_execute=true: Single-tool-call requests (deck creation, email draft, search)
         - is_goal=true: Complex tasks requiring external research or multi-step agent workflows
         - is_quick_action=true: Requests answerable from data ARIA already has
-        - is_conversational (both false): Casual conversation, feedback, explanations
+        - is_conversational (all false): Casual conversation, feedback, explanations
 
         Returns the parsed intent dict on success, or ``None`` on classification failure.
         """
@@ -982,7 +1060,16 @@ class ChatService:
             user_id,
         )
 
-        # --- Tier 1: Deterministic pattern match (no LLM call needed) ---
+        # --- Tier 1a: Direct execute pattern match ---
+        direct_match = self._match_direct_execute(message)
+        if direct_match:
+            logger.info(
+                "Intent classified via DIRECT EXECUTE PATTERN MATCH: %s",
+                direct_match.get("action_type"),
+            )
+            return direct_match
+
+        # --- Tier 1b: Goal trigger pattern match ---
         pattern_match = self._match_goal_trigger(message)
         logger.warning(
             "INTENT_DEBUG: pattern_match result=%s",
@@ -995,19 +1082,41 @@ class ChatService:
             )
             return pattern_match
 
+        # --- Tier 2: LLM classification (Haiku for speed) ---
         try:
             intent_prompt = (
                 "You are the intent classifier for ARIA, an AI colleague for life sciences "
-                "commercial teams. ARIA has three response modes.\n\n"
+                "commercial teams. ARIA has four response modes.\n\n"
                 f'User message: "{message}"\n\n'
 
+                "CLASSIFY AS is_direct_execute=true for SINGLE-ACTION requests where ONE "
+                "tool call produces the complete output. No multi-step plan needed:\n"
+                "- Create/make/build a deck, presentation, or slides\n"
+                "- Draft/write/send a single email to a specific person\n"
+                "- Find/search/look up a specific person or company\n"
+                "- Research a specific company (not a whole market)\n"
+                "- Get market news or updates for this week\n"
+                "- Summarize a specific meeting, email, or document\n\n"
+                "EXAMPLES of is_direct_execute:\n"
+                '- "Create a deck for my meeting with Rob Douglas" -> create_deck\n'
+                '- "Draft a follow-up email to John Barker" -> draft_email\n'
+                '- "What\'s happening in my market this week" -> market_news\n'
+                '- "Find contact info for biotech VPs in Boston" -> search_contact\n'
+                '- "Tell me about Cytiva" -> search_company\n'
+                '- "Summarize my last call with Sartorius" -> summarize\n\n'
+
                 "CLASSIFY AS is_goal=true ONLY for complex tasks requiring multi-step "
-                "external research or creation that ARIA cannot answer from existing data:\n"
-                "- Find, source, or identify NEW companies, leads, or prospects (requires external search)\n"
-                "- Deep research or investigation of a market, sector, or company (requires web/API calls)\n"
-                "- Build a comprehensive strategy, report, or territory plan from scratch\n"
-                "- Create a new battle card or competitive analysis requiring fresh research\n"
-                "- Monitor or set up tracking for new entities\n\n"
+                "external research or creation that cannot be done in a single action:\n"
+                "- Build a territory plan or comprehensive strategy\n"
+                "- Research and prioritize a list of 20+ accounts\n"
+                "- Prepare for Q2 planning (multi-week effort)\n"
+                "- Find, qualify, and rank 50+ leads\n"
+                "- Create a competitive landscape analysis across many competitors\n\n"
+                "EXAMPLES of is_goal:\n"
+                '- "Build a territory plan for Northeast" -> goal\n'
+                '- "Help me prepare for Q2 planning" -> goal\n'
+                '- "Research and prioritize my top 20 accounts" -> goal\n'
+                '- "Find 50 biotech leads in the Bay Area" -> goal\n\n'
 
                 "CLASSIFY AS is_quick_action=true for requests answerable from data ARIA "
                 "already has (calendar, emails, signals, tasks, contacts, battle cards):\n"
@@ -1017,37 +1126,32 @@ class ChatService:
                 "- Show, review, or summarize email drafts or pending replies\n"
                 "- Show, review, or summarize tasks, goals, or action items\n"
                 "- Show pipeline, deals, or lead status\n"
-                "- Look up a specific competitor's battle card\n"
-                "- Draft a quick email reply (not a cold outreach campaign)\n"
-                "- Any question that can be answered by querying existing database tables\n\n"
+                "- Look up a specific competitor's battle card\n\n"
 
                 "CLASSIFY AS is_conversational=true for:\n"
                 "- Casual conversation, greetings, or small talk\n"
                 "- Asking ARIA to explain, clarify, or teach a concept\n"
                 "- Feedback on a previous response\n"
-                "- Questions about ARIA's capabilities or status\n"
-                "- Opinions, advice, or discussion\n"
-                "- Approving or rejecting a presented plan\n"
-                "- Following up on something ARIA already said\n\n"
+                "- Questions about ARIA's capabilities\n"
+                "- Approving or rejecting a presented plan\n\n"
 
-                "IMPORTANT: Default to is_quick_action when the request involves data ARIA "
-                "likely already has. Only use is_goal for tasks requiring NEW external research "
-                "or multi-step agent workflows. When in doubt between goal and quick_action, "
-                "choose quick_action - it is better to answer fast and offer to go deeper than "
-                "to make the user wait for a plan they did not need.\n\n"
+                "PRIORITY ORDER: direct_execute > quick_action > goal > conversational\n"
+                "When in doubt between direct_execute and goal, choose direct_execute.\n"
+                "When in doubt between goal and quick_action, choose quick_action.\n\n"
 
                 "Respond with ONLY valid JSON (no markdown, no backticks):\n"
                 "{\n"
+                '  "is_direct_execute": true or false,\n'
                 '  "is_goal": true or false,\n'
                 '  "is_quick_action": true or false,\n'
+                '  "action_type": "create_deck|draft_email|search_contact|search_company|market_news|summarize - if direct_execute; meeting_prep|calendar_query|signal_review|draft_review|task_review|pipeline_review|competitive_lookup - if quick_action; else null",\n'
                 '  "goal_title": "concise title if is_goal, else null",\n'
                 '  "goal_type": "lead_gen|research|outreach|analysis|competitive_intel|territory|monitoring - if is_goal, else null",\n'
-                '  "action_type": "meeting_prep|calendar_query|signal_review|draft_review|task_review|pipeline_review|competitive_lookup|quick_draft - if is_quick_action, else null",\n'
                 '  "goal_description": "1-2 sentence description if is_goal, else null"\n'
                 "}\n\n"
                 "RULES:\n"
-                "- Exactly one of is_goal or is_quick_action should be true, or both false (conversational)\n"
-                "- Never set both is_goal and is_quick_action to true\n"
+                "- Exactly one of is_direct_execute, is_goal, or is_quick_action should be true, or all false (conversational)\n"
+                "- Never set more than one to true\n"
             )
 
             llm = LLMClient()
@@ -1056,7 +1160,7 @@ class ChatService:
                 max_tokens=256,
                 temperature=0.1,
                 user_id=user_id,
-                task=TaskType.CHAT_RESPONSE,
+                task=TaskType.INTENT_CLASSIFY,
             )
 
             # Strip markdown fences if present
@@ -1070,6 +1174,8 @@ class ChatService:
             intent = json.loads(cleaned)
 
             # Ensure new fields have defaults for backwards compatibility
+            if "is_direct_execute" not in intent:
+                intent["is_direct_execute"] = False
             if "is_quick_action" not in intent:
                 intent["is_quick_action"] = False
             if "action_type" not in intent:
@@ -1793,6 +1899,435 @@ class ChatService:
         )
 
         return response
+
+    # ------------------------------------------------------------------
+    # Direct Execute Handler — single-tool-call requests
+    # ------------------------------------------------------------------
+
+    async def _handle_direct_execute(
+        self,
+        user_id: str,
+        conversation_id: str,
+        message: str,
+        intent: dict[str, Any],
+        working_memory: Any,
+        conversation_messages: list,
+    ) -> dict[str, Any]:
+        """Handle direct execution requests that produce output via a single service call.
+
+        Routes to the appropriate service (deck generation, email draft,
+        contact/company search, etc.) and returns the result directly
+        without creating a goal or execution plan.
+
+        Args:
+            user_id: The user's ID.
+            conversation_id: The conversation ID.
+            message: The user's original message.
+            intent: The intent dict containing action_type.
+            working_memory: Working memory object.
+            conversation_messages: Recent conversation history.
+
+        Returns:
+            Dictionary with response text, rich_content, ui_commands, and suggestions.
+        """
+        action_type = intent.get("action_type", "")
+        response_text = ""
+        rich_content: list[dict[str, Any]] = []
+        ui_commands: list[dict[str, Any]] = []
+        suggestions: list[str] = []
+
+        try:
+            if action_type == "create_deck":
+                response_text, rich_content, ui_commands, suggestions = (
+                    await self._execute_create_deck(user_id, message)
+                )
+
+            elif action_type == "draft_email":
+                response_text, rich_content, ui_commands, suggestions = (
+                    await self._execute_draft_email(user_id, message)
+                )
+
+            elif action_type in ("search_contact", "search_company"):
+                response_text, rich_content, ui_commands, suggestions = (
+                    await self._execute_search(user_id, message, action_type)
+                )
+
+            elif action_type == "market_news":
+                # Delegate to quick action handler — it already handles signal_review
+                qa_intent = {
+                    "is_quick_action": True,
+                    "action_type": "signal_review",
+                }
+                result = await self._handle_quick_action(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message=message,
+                    intent=qa_intent,
+                    working_memory=working_memory,
+                    conversation_messages=conversation_messages,
+                )
+                return result
+
+            elif action_type == "summarize":
+                # Summarize requests are best handled conversationally with context
+                qa_intent = {
+                    "is_quick_action": True,
+                    "action_type": "meeting_prep",
+                }
+                result = await self._handle_quick_action(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message=message,
+                    intent=qa_intent,
+                    working_memory=working_memory,
+                    conversation_messages=conversation_messages,
+                )
+                return result
+
+            else:
+                response_text = (
+                    "I understood your request but I'm not sure how to execute it directly. "
+                    "Could you rephrase or give me more details?"
+                )
+                suggestions = ["Try again", "What can you do?"]
+
+        except Exception as e:
+            logger.exception(
+                "Direct execute failed: action_type=%s",
+                action_type,
+                extra={"user_id": user_id},
+            )
+            response_text = (
+                f"I tried to handle that directly but ran into an issue: {e}. "
+                "Would you like me to try a different approach?"
+            )
+            suggestions = ["Try again", "Create a plan instead"]
+
+        # Persist conversation turn
+        db = get_supabase_client()
+        db.table("messages").insert({
+            "conversation_id": conversation_id,
+            "role": "user",
+            "content": message,
+        }).execute()
+        db.table("messages").insert({
+            "conversation_id": conversation_id,
+            "role": "assistant",
+            "content": response_text,
+        }).execute()
+
+        if working_memory:
+            working_memory.add_message("user", message)
+            working_memory.add_message("assistant", response_text)
+
+        return {
+            "response": response_text,
+            "rich_content": rich_content,
+            "ui_commands": ui_commands,
+            "suggestions": suggestions,
+            "conversation_id": conversation_id,
+            "intent": "direct_execute",
+            "action_type": action_type,
+        }
+
+    async def _execute_create_deck(
+        self,
+        user_id: str,
+        message: str,
+    ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+        """Execute deck creation from a chat message.
+
+        Extracts meeting context from the message and calls the deck service.
+
+        Returns:
+            Tuple of (response_text, rich_content, ui_commands, suggestions).
+        """
+        from src.services.deck_service import DeckServiceError, create_adhoc_deck
+
+        db = get_supabase_client()
+
+        # Use LLM to extract a good deck prompt from the user's message
+        llm = LLMClient()
+        extract_prompt = (
+            "Extract a clear presentation prompt from the user's request. "
+            "Include any mentioned people, companies, topics, or meeting context. "
+            "Return ONLY the presentation prompt text, nothing else.\n\n"
+            f'User request: "{message}"'
+        )
+        deck_prompt = await llm.generate_response(
+            messages=[{"role": "user", "content": extract_prompt}],
+            max_tokens=512,
+            temperature=0.3,
+            user_id=user_id,
+            task=TaskType.INTENT_CLASSIFY,
+        )
+
+        # Extract a title from the message
+        title_prompt = (
+            "Generate a short (5-8 word) presentation title from this request. "
+            "Return ONLY the title, no quotes or punctuation.\n\n"
+            f'Request: "{message}"'
+        )
+        title = await llm.generate_response(
+            messages=[{"role": "user", "content": title_prompt}],
+            max_tokens=32,
+            temperature=0.3,
+            user_id=user_id,
+            task=TaskType.INTENT_CLASSIFY,
+        )
+        title = title.strip().strip('"').strip("'")
+
+        try:
+            result = await create_adhoc_deck(
+                db=db,
+                user_id=user_id,
+                prompt=deck_prompt.strip(),
+                title=title,
+                text_mode="generate",
+            )
+
+            gamma_url = result["gamma_url"]
+            response_text = (
+                f"Done — I've created your presentation **{title}**.\n\n"
+                f"[Open in Gamma]({gamma_url})\n\n"
+                f"You can edit it directly in Gamma. Let me know if you'd like "
+                f"me to adjust the content or create a different version."
+            )
+            rich_content = [{
+                "type": "deck_created",
+                "data": {
+                    "deck_id": result["deck_id"],
+                    "title": title,
+                    "gamma_url": gamma_url,
+                    "status": result["status"],
+                },
+            }]
+            ui_commands: list[dict[str, Any]] = []
+            suggestions = [
+                "Add more slides about pricing",
+                "Create another version",
+                "Share this with the team",
+            ]
+
+            return response_text, rich_content, ui_commands, suggestions
+
+        except DeckServiceError as e:
+            error_msg = str(e)
+            if "not configured" in error_msg.lower():
+                response_text = (
+                    "I'd love to create that deck, but the Gamma API isn't configured yet. "
+                    "Once it's set up, I can generate presentations directly from chat."
+                )
+            else:
+                response_text = (
+                    f"I tried to create the presentation but hit an issue: {error_msg}. "
+                    "Would you like me to try again?"
+                )
+            return response_text, [], [], ["Try again"]
+
+    async def _execute_draft_email(
+        self,
+        user_id: str,
+        message: str,
+    ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+        """Execute email drafting from a chat message.
+
+        Uses the Scribe agent / email tools to draft an email.
+
+        Returns:
+            Tuple of (response_text, rich_content, ui_commands, suggestions).
+        """
+        # Use LLM to generate the email draft
+        llm = LLMClient()
+        draft_prompt = (
+            "You are drafting a professional email based on the user's request. "
+            "Extract the recipient, subject, and compose the email body. "
+            "Return as JSON with fields: recipient_name, subject, body.\n\n"
+            f'User request: "{message}"'
+        )
+        draft_raw = await llm.generate_response(
+            messages=[{"role": "user", "content": draft_prompt}],
+            max_tokens=1024,
+            temperature=0.6,
+            user_id=user_id,
+            task=TaskType.SCRIBE_DRAFT_EMAIL,
+        )
+
+        # Try to parse as JSON
+        try:
+            cleaned = draft_raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1]
+            if cleaned.endswith("```"):
+                cleaned = cleaned.rsplit("```", 1)[0]
+            draft = json.loads(cleaned.strip())
+        except json.JSONDecodeError:
+            # Fall back to using the raw text as the body
+            draft = {
+                "recipient_name": "recipient",
+                "subject": "Follow-up",
+                "body": draft_raw.strip(),
+            }
+
+        recipient = draft.get("recipient_name", "recipient")
+        subject = draft.get("subject", "Follow-up")
+        body = draft.get("body", "")
+
+        # Store as email draft
+        try:
+            db = get_supabase_client()
+            import uuid as _uuid
+            draft_id = str(_uuid.uuid4())
+            db.table("email_drafts").insert({
+                "id": draft_id,
+                "user_id": user_id,
+                "recipient_name": recipient,
+                "subject": subject,
+                "body": body,
+                "status": "draft",
+            }).execute()
+
+            response_text = (
+                f"Here's a draft email to **{recipient}**:\n\n"
+                f"**Subject:** {subject}\n\n"
+                f"{body}\n\n"
+                f"---\n"
+                f"Saved as a draft. You can review and send it from the Drafts page, "
+                f"or tell me to adjust it."
+            )
+            rich_content = [{
+                "type": "email_draft",
+                "data": {
+                    "draft_id": draft_id,
+                    "recipient": recipient,
+                    "subject": subject,
+                    "body": body,
+                },
+            }]
+            ui_commands = [{"action": "navigate", "route": "/drafts"}]
+            suggestions = [
+                "Make it more concise",
+                "Make it more formal",
+                "Send it",
+            ]
+            return response_text, rich_content, ui_commands, suggestions
+
+        except Exception as e:
+            logger.warning("Failed to store email draft: %s", e)
+            response_text = (
+                f"Here's a draft email to **{recipient}**:\n\n"
+                f"**Subject:** {subject}\n\n"
+                f"{body}\n\n"
+                f"I wasn't able to save it as a draft, but you can copy and send it."
+            )
+            return response_text, [], [], ["Try saving again"]
+
+    async def _execute_search(
+        self,
+        user_id: str,
+        message: str,
+        action_type: str,
+    ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+        """Execute a contact or company search from a chat message.
+
+        Uses Exa web grounding to find information.
+
+        Returns:
+            Tuple of (response_text, rich_content, ui_commands, suggestions).
+        """
+        # Extract the search target from the message
+        llm = LLMClient()
+        extract_prompt = (
+            "Extract the person name, company name, or search query from this request. "
+            "Return ONLY valid JSON: "
+            '{"name": "...", "company": "...", "query": "..."}\n\n'
+            f'Request: "{message}"'
+        )
+        raw = await llm.generate_response(
+            messages=[{"role": "user", "content": extract_prompt}],
+            max_tokens=128,
+            temperature=0.1,
+            user_id=user_id,
+            task=TaskType.INTENT_CLASSIFY,
+        )
+
+        try:
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1]
+            if cleaned.endswith("```"):
+                cleaned = cleaned.rsplit("```", 1)[0]
+            search_params = json.loads(cleaned.strip())
+        except json.JSONDecodeError:
+            search_params = {"query": message}
+
+        name = search_params.get("name", "")
+        company = search_params.get("company", "")
+        query = search_params.get("query", message)
+
+        # Try web grounding
+        results: list[str] = []
+
+        if action_type == "search_contact" and name:
+            person_result = await self._web_grounding._ground_person(name, f"at {company}" if company else "")
+            if person_result:
+                parts = [f"**{person_result.get('name', name)}**"]
+                if person_result.get("title"):
+                    parts.append(f"Title: {person_result['title']}")
+                if person_result.get("company"):
+                    parts.append(f"Company: {person_result['company']}")
+                if person_result.get("linkedin_url"):
+                    parts.append(f"LinkedIn: {person_result['linkedin_url']}")
+                if person_result.get("bio"):
+                    parts.append(f"\n{person_result['bio']}")
+                results.append("\n".join(parts))
+
+        if (action_type == "search_company" or not results) and (company or query):
+            search_target = company or query
+            company_result = await self._web_grounding._ground_company(search_target)
+            if company_result:
+                parts = [f"**{company_result.get('company_name', search_target)}**"]
+                if company_result.get("description"):
+                    parts.append(company_result["description"])
+                if company_result.get("domain"):
+                    parts.append(f"Website: {company_result['domain']}")
+                if company_result.get("funding"):
+                    parts.append(f"Latest funding: {company_result['funding']}")
+                news = company_result.get("recent_news", [])
+                if news:
+                    parts.append("\n**Recent News:**")
+                    for item in news[:3]:
+                        title = item.get("title", "")
+                        url = item.get("url", "")
+                        parts.append(f"- [{title}]({url})" if url else f"- {title}")
+                results.append("\n".join(parts))
+
+        # Fallback to general search
+        if not results:
+            general = await self._web_grounding._ground_general(query or message)
+            if general and general.get("results"):
+                parts = [f"**Search results for:** {query or message}\n"]
+                for r in general["results"][:5]:
+                    title = r.get("title", "")
+                    url = r.get("url", "")
+                    snippet = r.get("snippet", "")
+                    parts.append(f"- **[{title}]({url})**\n  {snippet}")
+                results.append("\n".join(parts))
+
+        if results:
+            response_text = "\n\n".join(results)
+        else:
+            response_text = (
+                f"I searched but couldn't find specific results for that query. "
+                f"Could you provide more details like a full name or company?"
+            )
+
+        suggestions = [
+            "Tell me more about them",
+            "Find their LinkedIn",
+            "Research their company",
+        ]
+        return response_text, [], [], suggestions
 
     # ------------------------------------------------------------------
     # Plan-Aware Conversation Handling

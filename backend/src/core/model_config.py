@@ -39,6 +39,7 @@ MODEL_ROUTES: dict[TaskType, ModelConfig] = {
     TaskType.ENTITY_EXTRACT:        ModelConfig(CLAUDE_SONNET, max_tokens=1024, temperature=0.1, fallback=CLAUDE_HAIKU),
     TaskType.MEMORY_SUMMARIZE:      ModelConfig(CLAUDE_SONNET, max_tokens=2048, temperature=0.3, fallback=CLAUDE_HAIKU),
     TaskType.MEMORY_CONSOLIDATE:    ModelConfig(CLAUDE_SONNET, max_tokens=2048, temperature=0.3, fallback=CLAUDE_HAIKU),
+    TaskType.INTENT_CLASSIFY:       ModelConfig(CLAUDE_HAIKU,  max_tokens=256,  temperature=0.1, fallback=CLAUDE_SONNET),
     TaskType.SUGGEST_FOLLOWUP:      ModelConfig(CLAUDE_HAIKU,  max_tokens=512,  temperature=0.7),
     TaskType.CAUSAL_ENTITY_EXTRACT: ModelConfig(CLAUDE_HAIKU,  max_tokens=1024, temperature=0.2, fallback=CLAUDE_SONNET),
     TaskType.CAUSAL_INFER:          ModelConfig(CLAUDE_HAIKU,  max_tokens=2048, temperature=0.4, fallback=CLAUDE_SONNET),

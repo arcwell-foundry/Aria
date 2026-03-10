@@ -280,10 +280,20 @@ async def chat_stream(
                     quick_action_match.get("action_type"),
                 )
 
-        # --- Inline Intent Detection (before building system prompt) ---
-        # Skip if signal-enriched OR quick action matched - those bypass LLM classification
-        intent_result = None
+        # --- Direct Execute Detection (BEFORE intent classification) ---
+        direct_execute_match = None
         if not was_signal_enriched and not quick_action_match:
+            direct_execute_match = ChatService._match_direct_execute(request.message)
+            if direct_execute_match:
+                logger.info(
+                    "DIRECT_EXECUTE: Pattern matched, routing to direct handler: %s",
+                    direct_execute_match.get("action_type"),
+                )
+
+        # --- Inline Intent Detection (before building system prompt) ---
+        # Skip if signal-enriched OR quick action matched OR direct execute matched
+        intent_result = None
+        if not was_signal_enriched and not quick_action_match and not direct_execute_match:
             intent_result = await service._classify_intent(current_user.id, request.message)
 
         # --- Quick Action Routing ---
@@ -341,6 +351,69 @@ async def chat_stream(
                 "ui_commands": result.get("ui_commands", []),
                 "suggestions": result.get("suggestions", []),
                 "intent_detected": "quick_action",
+            }
+            yield f"data: {json.dumps(complete_event)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        # --- Direct Execute Routing ---
+        if direct_execute_match or (intent_result and intent_result.get("is_direct_execute")):
+            execute_intent = direct_execute_match or intent_result
+            logger.info(
+                "DIRECT_EXECUTE: Routing to handler, action_type=%s",
+                execute_intent.get("action_type"),
+            )
+
+            # Send metadata event
+            metadata = {
+                "type": "metadata",
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+            }
+            yield f"data: {json.dumps(metadata)}\n\n"
+
+            try:
+                result = await service._handle_direct_execute(
+                    user_id=current_user.id,
+                    conversation_id=conversation_id,
+                    message=request.message,
+                    intent=execute_intent,
+                    working_memory=working_memory,
+                    conversation_messages=conversation_messages,
+                )
+            except Exception:
+                logger.exception(
+                    "Direct execute handling failed",
+                    extra={"user_id": current_user.id},
+                )
+                error_event = {
+                    "type": "token",
+                    "content": "I tried to handle that directly but ran into a problem. Please try again.",
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
+                complete_event = {
+                    "type": "complete",
+                    "rich_content": [],
+                    "ui_commands": [],
+                    "suggestions": ["Try again"],
+                    "intent_detected": "direct_execute",
+                }
+                yield f"data: {json.dumps(complete_event)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            # Stream response as a single token chunk
+            response_text = result.get("response", "")
+            token_event = {"type": "token", "content": response_text}
+            yield f"data: {json.dumps(token_event)}\n\n"
+
+            # Send completion event
+            complete_event = {
+                "type": "complete",
+                "rich_content": result.get("rich_content", []),
+                "ui_commands": result.get("ui_commands", []),
+                "suggestions": result.get("suggestions", []),
+                "intent_detected": "direct_execute",
             }
             yield f"data: {json.dumps(complete_event)}\n\n"
             yield "data: [DONE]\n\n"
@@ -414,9 +487,9 @@ async def chat_stream(
             yield "data: [DONE]\n\n"
             return
 
-        # --- Check for pending plan interactions (skip if signal-enriched OR quick action) ---
+        # --- Check for pending plan interactions (skip if signal-enriched, quick action, or direct execute) ---
         plan_action = None
-        if not was_signal_enriched and not quick_action_match and not (intent_result and intent_result.get("is_quick_action")):
+        if not was_signal_enriched and not quick_action_match and not direct_execute_match and not (intent_result and intent_result.get("is_quick_action")):
             plan_action = await service._classify_plan_action(current_user.id, request.message)
         if plan_action and plan_action["action"] in ("approve", "modify", "retry_plan"):
             # Short-circuit: handle plan action
