@@ -10,11 +10,13 @@ import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import SkillAwareAgent
 from src.core.config import settings
 from src.core.task_types import TaskType
+from src.security.instruction_detector import InstructionDetector, SourceTrustLevel
 from src.security.prompt_security import get_security_context, wrap_external_data
 
 if TYPE_CHECKING:
@@ -121,6 +123,11 @@ class ScoutAgent(SkillAwareAgent):
         """
         self._exa_provider: Any = None
         self._resource_status: list[dict[str, Any]] = []  # Tool connectivity status
+        self._instruction_detector = InstructionDetector(llm_client=None)
+        # Trigger intelligence loaded per-execution
+        self._trigger_weights: dict[str, float] = {}
+        self._active_icps: list[dict[str, Any]] = []
+        self._sub_industry_context: dict[str, Any] | None = None
         super().__init__(
             llm_client=llm_client,
             user_id=user_id,
@@ -160,6 +167,346 @@ class ScoutAgent(SkillAwareAgent):
                 logger.warning("ScoutAgent: Failed to initialize PerplexityClient: %s", e)
                 self._perplexity_client = None
         return self._perplexity_client
+
+    async def _load_trigger_intelligence(self) -> None:
+        """Load dynamic trigger relevance weights and active ICPs.
+
+        Per execution_spec.md Section 1.4: loads trigger relevance weights
+        from memory_semantic. If not found (first run), initializes defaults
+        based on user's SubIndustryContext.
+
+        Also loads all active ICPs from lead_icp_profiles for signal-to-lead
+        matching.
+        """
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+
+        # 1. Load trigger relevance weights from memory_semantic
+        try:
+            result = (
+                db.table("memory_semantic")
+                .select("fact, metadata, confidence")
+                .eq("user_id", self.user_id)
+                .eq("metadata->>entity_type", "trigger_relevance")
+                .order("confidence", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                meta = result.data[0].get("metadata", {})
+                stored_weights = meta.get("weights", {})
+                if isinstance(stored_weights, dict) and stored_weights:
+                    self._trigger_weights = stored_weights
+                    logger.info(
+                        "[SCOUT] Loaded trigger weights from memory_semantic: %d types",
+                        len(self._trigger_weights),
+                    )
+                else:
+                    self._trigger_weights = {}
+            else:
+                self._trigger_weights = {}
+                logger.info("[SCOUT] No trigger weights found, will use defaults")
+        except Exception as e:
+            logger.warning("[SCOUT] Failed to load trigger weights: %s", e)
+            self._trigger_weights = {}
+
+        # 2. Load SubIndustryContext for default weight initialization
+        if not self._trigger_weights:
+            try:
+                ctx_result = (
+                    db.table("memory_semantic")
+                    .select("fact, metadata")
+                    .eq("user_id", self.user_id)
+                    .or_(
+                        "metadata->>entity_type.eq.sub_industry_context,"
+                        "metadata->>entity_type.eq.company_classification"
+                    )
+                    .order("confidence", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if ctx_result.data:
+                    self._sub_industry_context = ctx_result.data[0].get("metadata", {})
+                else:
+                    self._sub_industry_context = None
+            except Exception as e:
+                logger.warning("[SCOUT] Failed to load SubIndustryContext: %s", e)
+                self._sub_industry_context = None
+
+            self._trigger_weights = self._compute_default_trigger_weights(
+                self._sub_industry_context
+            )
+            logger.info(
+                "[SCOUT] Initialized default trigger weights for sub-industry: %s",
+                (self._sub_industry_context or {}).get("company_type", "generic"),
+            )
+
+        # 3. Load active ICPs from lead_icp_profiles
+        try:
+            icp_result = (
+                db.table("lead_icp_profiles")
+                .select("id, name, criteria, is_active")
+                .eq("user_id", self.user_id)
+                .eq("is_active", True)
+                .execute()
+            )
+            self._active_icps = icp_result.data if icp_result.data else []
+            logger.info("[SCOUT] Loaded %d active ICPs", len(self._active_icps))
+        except Exception as e:
+            logger.warning("[SCOUT] Failed to load active ICPs: %s", e)
+            self._active_icps = []
+
+    def _compute_default_trigger_weights(
+        self,
+        sub_industry_ctx: dict[str, Any] | None,
+    ) -> dict[str, float]:
+        """Compute default trigger relevance weights based on SubIndustryContext.
+
+        Per Section 1.4: trigger relevance differs by sub-industry.
+        E.g., FDA approval is CRITICAL for CDMOs but LOW for lab equipment.
+
+        Args:
+            sub_industry_ctx: SubIndustryContext metadata or None.
+
+        Returns:
+            Dict mapping signal_type to weight multiplier (0.0-2.0).
+        """
+        # Base weights (signal_type -> relevance multiplier)
+        defaults: dict[str, float] = {
+            "funding_round": 1.2,
+            "leadership_change": 1.0,
+            "product_launch": 1.0,
+            "regulatory": 1.0,
+            "partnership": 1.0,
+            "hiring": 0.9,
+            "expansion": 1.0,
+        }
+
+        if not sub_industry_ctx:
+            return defaults
+
+        company_type = (sub_industry_ctx.get("company_type") or "").upper()
+
+        if company_type in ("CDMO", "CMO"):
+            # FDA approvals create manufacturing demand
+            defaults["regulatory"] = 1.8
+            defaults["partnership"] = 1.5
+            defaults["expansion"] = 1.3
+            defaults["funding_round"] = 1.4
+            defaults["hiring"] = 0.8
+        elif company_type == "CRO":
+            # Phase transitions create trial outsourcing demand
+            defaults["regulatory"] = 1.5
+            defaults["funding_round"] = 1.6
+            defaults["partnership"] = 1.3
+            defaults["expansion"] = 0.8
+        elif company_type in ("LAB EQUIPMENT", "REAGENT SUPPLIER", "CONSUMABLES"):
+            # Facility expansion = equipment purchases
+            defaults["expansion"] = 1.8
+            defaults["funding_round"] = 1.3
+            defaults["regulatory"] = 0.6
+            defaults["hiring"] = 1.3
+        elif company_type in ("BIG PHARMA", "PHARMA", "BIOTECH"):
+            # Pipeline events and M&A most relevant
+            defaults["regulatory"] = 1.5
+            defaults["partnership"] = 1.4
+            defaults["funding_round"] = 1.0
+            defaults["leadership_change"] = 1.3
+        elif company_type in ("MEDTECH", "DIAGNOSTICS"):
+            # Regulatory and reimbursement driven
+            defaults["regulatory"] = 1.6
+            defaults["product_launch"] = 1.5
+            defaults["expansion"] = 1.2
+
+        return defaults
+
+    def _sanitize_source_data(
+        self,
+        text: str,
+        source: str,
+    ) -> str:
+        """Sanitize external data through InstructionDetector.
+
+        Applies trust-level-appropriate scanning:
+        - LOW trust (Exa news): full pattern scan
+        - HIGH trust (SEC EDGAR): pattern scan only
+
+        Args:
+            text: Raw text content from external source.
+            source: Source identifier for trust level lookup.
+
+        Returns:
+            Sanitized text with injections quarantined.
+        """
+        if not text:
+            return text
+
+        detections = self._instruction_detector.detect_patterns(text)
+        sanitized = text
+        if detections:
+            for detection in detections:
+                record = self._instruction_detector.quarantine(sanitized, detection)
+                sanitized = record.sanitized_text
+            logger.warning(
+                "[SCOUT] %d injection(s) detected in %s data, quarantined",
+                len(detections),
+                source,
+            )
+        return sanitized
+
+    def _sanitize_gathered_data(
+        self,
+        gathered: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Sanitize all gathered intelligence data before LLM classification.
+
+        Applies appropriate trust levels:
+        - web_results, news_results, social_mentions: LOW trust (full scan)
+        - SEC/government data: HIGH trust (pattern scan only)
+
+        Args:
+            gathered: Dict of gathered intelligence data from all sources.
+
+        Returns:
+            Sanitized copy of the gathered data.
+        """
+        sanitized = gathered.copy()
+
+        # LOW trust sources: Exa news, web, social, perplexity
+        for key in ("web_results", "news_results", "social_mentions"):
+            items = sanitized.get(key, [])
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict):
+                        for field in ("title", "snippet", "content", "url"):
+                            if field in item and isinstance(item[field], str):
+                                item[field] = self._sanitize_source_data(
+                                    item[field], "exa_news_search"
+                                )
+
+        # Perplexity results: LOW trust
+        perp = sanitized.get("perplexity_intelligence", {})
+        if isinstance(perp, dict) and perp.get("answer"):
+            perp["answer"] = self._sanitize_source_data(
+                perp["answer"], "perplexity_api"
+            )
+
+        return sanitized
+
+    async def _check_icp_match_and_queue(
+        self,
+        signal: dict[str, Any],
+    ) -> None:
+        """Check if a detected signal's company matches any active ICP.
+
+        If the company matches, queue a lead discovery task for Hunter
+        via aria_action_queue.
+
+        Args:
+            signal: Normalized signal dict with company_name, signal_type, etc.
+        """
+        if not self._active_icps:
+            return
+
+        company_name = signal.get("company_name", "")
+        if not company_name:
+            return
+
+        signal_type = signal.get("signal_type", "unknown")
+
+        for icp in self._active_icps:
+            criteria = icp.get("criteria", {})
+            if not isinstance(criteria, dict):
+                continue
+
+            # Simple ICP match: check industry and geography alignment
+            icp_industry = criteria.get("industry", "")
+            icp_geo = criteria.get("geography", "")
+
+            # For signal-triggered leads, we match more loosely — the trigger
+            # itself is the primary qualification signal
+            match = False
+            if icp_industry:
+                # Any life sciences company with an active trigger is worth evaluating
+                icp_ind_lower = icp_industry.lower()
+                if any(
+                    kw in icp_ind_lower
+                    for kw in [
+                        "life sciences",
+                        "biotech",
+                        "pharma",
+                        "biopharma",
+                        "medtech",
+                    ]
+                ):
+                    match = True
+            else:
+                # No industry filter — all signals match
+                match = True
+
+            if not match:
+                continue
+
+            # Apply trigger weight — only queue if signal is relevant enough
+            weight = self._trigger_weights.get(signal_type, 1.0)
+            weighted_relevance = signal.get("relevance_score", 0.5) * weight
+            if weighted_relevance < 0.5:
+                logger.debug(
+                    "[SCOUT] Signal for '%s' below weighted threshold (%.2f), skipping ICP queue",
+                    company_name,
+                    weighted_relevance,
+                )
+                continue
+
+            # Queue lead discovery task for Hunter
+            try:
+                from src.db.supabase import SupabaseClient
+
+                db = SupabaseClient.get_client()
+                now_iso = datetime.now(UTC).isoformat()
+
+                db.table("aria_action_queue").insert({
+                    "id": str(uuid4()),
+                    "user_id": self.user_id,
+                    "action_type": "lead_discovery",
+                    "title": f"Investigate {company_name} — {signal_type} signal detected",
+                    "description": (
+                        f"Scout detected a {signal_type} signal for {company_name} "
+                        f"(relevance: {signal.get('relevance_score', 0):.2f}, "
+                        f"weighted: {weighted_relevance:.2f}). "
+                        f"Matches ICP '{icp.get('name', 'unnamed')}'. "
+                        f"Hunter should run full lead discovery."
+                    ),
+                    "agent": "hunter",
+                    "status": "pending",
+                    "priority": "high" if weighted_relevance >= 0.8 else "medium",
+                    "metadata": {
+                        "trigger_signal_type": signal_type,
+                        "trigger_company": company_name,
+                        "trigger_headline": signal.get("headline", ""),
+                        "icp_id": icp.get("id"),
+                        "icp_name": icp.get("name"),
+                        "weighted_relevance": round(weighted_relevance, 3),
+                    },
+                    "created_at": now_iso,
+                }).execute()
+
+                logger.info(
+                    "[SCOUT] Queued Hunter lead discovery for '%s' (ICP: %s, signal: %s)",
+                    company_name,
+                    icp.get("name", "?"),
+                    signal_type,
+                )
+                # Only queue once per company per signal, even if multiple ICPs match
+                return
+
+            except Exception as e:
+                logger.warning(
+                    "[SCOUT] Failed to queue Hunter task for '%s': %s",
+                    company_name,
+                    e,
+                )
 
     def _check_tool_connected(
         self,
@@ -243,6 +590,9 @@ class ScoutAgent(SkillAwareAgent):
         await self._log_skill_consideration()
 
         logger.info("Scout agent starting intelligence gathering task")
+
+        # Load trigger intelligence at start of scanning (fail-open)
+        await self._load_trigger_intelligence()
 
         # Extract team intelligence for LLM enrichment (optional, fail-open)
         self._team_intelligence: str = task.get("team_intelligence", "")
@@ -680,6 +1030,9 @@ class ScoutAgent(SkillAwareAgent):
                 "perplexity_intelligence": perplexity_result,
             }
 
+            # Sanitize all external data before LLM classification
+            gathered_data = self._sanitize_gathered_data(gathered_data)
+
             # Use Claude to classify signals from gathered intelligence
             try:
                 gathered_json = json.dumps(gathered_data, indent=2, default=str)
@@ -730,21 +1083,34 @@ class ScoutAgent(SkillAwareAgent):
                     for signal in parsed:
                         if not isinstance(signal, dict):
                             continue
+
+                        signal_type = signal.get("signal_type", "unknown")
+                        base_relevance = float(signal.get("relevance_score", 0.5))
+
+                        # Apply dynamic trigger weight from loaded weights
+                        trigger_weight = self._trigger_weights.get(signal_type, 1.0)
+                        weighted_relevance = min(1.0, base_relevance * trigger_weight)
+
                         # Ensure required fields have defaults
                         normalized: dict[str, Any] = {
                             "company_name": signal.get("company_name", entity),
-                            "signal_type": signal.get("signal_type", "unknown"),
+                            "signal_type": signal_type,
                             "headline": signal.get("headline", ""),
                             "summary": signal.get("summary", ""),
                             "source_url": signal.get("source_url", ""),
                             "source_name": signal.get("source_name", ""),
-                            "relevance_score": float(signal.get("relevance_score", 0.5)),
+                            "relevance_score": round(weighted_relevance, 3),
+                            "base_relevance": round(base_relevance, 3),
+                            "trigger_weight": round(trigger_weight, 2),
                             "detected_at": signal.get(
                                 "detected_at",
                                 datetime.now(tz=UTC).isoformat(),
                             ),
                         }
                         all_signals.append(normalized)
+
+                        # Check ICP match and queue Hunter if applicable
+                        await self._check_icp_match_and_queue(normalized)
 
                     logger.info(f"Signal detection found {len(parsed)} signals for '{entity}'")
                 else:

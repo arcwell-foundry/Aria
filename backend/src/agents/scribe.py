@@ -8,7 +8,9 @@ fallback for resilience.
 import json
 import logging
 import re
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import SkillAwareAgent
@@ -160,6 +162,459 @@ class ScribeAgent(SkillAwareAgent):
             except Exception as e:
                 logger.warning("ScribeAgent: Failed to initialize ExaEnrichmentProvider: %s", e)
         return self._exa_provider
+
+    async def _load_outreach_intelligence(
+        self,
+        recipient: dict[str, Any] | None,
+        lead_memory_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Load outreach intelligence context for drafting.
+
+        Per execution_spec.md Section 5.1-5.2, loads:
+        - Persona-specific messaging approach from stakeholder title/role
+        - Trigger event that originated this lead
+        - Company enrichment facts from memory_semantic
+
+        Args:
+            recipient: Recipient info with name, company, title.
+            lead_memory_id: Optional lead_memory_id to look up context.
+
+        Returns:
+            Dict with persona_approach, trigger_context, company_facts.
+        """
+        context: dict[str, Any] = {
+            "persona_approach": "",
+            "trigger_context": "",
+            "company_facts": [],
+            "stakeholder_role": "",
+        }
+
+        if not recipient:
+            return context
+
+        recipient_title = recipient.get("title", "")
+        recipient_company = recipient.get("company", "")
+
+        # 1. Determine persona-specific messaging approach from title/role
+        context["persona_approach"] = self._determine_persona_approach(
+            title=recipient_title,
+            role=recipient.get("role", ""),
+        )
+
+        try:
+            from src.db.supabase import SupabaseClient
+
+            db = SupabaseClient.get_client()
+        except Exception as e:
+            logger.warning("[SCRIBE] Cannot access DB for outreach intelligence: %s", e)
+            return context
+
+        # 2. Load stakeholder role from lead_memory_stakeholders
+        if recipient_company and not lead_memory_id:
+            try:
+                lead_result = (
+                    db.table("lead_memories")
+                    .select("id")
+                    .eq("user_id", self.user_id)
+                    .ilike("company_name", f"%{recipient_company}%")
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if lead_result.data:
+                    lead_memory_id = lead_result.data[0]["id"]
+            except Exception as e:
+                logger.debug("[SCRIBE] Failed to look up lead_memory_id: %s", e)
+
+        if lead_memory_id:
+            # Load stakeholder details
+            try:
+                recipient_name = recipient.get("name", "")
+                if recipient_name:
+                    stakeholder_result = (
+                        db.table("lead_memory_stakeholders")
+                        .select("title, role, influence_level")
+                        .eq("lead_memory_id", lead_memory_id)
+                        .ilike("contact_name", f"%{recipient_name}%")
+                        .limit(1)
+                        .execute()
+                    )
+                    if stakeholder_result.data:
+                        sh = stakeholder_result.data[0]
+                        context["stakeholder_role"] = sh.get("role", "")
+                        # Refine persona approach with DB-stored role
+                        if sh.get("role"):
+                            context["persona_approach"] = self._determine_persona_approach(
+                                title=sh.get("title", recipient_title),
+                                role=sh["role"],
+                            )
+                        logger.info(
+                            "[SCRIBE] Loaded stakeholder: role=%s, influence=%s",
+                            sh.get("role", "?"),
+                            sh.get("influence_level", "?"),
+                        )
+            except Exception as e:
+                logger.debug("[SCRIBE] Failed to load stakeholder: %s", e)
+
+            # 3. Load trigger event from lead_memory_events
+            try:
+                event_result = (
+                    db.table("lead_memory_events")
+                    .select("event_type, subject, content, occurred_at, metadata")
+                    .eq("lead_memory_id", lead_memory_id)
+                    .in_("event_type", ["signal", "discovery"])
+                    .order("occurred_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if event_result.data:
+                    evt = event_result.data[0]
+                    trigger_type = (evt.get("metadata") or {}).get(
+                        "trigger_signal_type",
+                        evt.get("event_type", ""),
+                    )
+                    context["trigger_context"] = (
+                        f"Trigger: {trigger_type}. "
+                        f"{evt.get('subject', '')}. "
+                        f"{evt.get('content', '')[:200]}"
+                    )
+                    logger.info(
+                        "[SCRIBE] Loaded trigger event: %s", trigger_type
+                    )
+            except Exception as e:
+                logger.debug("[SCRIBE] Failed to load trigger event: %s", e)
+
+        # 4. Load company enrichment facts from memory_semantic
+        if recipient_company:
+            try:
+                facts_result = (
+                    db.table("memory_semantic")
+                    .select("fact, confidence")
+                    .eq("user_id", self.user_id)
+                    .ilike("fact", f"%{recipient_company}%")
+                    .order("confidence", desc=True)
+                    .limit(5)
+                    .execute()
+                )
+                if facts_result.data:
+                    context["company_facts"] = [
+                        row["fact"] for row in facts_result.data
+                    ]
+                    logger.info(
+                        "[SCRIBE] Loaded %d company facts for %s",
+                        len(facts_result.data),
+                        recipient_company,
+                    )
+            except Exception as e:
+                logger.debug("[SCRIBE] Failed to load company facts: %s", e)
+
+        return context
+
+    def _determine_persona_approach(
+        self,
+        title: str,
+        role: str = "",
+    ) -> str:
+        """Determine persona-specific messaging approach.
+
+        Per knowledge_base.md Section 5.2, maps title/role to messaging
+        framework: senior executive, technical leader, procurement, or
+        quality/regulatory.
+
+        Args:
+            title: Contact's job title.
+            role: Stakeholder role (decision_maker, influencer, etc.).
+
+        Returns:
+            Messaging approach instruction string for LLM prompt.
+        """
+        title_lower = title.lower()
+
+        # Senior executive persona
+        if any(
+            kw in title_lower
+            for kw in [
+                "ceo", "cfo", "cto", "coo", "chief", "president",
+                "svp", "evp", "vp commercial", "vp sales", "cco",
+            ]
+        ) or role == "decision_maker":
+            return (
+                "PERSONA: Senior Executive. "
+                "Use strategic, ROI-focused language. Lead with competitive insight or market trend. "
+                "Reference recent earnings call language or conference presentation if available. "
+                "Quantify potential impact. Keep it concise -- 3-4 short paragraphs max. "
+                "Tone: peer-level, confident."
+            )
+
+        # Technical leader persona
+        if any(
+            kw in title_lower
+            for kw in [
+                "r&d", "research", "scientist", "phd", "cso",
+                "scientific", "engineering", "development",
+            ]
+        ):
+            return (
+                "PERSONA: Technical Leader. "
+                "Use evidence-based, scientifically precise language. Reference specific programs "
+                "in their pipeline. Cite relevant data. Offer scientific value (application note, "
+                "case study, technical comparison). Tone: collegial, peer-level, respectful of expertise."
+            )
+
+        # Procurement / operations persona
+        if any(
+            kw in title_lower
+            for kw in [
+                "procurement", "sourcing", "supply chain", "operations",
+                "manufacturing", "vp ops",
+            ]
+        ):
+            return (
+                "PERSONA: Procurement/Operations. "
+                "Lead with operational efficiency or cost insight. Reference industry benchmark data. "
+                "Emphasize compliance credentials and TCO. Use language: efficiency, SLA, vendor "
+                "qualification, audit readiness. Tone: professional, structured, detail-oriented."
+            )
+
+        # Quality / regulatory persona
+        if any(
+            kw in title_lower
+            for kw in [
+                "quality", "regulatory", "compliance", "validation",
+                "gmp", "gxp",
+            ]
+        ):
+            return (
+                "PERSONA: Quality/Regulatory. "
+                "Lead with compliance-relevant content. Reference recent regulatory developments "
+                "(new FDA guidance, enforcement actions). Use language: validation, qualification, "
+                "audit trail, 21 CFR Part 11, data integrity. Tone: conservative, precise, risk-aware."
+            )
+
+        # Default: general professional
+        return (
+            "PERSONA: Business Professional. "
+            "Lead with insight relevant to their role. Keep messaging concise and value-first. "
+            "Reference specific company events or recent news. Include a clear next step."
+        )
+
+    def _run_compliance_scan(
+        self,
+        subject: str,
+        body: str,
+        recipient: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Run compliance scan on a drafted email.
+
+        Checks for:
+        - Medical/efficacy claims requiring MLR review
+        - HCP recipient (flag for Sunshine Act tracking)
+        - Competitive claims from non-public sources
+
+        Args:
+            subject: Email subject line.
+            body: Email body text.
+            recipient: Recipient info with title, company.
+
+        Returns:
+            Compliance scan results dict for email_drafts.metadata.
+        """
+        findings: list[dict[str, str]] = []
+        flags: list[str] = []
+        combined_text = f"{subject} {body}".lower()
+
+        # 1. Medical claims scan (efficacy/treatment language)
+        medical_patterns = [
+            (r"\b(cure|treat|heal|remedy|prevent)\b", "medical_claim"),
+            (r"\b(clinically\s+proven|scientifically\s+proven)\b", "unqualified_efficacy"),
+            (r"\b(superior\s+to|better\s+than|outperforms)\b.*\b(treatment|therapy|drug)\b", "comparative_claim"),
+            (r"\b(fda\s+approved\s+for|indicated\s+for)\b", "regulatory_claim"),
+            (r"\b(patient\s+outcomes?|survival\s+rate|response\s+rate)\b", "clinical_outcome_claim"),
+            (r"\b(no\s+side\s+effects?|zero\s+adverse)\b", "safety_claim"),
+        ]
+        for pattern, claim_type in medical_patterns:
+            if re.search(pattern, combined_text):
+                findings.append({
+                    "type": "medical_claim",
+                    "subtype": claim_type,
+                    "severity": "high",
+                    "recommendation": "Requires MLR (Medical, Legal, Regulatory) review before sending",
+                })
+                if "mlr_review_required" not in flags:
+                    flags.append("mlr_review_required")
+
+        # 2. HCP recipient check (Sunshine Act / Open Payments)
+        hcp_indicators = [
+            "md", "m.d.", "do", "d.o.", "phd", "ph.d.",
+            "physician", "surgeon", "clinician", "nurse practitioner",
+            "pharmacist", "medical director", "chief medical",
+        ]
+        recipient_title = ""
+        if recipient:
+            recipient_title = recipient.get("title", "").lower()
+
+        is_hcp = any(ind in recipient_title for ind in hcp_indicators)
+        if is_hcp:
+            findings.append({
+                "type": "hcp_recipient",
+                "subtype": "sunshine_act",
+                "severity": "medium",
+                "recommendation": (
+                    "Recipient appears to be a Healthcare Professional. "
+                    "Ensure compliance with Sunshine Act / Open Payments "
+                    "reporting if offering anything of value."
+                ),
+            })
+            flags.append("hcp_sunshine_act")
+
+        # 3. Competitive claims from non-public sources
+        competitive_patterns = [
+            (r"\b(confidential|internal)\s+(data|source|intelligence)\b", "non_public_source"),
+            (r"\b(we\s+learned|we\s+discovered|our\s+sources)\b.*\b(competitor|rival)\b", "competitive_intelligence"),
+            (r"\b(their\s+internal|inside\s+information)\b", "insider_information"),
+        ]
+        for pattern, claim_type in competitive_patterns:
+            if re.search(pattern, combined_text):
+                findings.append({
+                    "type": "competitive_claim",
+                    "subtype": claim_type,
+                    "severity": "high",
+                    "recommendation": "Remove references to non-public competitive intelligence",
+                })
+                if "competitive_review" not in flags:
+                    flags.append("competitive_review")
+
+        scan_result = {
+            "scanned_at": datetime.now(UTC).isoformat(),
+            "passed": len(findings) == 0,
+            "findings": findings,
+            "flags": flags,
+            "finding_count": len(findings),
+        }
+
+        if findings:
+            logger.info(
+                "[SCRIBE] Compliance scan found %d issue(s): %s",
+                len(findings),
+                ", ".join(flags),
+            )
+        else:
+            logger.info("[SCRIBE] Compliance scan passed")
+
+        return scan_result
+
+    async def _track_outreach_in_memory(
+        self,
+        content: dict[str, Any],
+        recipient: dict[str, Any] | None,
+        compliance_scan: dict[str, Any],
+        lead_memory_id: str | None = None,
+    ) -> None:
+        """Track outreach draft in lead_memory_events, email_drafts, aria_activity.
+
+        Per execution_spec.md Section 5.3. NEVER auto-sends.
+
+        Args:
+            content: Drafted email content with subject, body.
+            recipient: Recipient info.
+            compliance_scan: Compliance scan results.
+            lead_memory_id: Optional lead_memory_id for event tracking.
+        """
+        try:
+            from src.db.supabase import SupabaseClient
+
+            db = SupabaseClient.get_client()
+        except Exception as e:
+            logger.warning("[SCRIBE] Cannot access DB for outreach tracking: %s", e)
+            return
+
+        now_iso = datetime.now(UTC).isoformat()
+        draft_id = str(uuid4())
+        recipient_email = ""
+        recipient_name = ""
+        recipient_company = ""
+
+        if recipient:
+            recipient_email = recipient.get("email", "")
+            recipient_name = recipient.get("name", "")
+            recipient_company = recipient.get("company", "")
+
+        # 1. email_drafts INSERT (status: 'draft' — NEVER auto-send)
+        try:
+            db.table("email_drafts").insert({
+                "id": draft_id,
+                "user_id": self.user_id,
+                "recipient_email": recipient_email,
+                "recipient": recipient_name,
+                "recipient_company": recipient_company,
+                "subject": content.get("subject", ""),
+                "body": content.get("body", ""),
+                "status": "draft",
+                "metadata": {
+                    "lead_memory_id": lead_memory_id,
+                    "persona_type": content.get("metadata", {}).get("persona_approach_used", ""),
+                    "compliance_scan": compliance_scan,
+                    "context_used": content.get("metadata", {}).get("context_used", []),
+                    "confidence_score": content.get("metadata", {}).get("confidence_score", 0.7),
+                    "tone": content.get("tone", "formal"),
+                    "research_informed": content.get("research_informed", False),
+                },
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            }).execute()
+            logger.info("[SCRIBE] Created email_drafts record: %s", draft_id)
+        except Exception as e:
+            logger.warning("[SCRIBE] Failed to insert email_drafts: %s", e)
+
+        # 2. lead_memory_events INSERT (event_type: 'email_drafted')
+        if lead_memory_id:
+            try:
+                db.table("lead_memory_events").insert({
+                    "id": str(uuid4()),
+                    "lead_memory_id": lead_memory_id,
+                    "event_type": "email_drafted",
+                    "subject": f"Draft: {content.get('subject', '')}",
+                    "content": (
+                        f"Outreach email drafted for {recipient_name} "
+                        f"at {recipient_company}. "
+                        f"Status: draft (awaiting user approval). "
+                        f"Compliance: {'passed' if compliance_scan.get('passed') else 'flagged'}."
+                    ),
+                    "occurred_at": now_iso,
+                    "source": "scribe_agent",
+                    "metadata": {
+                        "email_draft_id": draft_id,
+                        "direction": "outbound",
+                        "compliance_passed": compliance_scan.get("passed", True),
+                        "compliance_flags": compliance_scan.get("flags", []),
+                    },
+                    "created_at": now_iso,
+                }).execute()
+            except Exception as e:
+                logger.warning("[SCRIBE] Failed to insert lead_memory_events: %s", e)
+
+        # 3. aria_activity INSERT
+        try:
+            db.table("aria_activity").insert({
+                "id": str(uuid4()),
+                "user_id": self.user_id,
+                "activity_type": "email_drafted",
+                "title": f"Draft ready: {content.get('subject', '')[:50]}",
+                "description": (
+                    f"Drafted email for {recipient_name} at {recipient_company}. "
+                    f"Status: draft (review on /communications). "
+                    f"Compliance: {len(compliance_scan.get('findings', []))} finding(s)."
+                ),
+                "metadata": {
+                    "email_draft_id": draft_id,
+                    "recipient": recipient_name,
+                    "recipient_company": recipient_company,
+                    "compliance_flags": compliance_scan.get("flags", []),
+                },
+                "created_at": now_iso,
+            }).execute()
+        except Exception as e:
+            logger.warning("[SCRIBE] Failed to insert aria_activity: %s", e)
 
     def _check_tool_connected(
         self,
@@ -315,6 +770,24 @@ class ScribeAgent(SkillAwareAgent):
         tone = task.get("tone", "formal")
         template_name = task.get("template_name")
         style = task.get("style")
+        lead_memory_id = task.get("lead_memory_id")
+
+        # Load outreach intelligence from skill knowledge (fail-open)
+        outreach_intel: dict[str, Any] = {}
+        if comm_type in ("email", "message"):
+            try:
+                outreach_intel = await self._load_outreach_intelligence(
+                    recipient=recipient,
+                    lead_memory_id=lead_memory_id,
+                )
+                # Enrich context with outreach intelligence
+                if outreach_intel.get("trigger_context"):
+                    context = f"{context}\n\n{outreach_intel['trigger_context']}"
+                if outreach_intel.get("company_facts"):
+                    facts_str = "\n".join(f"- {f}" for f in outreach_intel["company_facts"])
+                    context = f"{context}\n\nCompany intelligence:\n{facts_str}"
+            except Exception as e:
+                logger.warning("[SCRIBE] Outreach intelligence loading failed: %s", e)
 
         logger.info(
             f"Starting draft for {comm_type}",
@@ -361,6 +834,7 @@ class ScribeAgent(SkillAwareAgent):
                             goal=goal,
                             tone=tone,
                             style=style,
+                            persona_approach=outreach_intel.get("persona_approach", ""),
                         )
                 else:
                     content = await self._draft_email(
@@ -369,6 +843,7 @@ class ScribeAgent(SkillAwareAgent):
                         goal=goal,
                         tone=tone,
                         style=style,
+                        persona_approach=outreach_intel.get("persona_approach", ""),
                     )
 
                 draft_type = "email"
@@ -401,12 +876,50 @@ class ScribeAgent(SkillAwareAgent):
                 content["body"] = await self._personalize(content["body"], style)
                 style_applied = "custom"
 
+            # Run compliance scan on email drafts (fail-open)
+            compliance_scan: dict[str, Any] = {}
+            if draft_type == "email" and content.get("body"):
+                try:
+                    compliance_scan = self._run_compliance_scan(
+                        subject=content.get("subject", ""),
+                        body=content["body"],
+                        recipient=recipient,
+                    )
+                    # Store scan in content metadata
+                    content_meta = content.get("metadata", {})
+                    content_meta["compliance_scan"] = compliance_scan
+                    content_meta["persona_approach_used"] = outreach_intel.get(
+                        "persona_approach", ""
+                    )[:100]
+                    content["metadata"] = content_meta
+                except Exception as e:
+                    logger.warning("[SCRIBE] Compliance scan failed: %s", e)
+
+            # Track outreach in memory (email_drafts, lead_memory_events, aria_activity)
+            # NEVER auto-send — draft only, user approves on /communications
+            if draft_type == "email" and content.get("body"):
+                try:
+                    await self._track_outreach_in_memory(
+                        content=content,
+                        recipient=recipient,
+                        compliance_scan=compliance_scan,
+                        lead_memory_id=lead_memory_id,
+                    )
+                except Exception as e:
+                    logger.warning("[SCRIBE] Outreach tracking failed: %s", e)
+
             # Build advisories for any degraded capabilities
-            advisories = []
+            advisories: list[str] = []
             if not exa_available and recipient:
                 advisories.append(
                     "Recipient research skipped - Exa web search not connected. "
                     "Connect Exa in Settings > Integrations for personalized recipient insights."
+                )
+            if compliance_scan and not compliance_scan.get("passed", True):
+                advisories.append(
+                    f"Compliance scan flagged {compliance_scan.get('finding_count', 0)} issue(s): "
+                    f"{', '.join(compliance_scan.get('flags', []))}. "
+                    "Review findings before sending."
                 )
 
             result_data = {
@@ -445,6 +958,7 @@ class ScribeAgent(SkillAwareAgent):
         goal: str = "",
         tone: str = "formal",
         style: dict[str, Any] | None = None,
+        persona_approach: str = "",
     ) -> dict[str, Any]:
         """Draft an email using LLM generation with template fallback.
 
@@ -460,6 +974,7 @@ class ScribeAgent(SkillAwareAgent):
             goal: What this email should achieve.
             tone: Tone of the email (formal, friendly, urgent).
             style: Optional Digital Twin style hints for the LLM.
+            persona_approach: Persona-specific messaging instructions from skill knowledge.
 
         Returns:
             Drafted email with subject, body, and metadata.
@@ -548,6 +1063,11 @@ class ScribeAgent(SkillAwareAgent):
             if style_parts:
                 style_hints = "\n\nWriting style preferences:\n" + "\n".join(style_parts)
 
+        # Build persona approach section from outreach intelligence
+        persona_section = ""
+        if persona_approach:
+            persona_section = f"\n\nMessaging approach:\n{persona_approach}\n"
+
         # Build team intelligence section if available (fail-open)
         team_intel_section = ""
         try:
@@ -564,6 +1084,7 @@ class ScribeAgent(SkillAwareAgent):
             f"Goal: {goal}\n\n"
             f"Tone: {tone}\n"
             f"{style_hints}"
+            f"{persona_section}"
             f"{team_intel_section}\n\n"
             f"Requirements:\n"
             f"- Keep the email concise and professional\n"

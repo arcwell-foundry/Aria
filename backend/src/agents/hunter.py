@@ -6,12 +6,15 @@ Discovers and qualifies new leads based on Ideal Customer Profile (ICP).
 import json
 import logging
 import re
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 from src.agents.base import AgentResult
 from src.agents.skill_aware_agent import SkillAwareAgent
 from src.core.config import settings
 from src.core.task_types import TaskType
+from src.security.instruction_detector import InstructionDetector
 from src.security.prompt_security import get_security_context, wrap_external_data
 
 if TYPE_CHECKING:
@@ -99,6 +102,11 @@ class HunterAgent(SkillAwareAgent):
         self._company_cache: dict[str, Any] = {}
         self._exa_provider: Any = None
         self._resource_status: list[dict[str, Any]] = []  # Tool connectivity status
+        self._instruction_detector = InstructionDetector(llm_client=None)
+        # Skill knowledge loaded per-execution
+        self._sub_industry_context: dict[str, Any] | None = None
+        self._active_icp: dict[str, Any] | None = None
+        self._domain_context: str = ""
         super().__init__(
             llm_client=llm_client,
             user_id=user_id,
@@ -122,6 +130,96 @@ class HunterAgent(SkillAwareAgent):
             except Exception as e:
                 logger.warning("HunterAgent: Failed to initialize ExaEnrichmentProvider: %s", e)
         return self._exa_provider
+
+    async def _load_skill_knowledge(self) -> None:
+        """Load lead gen skill knowledge at the start of discovery.
+
+        Reads SubIndustryContext from memory_semantic, active ICP from
+        lead_icp_profiles, and domain context from knowledge_base.md.
+        Results are stored as instance attributes for use during scoring
+        and write protocol.
+        """
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+
+        # 1. Load SubIndustryContext from memory_semantic
+        try:
+            result = (
+                db.table("memory_semantic")
+                .select("fact, metadata, confidence")
+                .eq("user_id", self.user_id)
+                .or_(
+                    "metadata->>entity_type.eq.sub_industry_context,"
+                    "metadata->>entity_type.eq.company_classification"
+                )
+                .order("confidence", desc=True)
+                .limit(5)
+                .execute()
+            )
+            if result.data:
+                self._sub_industry_context = {
+                    "facts": [row["fact"] for row in result.data],
+                    "metadata": result.data[0].get("metadata", {}),
+                }
+                logger.info(
+                    "[HUNTER] Loaded SubIndustryContext: %d facts",
+                    len(result.data),
+                )
+            else:
+                self._sub_industry_context = None
+                logger.info("[HUNTER] No SubIndustryContext found in memory_semantic")
+        except Exception as e:
+            logger.warning("[HUNTER] Failed to load SubIndustryContext: %s", e)
+            self._sub_industry_context = None
+
+        # 2. Load active ICP from lead_icp_profiles
+        try:
+            result = (
+                db.table("lead_icp_profiles")
+                .select("id, name, criteria, is_active")
+                .eq("user_id", self.user_id)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                self._active_icp = result.data[0]
+                logger.info(
+                    "[HUNTER] Loaded active ICP: %s",
+                    self._active_icp.get("name", "unnamed"),
+                )
+            else:
+                self._active_icp = None
+                logger.info("[HUNTER] No active ICP found in lead_icp_profiles")
+        except Exception as e:
+            logger.warning("[HUNTER] Failed to load active ICP: %s", e)
+            self._active_icp = None
+
+        # 3. Load domain context from knowledge_base.md
+        try:
+            import os
+
+            kb_path = os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "skills",
+                "definitions",
+                "life_sciences_lead_gen",
+                "knowledge_base.md",
+            )
+            kb_path = os.path.normpath(kb_path)
+            if os.path.exists(kb_path):
+                with open(kb_path, encoding="utf-8") as f:
+                    # Read first 4000 chars for foundational context
+                    self._domain_context = f.read(4000)
+                logger.info("[HUNTER] Loaded domain context from knowledge_base.md")
+            else:
+                self._domain_context = ""
+                logger.info("[HUNTER] knowledge_base.md not found at %s", kb_path)
+        except Exception as e:
+            logger.warning("[HUNTER] Failed to load knowledge_base.md: %s", e)
+            self._domain_context = ""
 
     def _check_tool_connected(
         self,
@@ -214,6 +312,9 @@ class HunterAgent(SkillAwareAgent):
 
         logger.warning("[HUNTER] execute() called - starting lead discovery")
 
+        # Load skill knowledge at the START of lead discovery (fail-open)
+        await self._load_skill_knowledge()
+
         # Extract team intelligence for LLM enrichment (optional, fail-open)
         self._team_intelligence: str = task.get("team_intelligence", "")
 
@@ -249,21 +350,31 @@ class HunterAgent(SkillAwareAgent):
         # Step 4: Limit to target_count
         companies = companies[:target_count]
 
-        # Step 5: Process each company - enrich, find contacts, score fit
+        # Step 5: Process each company - enrich, find contacts, score, write to memory
         leads = []
         for company in companies:
             try:
                 # Enrich company data
                 enriched_company = await self._enrich_company(company)
 
+                # Sanitize Exa-sourced data before processing
+                enriched_company = await self._sanitize_external_data(
+                    enriched_company, source="exa_company_search"
+                )
+
                 # Find contacts
                 contacts = await self._find_contacts(company_name=enriched_company["name"])
 
-                # Score fit against ICP
-                fit_score, fit_reasons, gaps = await self._score_fit(
+                # Score using dynamic 4-dimension model (Section 3.2)
+                discovery_score = await self._score_discovery(
                     company=enriched_company,
+                    contacts=contacts,
                     icp=icp,
                 )
+
+                fit_score = discovery_score["total"]
+                fit_reasons = discovery_score.get("fit_reasons", [])
+                gaps = discovery_score.get("gaps", [])
 
                 # Build lead object
                 lead = {
@@ -273,8 +384,16 @@ class HunterAgent(SkillAwareAgent):
                     "fit_reasons": fit_reasons,
                     "gaps": gaps,
                     "source": "hunter_pro",
+                    "discovery_score": discovery_score,
                 }
                 leads.append(lead)
+
+                # Write to memory per Section 7.1 protocol (fail-open)
+                await self._write_lead_to_memory(
+                    company=enriched_company,
+                    contacts=contacts,
+                    discovery_score=discovery_score,
+                )
 
             except Exception as e:
                 # Handle per-company exceptions gracefully
@@ -1248,6 +1367,470 @@ class HunterAgent(SkillAwareAgent):
                 "status": "failed",
                 "error": str(e),
             }
+
+    async def _sanitize_external_data(
+        self,
+        data: dict[str, Any],
+        source: str = "exa_company_search",
+    ) -> dict[str, Any]:
+        """Sanitize external data through security pipeline before processing.
+
+        Runs InstructionDetector pattern scan on string fields and wraps
+        data with source attribution per security.md.
+
+        Args:
+            data: External data dict to sanitize.
+            source: Data source identifier for trust level lookup.
+
+        Returns:
+            Sanitized data dict with injections quarantined.
+        """
+        sanitized = data.copy()
+        for key, value in sanitized.items():
+            if not isinstance(value, str):
+                continue
+            # Run pattern-based injection detection
+            detections = self._instruction_detector.detect_patterns(value)
+            if detections:
+                # Quarantine the detected injections
+                for detection in detections:
+                    record = self._instruction_detector.quarantine(value, detection)
+                    sanitized[key] = record.sanitized_text
+                    value = record.sanitized_text
+                logger.warning(
+                    "[HUNTER] Injection detected in field '%s' from source '%s'",
+                    key,
+                    source,
+                )
+        return sanitized
+
+    async def _score_discovery(
+        self,
+        company: dict[str, Any],
+        contacts: list[dict[str, Any]],
+        icp: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Score a discovered lead using the dynamic 4-dimension model.
+
+        Per execution_spec.md Section 3.2:
+        - ICP Fit (base 30%)
+        - Trigger Signal Relevance (base 30%)
+        - Relationship & Access (base 25%)
+        - Buying Readiness (base 15%)
+
+        Args:
+            company: Enriched company data.
+            contacts: Discovered contacts at the company.
+            icp: Active ICP criteria.
+
+        Returns:
+            Discovery score breakdown dict for lead_memories.metadata.
+        """
+        # Use active ICP from skill knowledge if available, else use task ICP
+        effective_icp = icp
+        if self._active_icp and self._active_icp.get("criteria"):
+            criteria = self._active_icp["criteria"]
+            if isinstance(criteria, dict):
+                effective_icp = {**icp, **criteria}
+
+        # Dynamic weights (can be adjusted based on SubIndustryContext)
+        weights = {
+            "icp_fit": 0.30,
+            "trigger_relevance": 0.30,
+            "relationship": 0.25,
+            "buying_readiness": 0.15,
+        }
+
+        # Adjust weights based on SubIndustryContext if available
+        if self._sub_industry_context:
+            meta = self._sub_industry_context.get("metadata", {})
+            # Relationship-heavy sub-industries get higher relationship weight
+            if meta.get("company_type") in ("CDMO", "CRO", "Consultant"):
+                weights["relationship"] = 0.35
+                weights["trigger_relevance"] = 0.25
+                weights["buying_readiness"] = 0.10
+            # Transactional sub-industries get higher buying readiness weight
+            elif meta.get("company_type") in (
+                "Reagent Supplier",
+                "Consumables",
+                "Lab Equipment",
+            ):
+                weights["buying_readiness"] = 0.25
+                weights["relationship"] = 0.15
+
+        # --- Dimension 1: ICP Fit ---
+        icp_score, icp_reasons, icp_gaps = await self._score_fit(company, effective_icp)
+
+        # --- Dimension 2: Trigger Signal Relevance ---
+        trigger_score = 0.0
+        trigger_signals: list[str] = []
+        try:
+            from src.db.supabase import SupabaseClient
+
+            db = SupabaseClient.get_client()
+            company_name = company.get("name", "")
+            if company_name:
+                signal_result = (
+                    db.table("market_signals")
+                    .select("signal_type, relevance_score, created_at")
+                    .eq("user_id", self.user_id)
+                    .ilike("company_name", f"%{company_name}%")
+                    .order("created_at", desc=True)
+                    .limit(10)
+                    .execute()
+                )
+                if signal_result.data:
+                    # Average relevance of recent signals, with recency multiplier
+                    total_relevance = 0.0
+                    for sig in signal_result.data:
+                        relevance = sig.get("relevance_score", 0.5)
+                        total_relevance += relevance
+                        trigger_signals.append(sig.get("signal_type", "unknown"))
+                    trigger_score = min(
+                        100.0,
+                        (total_relevance / len(signal_result.data)) * 100,
+                    )
+        except Exception as e:
+            logger.warning("[HUNTER] Failed to query market_signals for scoring: %s", e)
+
+        # --- Dimension 3: Relationship & Access ---
+        relationship_score = 0.0
+        mutual_contacts = 0
+        try:
+            # Check for existing relationships in memory_semantic
+            from src.db.supabase import SupabaseClient
+
+            db = SupabaseClient.get_client()
+            company_name = company.get("name", "")
+            if company_name:
+                rel_result = (
+                    db.table("memory_semantic")
+                    .select("fact, confidence")
+                    .eq("user_id", self.user_id)
+                    .ilike("fact", f"%{company_name}%")
+                    .limit(5)
+                    .execute()
+                )
+                if rel_result.data:
+                    mutual_contacts = len(rel_result.data)
+                    relationship_score = min(100.0, mutual_contacts * 25.0)
+        except Exception as e:
+            logger.warning("[HUNTER] Failed to query relationships for scoring: %s", e)
+
+        # Contacts found boost relationship score
+        if contacts:
+            contact_boost = min(30.0, len(contacts) * 10.0)
+            relationship_score = min(100.0, relationship_score + contact_boost)
+
+        # --- Dimension 4: Buying Readiness ---
+        buying_score = 0.0
+        buying_signals: list[str] = []
+        # Hiring signals from enrichment
+        recent_news = company.get("recent_news", [])
+        if recent_news:
+            for news_item in recent_news:
+                news_text = str(news_item).lower()
+                if any(
+                    kw in news_text
+                    for kw in ["hiring", "expansion", "funding", "raised", "partnership"]
+                ):
+                    buying_score += 15.0
+                    buying_signals.append("hiring_or_expansion")
+                    break
+        # Funding stage signals
+        funding = company.get("funding_stage", "")
+        if funding and funding.lower() not in ("unknown", ""):
+            buying_score += 10.0
+            buying_signals.append("known_funding_stage")
+        buying_score = min(100.0, buying_score)
+
+        # --- Compute weighted total ---
+        total = (
+            icp_score * weights["icp_fit"]
+            + trigger_score * weights["trigger_relevance"]
+            + relationship_score * weights["relationship"]
+            + buying_score * weights["buying_readiness"]
+        )
+        total = max(0.0, min(100.0, total))
+
+        now_iso = datetime.now(UTC).isoformat()
+        sub_industry_label = ""
+        if self._sub_industry_context:
+            meta = self._sub_industry_context.get("metadata", {})
+            sub_industry_label = (
+                f"{meta.get('company_type', '')} - {meta.get('modality', '')}"
+            ).strip(" -")
+
+        return {
+            "total": round(total, 1),
+            "icp_fit": {
+                "score": round(icp_score, 1),
+                "weight": weights["icp_fit"],
+                "weighted": round(icp_score * weights["icp_fit"], 1),
+            },
+            "trigger_relevance": {
+                "score": round(trigger_score, 1),
+                "weight": weights["trigger_relevance"],
+                "weighted": round(trigger_score * weights["trigger_relevance"], 1),
+                "triggers": trigger_signals,
+            },
+            "relationship": {
+                "score": round(relationship_score, 1),
+                "weight": weights["relationship"],
+                "weighted": round(relationship_score * weights["relationship"], 1),
+                "mutual_contacts": mutual_contacts,
+            },
+            "buying_readiness": {
+                "score": round(buying_score, 1),
+                "weight": weights["buying_readiness"],
+                "weighted": round(buying_score * weights["buying_readiness"], 1),
+                "signals": buying_signals,
+            },
+            "scoring_context": {
+                "sub_industry": sub_industry_label,
+                "weights_source": "dynamic_from_enrichment"
+                if self._sub_industry_context
+                else "base_defaults",
+                "scored_at": now_iso,
+            },
+            "fit_reasons": icp_reasons,
+            "gaps": icp_gaps,
+        }
+
+    async def _write_lead_to_memory(
+        self,
+        company: dict[str, Any],
+        contacts: list[dict[str, Any]],
+        discovery_score: dict[str, Any],
+    ) -> None:
+        """Write discovered lead to memory per Section 7.1 protocol.
+
+        Inserts into lead_memories, lead_memory_events, lead_memory_stakeholders,
+        memory_semantic, and aria_activity with proper source attribution.
+
+        Args:
+            company: Enriched company data.
+            contacts: Discovered contacts.
+            discovery_score: Computed discovery score breakdown.
+        """
+        try:
+            from src.db.supabase import SupabaseClient
+
+            db = SupabaseClient.get_client()
+        except Exception as e:
+            logger.warning("[HUNTER] Cannot access DB for memory writes: %s", e)
+            return
+
+        company_name = company.get("name", "Unknown")
+        now_iso = datetime.now(UTC).isoformat()
+        lead_id = str(uuid4())
+        total_score = discovery_score.get("total", 0)
+
+        # 1. lead_memories INSERT
+        try:
+            db.table("lead_memories").insert({
+                "id": lead_id,
+                "user_id": self.user_id,
+                "company_name": company_name,
+                "lifecycle_stage": "lead",
+                "status": "active",
+                "health_score": total_score,
+                "metadata": {
+                    "source": "hunter_discovery",
+                    "discovery_score": discovery_score,
+                    "industry": company.get("industry", ""),
+                    "geography": company.get("geography", ""),
+                    "size": company.get("size", ""),
+                    "domain": company.get("domain", ""),
+                },
+                "first_touch_at": now_iso,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            }).execute()
+            logger.info("[HUNTER] Created lead_memories record for '%s'", company_name)
+        except Exception as e:
+            logger.warning(
+                "[HUNTER] Failed to insert lead_memories for '%s': %s",
+                company_name,
+                e,
+            )
+            return  # If lead creation fails, skip dependent writes
+
+        # 2. lead_memory_events INSERT
+        try:
+            db.table("lead_memory_events").insert({
+                "id": str(uuid4()),
+                "lead_memory_id": lead_id,
+                "event_type": "discovery",
+                "subject": f"Lead discovered via hunter_discovery",
+                "content": (
+                    f"Hunter discovered {company_name} as a lead. "
+                    f"ICP match: {total_score:.0f}%."
+                ),
+                "occurred_at": now_iso,
+                "source": "aria_discovery",
+                "metadata": {
+                    "icp_match_score": total_score,
+                    "discovery_dimensions": {
+                        "icp_fit": discovery_score.get("icp_fit", {}).get("score", 0),
+                        "trigger_relevance": discovery_score.get("trigger_relevance", {}).get(
+                            "score", 0
+                        ),
+                        "relationship": discovery_score.get("relationship", {}).get("score", 0),
+                        "buying_readiness": discovery_score.get("buying_readiness", {}).get(
+                            "score", 0
+                        ),
+                    },
+                },
+                "created_at": now_iso,
+            }).execute()
+        except Exception as e:
+            logger.warning(
+                "[HUNTER] Failed to insert lead_memory_events for '%s': %s",
+                company_name,
+                e,
+            )
+
+        # 3. lead_memory_stakeholders INSERT (for each contact found)
+        for contact in contacts:
+            try:
+                db.table("lead_memory_stakeholders").insert({
+                    "id": str(uuid4()),
+                    "lead_memory_id": lead_id,
+                    "contact_email": contact.get("email", ""),
+                    "contact_name": contact.get("name", ""),
+                    "title": contact.get("title", ""),
+                    "role": self._infer_stakeholder_role(contact.get("title", "")),
+                    "influence_level": self._infer_influence_level(
+                        contact.get("seniority", "")
+                    ),
+                    "sentiment": "unknown",
+                    "created_at": now_iso,
+                }).execute()
+            except Exception as e:
+                logger.warning(
+                    "[HUNTER] Failed to insert stakeholder '%s' for '%s': %s",
+                    contact.get("name", "?"),
+                    company_name,
+                    e,
+                )
+
+        # 4. memory_semantic INSERT (company facts with confidence + source)
+        semantic_facts = [
+            {
+                "fact": f"{company_name} is a {company.get('industry', 'life sciences')} "
+                f"company in {company.get('geography', 'unknown region')}",
+                "confidence": 0.65,
+                "source": "hunter_enrichment",
+                "metadata": {
+                    "entity_type": "company",
+                    "company_name": company_name,
+                    "data_source": "exa_company_search",
+                },
+            },
+        ]
+        if company.get("size"):
+            semantic_facts.append({
+                "fact": f"{company_name} has approximately {company['size']} employees",
+                "confidence": 0.60,
+                "source": "hunter_enrichment",
+                "metadata": {
+                    "entity_type": "company",
+                    "company_name": company_name,
+                    "data_source": "exa_company_search",
+                },
+            })
+        if company.get("funding_stage") and company["funding_stage"] != "Unknown":
+            semantic_facts.append({
+                "fact": f"{company_name} is at {company['funding_stage']} funding stage",
+                "confidence": 0.60,
+                "source": "hunter_enrichment",
+                "metadata": {
+                    "entity_type": "company",
+                    "company_name": company_name,
+                    "data_source": "exa_company_search",
+                },
+            })
+
+        for fact_data in semantic_facts:
+            try:
+                db.table("memory_semantic").insert({
+                    "id": str(uuid4()),
+                    "user_id": self.user_id,
+                    "fact": fact_data["fact"],
+                    "confidence": fact_data["confidence"],
+                    "source": fact_data["source"],
+                    "metadata": fact_data["metadata"],
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                }).execute()
+            except Exception as e:
+                logger.warning(
+                    "[HUNTER] Failed to insert memory_semantic fact for '%s': %s",
+                    company_name,
+                    e,
+                )
+
+        # 5. aria_activity INSERT
+        try:
+            db.table("aria_activity").insert({
+                "id": str(uuid4()),
+                "user_id": self.user_id,
+                "activity_type": "lead_discovered",
+                "title": f"New lead: {company_name}",
+                "description": (
+                    f"Discovered via hunter_discovery. "
+                    f"ICP match: {total_score:.0f}%. "
+                    f"{len(contacts)} contacts found."
+                ),
+                "metadata": {
+                    "lead_id": lead_id,
+                    "company_name": company_name,
+                    "discovery_score": total_score,
+                    "contacts_found": len(contacts),
+                },
+                "created_at": now_iso,
+            }).execute()
+        except Exception as e:
+            logger.warning(
+                "[HUNTER] Failed to insert aria_activity for '%s': %s",
+                company_name,
+                e,
+            )
+
+    def _infer_stakeholder_role(self, title: str) -> str:
+        """Infer stakeholder role from job title.
+
+        Args:
+            title: Job title string.
+
+        Returns:
+            Role classification: decision_maker, influencer, champion, or user.
+        """
+        title_lower = title.lower()
+        if any(kw in title_lower for kw in ["ceo", "cfo", "cto", "coo", "president", "chief", "svp"]):
+            return "decision_maker"
+        if any(kw in title_lower for kw in ["vp", "vice president", "director", "head of"]):
+            return "influencer"
+        if any(kw in title_lower for kw in ["manager", "lead", "senior"]):
+            return "champion"
+        return "user"
+
+    def _infer_influence_level(self, seniority: str) -> str:
+        """Infer influence level from seniority label.
+
+        Args:
+            seniority: Seniority string (e.g., "C-Level", "VP-Level").
+
+        Returns:
+            Influence level: high, medium, or low.
+        """
+        seniority_lower = seniority.lower()
+        if "c-level" in seniority_lower or "executive" in seniority_lower:
+            return "high"
+        if "vp" in seniority_lower or "director" in seniority_lower:
+            return "medium"
+        return "low"
 
     async def _score_fit(
         self,
