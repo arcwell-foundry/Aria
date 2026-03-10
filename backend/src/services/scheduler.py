@@ -2475,10 +2475,16 @@ async def start_scheduler() -> None:
         return
 
     try:
+        from apscheduler.executors.pool import ThreadPoolExecutor
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from apscheduler.triggers.cron import CronTrigger
 
-        _scheduler = AsyncIOScheduler()
+        # Configure thread pool to prevent missed jobs under load.
+        # Default executor has only 1 thread which gets blocked by API requests.
+        executors = {
+            "default": ThreadPoolExecutor(max_workers=10),
+        }
+        _scheduler = AsyncIOScheduler(executors=executors)
         _scheduler.add_job(
             _run_ambient_gap_checks,
             trigger=CronTrigger(hour=6, minute=0),  # 6:00 AM daily
@@ -2715,6 +2721,7 @@ async def start_scheduler() -> None:
             id="working_memory_sync",
             name="Working memory 30-second persistence sync",
             replace_existing=True,
+            misfire_grace_time=60,  # 1 min grace for frequent sync
         )
         _scheduler.add_job(
             _run_pulse_sweep,
@@ -2722,6 +2729,7 @@ async def start_scheduler() -> None:
             id="pulse_sweep",
             name="Intelligence Pulse Engine sweep for missed signals",
             replace_existing=True,
+            misfire_grace_time=300,  # 5 min grace
         )
         _scheduler.add_job(
             _run_capability_demand_check,
@@ -2757,6 +2765,7 @@ async def start_scheduler() -> None:
             id="reconciliation_sweep",
             name="Event reconciliation sweep",
             replace_existing=True,
+            misfire_grace_time=300,  # 5 min grace
         )
         _scheduler.add_job(
             _run_connection_health_check,
@@ -2822,6 +2831,7 @@ async def start_scheduler() -> None:
             id="jarvis_insight_delivery",
             name="Deliver pending Jarvis insights via WebSocket/action queue",
             replace_existing=True,
+            misfire_grace_time=300,  # 5 min grace - run even if slightly delayed
         )
         _scheduler.add_job(
             _run_deal_health_monitor,

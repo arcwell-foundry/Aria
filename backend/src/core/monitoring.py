@@ -155,7 +155,7 @@ async def check_claude() -> ServiceCheck:
 async def check_exa() -> ServiceCheck:
     """Check Exa API reachability.
 
-    Uses the find_similar endpoint which accepts GET requests for health checks.
+    Uses the findSimilar endpoint with POST request (matches exa_provider.py).
     """
     start = time.perf_counter()
     try:
@@ -171,15 +171,17 @@ async def check_exa() -> ServiceCheck:
         import httpx
 
         async with httpx.AsyncClient(timeout=5.0) as client:
-            # Use find_similar endpoint which accepts GET requests
-            # See: https://docs.exa.ai/api-reference/search/find-similar
-            response = await client.get(
-                "https://api.exa.ai/find_similar",
+            # Use findSimilar endpoint with POST (matches exa_provider.py:888)
+            response = await client.post(
+                "https://api.exa.ai/findSimilar",
                 headers={
                     "x-api-key": settings.EXA_API_KEY,
                     "Content-Type": "application/json",
                 },
-                params={"url": "https://example.com"},
+                json={
+                    "url": "https://example.com",
+                    "numResults": 1,
+                },
             )
             latency = (time.perf_counter() - start) * 1000
             # 200, 400 (missing required param), or 401 (invalid key) all indicate API is reachable
