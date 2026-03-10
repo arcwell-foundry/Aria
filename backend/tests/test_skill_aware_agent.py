@@ -2,7 +2,7 @@
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -317,7 +317,7 @@ async def test_analyze_skill_needs_handles_malformed_json() -> None:
 
 @pytest.mark.asyncio
 async def test_execute_with_skills_simple_path() -> None:
-    """Test execute_with_skills takes the simple path for 1 recommended skill."""
+    """Test execute_with_skills takes the capability dispatch path for a registered capability."""
     mock_llm = MagicMock()
     mock_llm.generate_response = AsyncMock(
         return_value=json.dumps({
@@ -331,25 +331,13 @@ async def test_execute_with_skills_simple_path() -> None:
     mock_index = MagicMock()
     mock_skill_entry = MagicMock()
     mock_skill_entry.id = "skill-uuid-1"
+    mock_skill_entry.skill_path = "aria:capability/contact-enricher"
+    mock_skill_entry.full_content = None
     mock_index.get_by_path = AsyncMock(return_value=mock_skill_entry)
 
-    # Mock orchestrator for single-skill plan
+    # Mock orchestrator (should NOT be called — capability dispatch takes priority)
     mock_orchestrator = MagicMock()
-    mock_plan = MagicMock()
-    mock_plan.plan_id = "plan-simple"
-    mock_plan.steps = [MagicMock()]
-    mock_orchestrator.create_execution_plan = AsyncMock(return_value=mock_plan)
-
-    mock_wm_entry = MagicMock()
-    mock_wm_entry.step_number = 1
-    mock_wm_entry.skill_id = "skill-uuid-1"
-    mock_wm_entry.status = "completed"
-    mock_wm_entry.summary = "Done"
-    mock_wm_entry.artifacts = []
-    mock_plan_result = MagicMock()
-    mock_plan_result.plan_id = "plan-simple"
-    mock_plan_result.working_memory = [mock_wm_entry]
-    mock_orchestrator.execute_plan = AsyncMock(return_value=mock_plan_result)
+    mock_orchestrator.create_execution_plan = AsyncMock()
 
     agent = _TestAgent(
         llm_client=mock_llm,
@@ -358,15 +346,34 @@ async def test_execute_with_skills_simple_path() -> None:
         skill_index=mock_index,
     )
 
-    result = await agent.execute_with_skills({"goal": "enrich contact"})
+    # Mock the capability handler to return a successful result
+    mock_handler_result = AgentResult(
+        success=True,
+        data={
+            "skill_execution": True,
+            "execution_mode": "capability_direct",
+            "skill_path": "aria:capability/contact-enricher",
+            "result": {"contacts": [{"name": "John"}]},
+            "artifacts": [],
+            "extracted_facts": [],
+        },
+    )
+
+    with patch(
+        "src.skills.capability_handlers.get_capability_handler",
+        return_value=AsyncMock(return_value=mock_handler_result),
+    ):
+        result = await agent.execute_with_skills({"goal": "enrich contact"})
 
     assert result.success is True
     assert result.data["skill_execution"] is True
-    assert result.data["execution_mode"] == "simple"
+    assert result.data["execution_mode"] == "capability_direct"
     assert result.data["skill_path"] == "aria:capability/contact-enricher"
 
     # Verify get_by_path was used (simple path)
     mock_index.get_by_path.assert_awaited_once_with("aria:capability/contact-enricher")
+    # Verify orchestrator was NOT called (capability dispatch bypasses it)
+    mock_orchestrator.create_execution_plan.assert_not_awaited()
 
 
 @pytest.mark.asyncio

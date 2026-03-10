@@ -950,15 +950,19 @@ class SkillOrchestrator:
         self,
         task: str,
         available_skills: list[Any],
+        user_id: str = "",
     ) -> ExecutionPlan:
         """Use LLM to analyze a task and build an execution plan.
 
         Fetches skill summaries, sends them with the task to the LLM,
         and parses the response into an ExecutionPlan with a dependency DAG.
+        Persists the plan to skill_execution_plans so downstream FK writes
+        (working_memory, audit, etc.) succeed.
 
         Args:
             task: Natural language description of the task to accomplish.
             available_skills: List of skill objects (must have .id attribute).
+            user_id: ID of the user requesting the plan. Required for persistence.
 
         Returns:
             An ExecutionPlan with steps, dependencies, and parallel groups.
@@ -970,8 +974,19 @@ class SkillOrchestrator:
         skill_ids = [s.id for s in available_skills]
         summaries = await self._index.get_summaries(skill_ids)
 
-        # Build summaries text for LLM
-        summaries_text = "\n".join(f"- {sid}: {summary}" for sid, summary in summaries.items())
+        # Build skill lookup maps for post-LLM validation
+        valid_skill_ids = set(skill_ids)
+        path_to_id: dict[str, str] = {}
+        for skill in available_skills:
+            path = getattr(skill, "skill_path", None)
+            if path:
+                path_to_id[path] = skill.id
+
+        # Build summaries text for LLM — include both id and path so LLM can reference either
+        summaries_text = "\n".join(
+            f"- id={sid} path={getattr(s, 'skill_path', 'unknown')}: {summaries.get(sid, getattr(s, 'skill_name', sid))}"
+            for s, sid in zip(available_skills, skill_ids)
+        )
 
         system_prompt = (
             "You are a skill orchestration planner. Given a task and available skills, "
@@ -1025,23 +1040,46 @@ class SkillOrchestrator:
         if not isinstance(plan_data, dict) or "steps" not in plan_data:
             raise ValueError("Failed to parse LLM plan: response missing required 'steps' field")
 
-        # Build ExecutionPlan from parsed data
+        # Build ExecutionPlan from parsed data, validating skill IDs
         try:
-            steps = [
-                ExecutionStep(
-                    step_number=s["step_number"],
-                    skill_id=s["skill_id"],
-                    skill_path=s.get("skill_path", ""),
-                    depends_on=s.get("depends_on", []),
-                    status="pending",
-                    input_data=s.get("input_data", {}),
+            steps = []
+            for s in plan_data["steps"]:
+                raw_id = s["skill_id"]
+                raw_path = s.get("skill_path", "")
+
+                # Validate skill_id — LLM often garbles UUIDs
+                if raw_id not in valid_skill_ids:
+                    # Try to recover via skill_path match
+                    recovered_id = path_to_id.get(raw_path)
+                    if recovered_id:
+                        logger.info(
+                            "Recovered garbled skill_id '%s' -> '%s' via path '%s'",
+                            raw_id, recovered_id, raw_path,
+                        )
+                        raw_id = recovered_id
+                    else:
+                        # Last resort: pick first available skill
+                        logger.warning(
+                            "Unrecoverable skill_id '%s' (path='%s'), "
+                            "skipping step %d",
+                            raw_id, raw_path, s["step_number"],
+                        )
+                        continue
+
+                steps.append(
+                    ExecutionStep(
+                        step_number=s["step_number"],
+                        skill_id=raw_id,
+                        skill_path=raw_path or path_to_id.get(raw_id, ""),
+                        depends_on=s.get("depends_on", []),
+                        status="pending",
+                        input_data=s.get("input_data", {}),
+                    )
                 )
-                for s in plan_data["steps"]
-            ]
         except (KeyError, TypeError) as e:
             raise ValueError(f"Failed to parse LLM plan: invalid step structure: {e}") from e
 
-        return ExecutionPlan(
+        plan = ExecutionPlan(
             task_description=task,
             steps=steps,
             parallel_groups=plan_data.get("parallel_groups", []),
@@ -1050,6 +1088,12 @@ class SkillOrchestrator:
             approval_required=plan_data.get("approval_required", False),
             reasoning=plan_data.get("reasoning", ""),
         )
+
+        # Persist plan so downstream FK writes (working_memory, audit) succeed
+        if user_id:
+            await self._persist_plan(plan, user_id)
+
+        return plan
 
     # -------------------------------------------------------------------------
     # Internal helpers

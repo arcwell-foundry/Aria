@@ -133,6 +133,7 @@ class SkillAwareAgent(BaseAgent):
         self.skill_orchestrator = skill_orchestrator
         self.skill_index = skill_index
         self._last_skill_analysis: SkillAnalysis | None = None
+        self._core_skills_installed: bool = False
         super().__init__(
             llm_client=llm_client,
             user_id=user_id,
@@ -149,6 +150,60 @@ class SkillAwareAgent(BaseAgent):
             if the agent_id is not in the mapping.
         """
         return AGENT_SKILLS.get(self.agent_id, [])
+
+    async def _ensure_core_skills_installed(self) -> None:
+        """Auto-install all core trust_level skills for the current user.
+
+        Called once per agent lifetime (cached via _core_skills_installed flag).
+        Populates the user_skills table so skill execution tracking works.
+        """
+        if self._core_skills_installed:
+            return
+        self._core_skills_installed = True
+
+        if self.skill_index is None:
+            return
+
+        try:
+            from src.security.trust_levels import SkillTrustLevel
+            from src.skills.installer import SkillInstaller
+
+            installer = SkillInstaller()
+
+            # Find all core-trust skills in the index
+            core_skills = await self.skill_index.search(
+                query="",
+                trust_level=SkillTrustLevel.CORE,
+                limit=100,
+            )
+
+            if not core_skills:
+                return
+
+            installed_count = 0
+            for skill in core_skills:
+                already = await installer.is_installed(self.user_id, skill.id)
+                if not already:
+                    try:
+                        await installer.install(
+                            user_id=self.user_id,
+                            skill_id=skill.id,
+                            auto_installed=True,
+                        )
+                        installed_count += 1
+                    except Exception as e:
+                        logger.debug(
+                            "Failed to auto-install skill %s: %s",
+                            skill.skill_path, e,
+                        )
+
+            if installed_count > 0:
+                logger.info(
+                    "Auto-installed %d core skills for user %s",
+                    installed_count, self.user_id,
+                )
+        except Exception as e:
+            logger.warning("Core skills auto-install failed (non-fatal): %s", e)
 
     async def _analyze_skill_needs(self, task: dict[str, Any]) -> SkillAnalysis:
         """Use LLM to determine if skills would help with a task.
@@ -320,7 +375,7 @@ class SkillAwareAgent(BaseAgent):
                 title=f"{self.name} proceeding with native execution",
                 description=(
                     f"Available skills: {', '.join(self._get_available_skills()) or 'none'}. "
-                    f"Decision: {'skills recommended but unavailable' if analysis.skills_needed else 'native execution preferred'}. "
+                    f"Decision: {'skill knowledge injected into context' if analysis.skills_needed else 'native execution preferred'}. "
                     f"Reasoning: {analysis.reasoning}"
                 ),
                 confidence=0.85,
@@ -333,6 +388,113 @@ class SkillAwareAgent(BaseAgent):
         except Exception as e:
             logger.warning(f"Failed to log skill consideration: {e}")
 
+    async def _record_capability_execution(
+        self,
+        skill_entry: "SkillIndexEntry",
+        result: AgentResult,
+    ) -> None:
+        """Record a capability execution to tracking tables.
+
+        Writes to skill_execution_plans, skill_working_memory,
+        skill_audit_log, and records usage in user_skills.
+
+        Args:
+            skill_entry: The skill that was executed.
+            result: The execution result.
+        """
+        try:
+            import uuid as _uuid
+            from datetime import UTC, datetime
+
+            from src.db.supabase import SupabaseClient
+
+            db = SupabaseClient.get_client()
+            plan_id = str(_uuid.uuid4())
+            now = datetime.now(UTC).isoformat()
+            exec_ms = result.execution_time_ms or 0
+
+            # 1. skill_execution_plans — create a completed plan record
+            try:
+                db.table("skill_execution_plans").insert({
+                    "id": plan_id,
+                    "user_id": self.user_id,
+                    "task_description": f"Direct capability: {skill_entry.skill_path}",
+                    "plan_dag": json.dumps({
+                        "steps": [{
+                            "step_number": 1,
+                            "skill_id": skill_entry.id,
+                            "skill_path": skill_entry.skill_path,
+                            "depends_on": [],
+                            "input_data": {},
+                        }],
+                        "parallel_groups": [[1]],
+                    }),
+                    "status": "completed" if result.success else "failed",
+                    "risk_level": "low",
+                    "reasoning": "Direct capability dispatch — no LLM planning needed",
+                    "estimated_seconds": 0,
+                    "actual_seconds": exec_ms // 1000,
+                    "completed_at": now,
+                }).execute()
+            except Exception as e:
+                logger.debug("Failed to write skill_execution_plans: %s", e)
+
+            # 2. skill_working_memory — record the step result
+            try:
+                db.table("skill_working_memory").insert({
+                    "plan_id": plan_id,
+                    "step_number": 1,
+                    "skill_id": skill_entry.id,
+                    "input_summary": None,
+                    "output_summary": f"Capability {skill_entry.skill_path} {'succeeded' if result.success else 'failed'}",
+                    "artifacts": json.dumps([]),
+                    "extracted_facts": json.dumps({}),
+                    "next_step_hints": json.dumps([]),
+                    "status": "completed" if result.success else "failed",
+                    "execution_time_ms": exec_ms,
+                }).execute()
+            except Exception as e:
+                logger.debug("Failed to write skill_working_memory: %s", e)
+
+            # 3. skill_audit_log
+            try:
+                db.table("skill_audit_log").insert({
+                    "user_id": self.user_id,
+                    "skill_id": skill_entry.id,
+                    "skill_path": skill_entry.skill_path,
+                    "action": "execute",
+                    "success": result.success,
+                    "execution_time_ms": exec_ms,
+                    "error_message": result.error,
+                    "metadata": json.dumps({
+                        "agent_id": self.agent_id,
+                        "execution_mode": "capability_direct",
+                        "plan_id": plan_id,
+                    }),
+                    "timestamp": now,
+                }).execute()
+            except Exception as e:
+                logger.debug("Failed to write skill_audit_log: %s", e)
+
+            # 4. user_skills usage tracking
+            try:
+                from src.skills.installer import SkillInstaller
+
+                installer = SkillInstaller()
+                await installer.record_usage(
+                    self.user_id,
+                    skill_entry.id,
+                    success=result.success,
+                )
+            except Exception as e:
+                logger.debug("Failed to record skill usage: %s", e)
+
+        except Exception as e:
+            logger.warning(
+                "Failed to record capability execution for %s: %s",
+                skill_entry.skill_path, e,
+            )
+
     async def _execute_simple_skill(
         self,
         task: dict[str, Any],
@@ -340,9 +502,13 @@ class SkillAwareAgent(BaseAgent):
     ) -> AgentResult:
         """Execute a single skill directly, bypassing full DAG orchestration.
 
-        For simple tasks that need only one skill, this looks up the skill
-        by path and creates a minimal 1-step execution plan. Falls back
-        to native execute() if the skill isn't found.
+        Execution paths (tried in order):
+        1. Capability dispatch — if a handler exists in capability_handlers,
+           call the real Python capability directly (no LLM sandbox).
+        2. Orchestrator pipeline — create a 1-step plan via LLM and execute
+           through the sandbox executor.
+        3. Knowledge injection fallback — inject skill YAML into task context
+           and use native execute().
 
         Args:
             task: Task specification with parameters.
@@ -376,12 +542,26 @@ class SkillAwareAgent(BaseAgent):
                 )
                 return await self.execute(task)
 
-            # Use orchestrator with minimal plan for the single skill
+            # --- Path 1: Capability dispatch (real Python code, no sandbox) ---
+            from src.skills.capability_handlers import get_capability_handler
+
+            handler = get_capability_handler(skill_path)
+            if handler is not None:
+                logger.info(
+                    f"Agent {self.name}: dispatching capability '{skill_path}' directly",
+                    extra={"agent_id": self.agent_id, "skill_path": skill_path},
+                )
+                result = await handler(self.user_id, task, skill_entry)
+                await self._record_capability_execution(skill_entry, result)
+                return result
+
+            # --- Path 2: Orchestrator pipeline (LLM sandbox) ---
             if self.skill_orchestrator is not None:
                 task_description = json.dumps(task, default=str)
                 plan = await self.skill_orchestrator.create_execution_plan(
                     task=task_description,
                     available_skills=[skill_entry],
+                    user_id=self.user_id,
                 )
 
                 plan_result = await self.skill_orchestrator.execute_plan(
@@ -408,7 +588,15 @@ class SkillAwareAgent(BaseAgent):
                         ),
                     )
 
-            # No orchestrator available - fall back to native
+            # --- Path 3: Knowledge injection fallback ---
+            # Inject skill definition content into task context for native execute()
+            if skill_entry.full_content:
+                logger.info(
+                    f"Agent {self.name}: injecting skill knowledge for '{skill_path}'",
+                    extra={"agent_id": self.agent_id, "skill_path": skill_path},
+                )
+                task = {**task, "skill_knowledge": skill_entry.full_content}
+
             return await self.execute(task)
 
         except Exception as e:
@@ -438,6 +626,9 @@ class SkillAwareAgent(BaseAgent):
         Returns:
             AgentResult with execution outcome.
         """
+        # Step 0: Ensure core skills are installed for this user (once per agent)
+        await self._ensure_core_skills_installed()
+
         # Step 1: Analyze if skills would help
         analysis = await self._analyze_skill_needs(task)
         self._last_skill_analysis = analysis
@@ -484,6 +675,7 @@ class SkillAwareAgent(BaseAgent):
             plan = await self.skill_orchestrator.create_execution_plan(
                 task=task_description,
                 available_skills=available_skill_entries,
+                user_id=self.user_id,
             )
 
             logger.info(
