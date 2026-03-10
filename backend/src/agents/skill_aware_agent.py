@@ -11,6 +11,7 @@ SkillOrchestrator DAG pipeline.
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -178,11 +179,10 @@ class SkillAwareAgent(BaseAgent):
             f"Agent: {self.name} ({self.description})\n"
             f"Available skills: {', '.join(available_skills)}\n\n"
             f"Task: {json.dumps(task, default=str)}\n\n"
-            "Respond with JSON only:\n"
-            '{"skills_needed": bool, "recommended_skills": ["skill-name", ...], '
-            '"reasoning": "explanation"}\n\n'
             "Only recommend skills from the available list. "
-            "Set skills_needed to false if the agent's built-in tools suffice."
+            "Set skills_needed to false if the agent's built-in tools suffice.\n\n"
+            "Respond with ONLY valid JSON, no markdown, no explanation:\n"
+            '{"skills_needed": true, "recommended_skills": ["skill-name"], "reasoning": "why"}'
         )
 
         try:
@@ -194,7 +194,26 @@ class SkillAwareAgent(BaseAgent):
                 agent_id="skill_aware_agent",
             )
 
-            parsed = json.loads(response)
+            # Guard against empty/None responses
+            if not response or not response.strip():
+                logger.warning(
+                    "Skill analysis returned empty response, defaulting to native execution"
+                )
+                return SkillAnalysis(
+                    skills_needed=False,
+                    recommended_skills=[],
+                    reasoning="LLM returned empty response, defaulting to native",
+                    is_simple=True,
+                )
+
+            # Strip markdown code fences if present (```json ... ```)
+            cleaned = response.strip()
+            fence_pattern = r"```(?:json)?\s*\n?(.*?)\n?\s*```"
+            fence_match = re.search(fence_pattern, cleaned, re.DOTALL)
+            if fence_match:
+                cleaned = fence_match.group(1).strip()
+
+            parsed = json.loads(cleaned)
 
             # Filter recommended skills to only those available
             recommended = [s for s in parsed.get("recommended_skills", []) if s in available_skills]
@@ -211,7 +230,13 @@ class SkillAwareAgent(BaseAgent):
             )
 
         except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.warning(f"Failed to parse skill analysis response: {e}")
+            # Log the actual raw response so we can diagnose the format issue
+            raw_preview = (response or "")[:500]
+            logger.warning(
+                "Failed to parse skill analysis response: %s | raw response: %s",
+                e,
+                raw_preview,
+            )
             return SkillAnalysis(
                 skills_needed=False,
                 recommended_skills=[],

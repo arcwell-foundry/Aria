@@ -301,16 +301,33 @@ class HunterAgent(SkillAwareAgent):
     async def execute(self, task: dict[str, Any]) -> AgentResult:
         """Execute the hunter agent's primary task.
 
+        Lead discovery REQUIRES a goal trigger. Hunter should never
+        autonomously create leads from signal monitoring alone.
+        Flow: User creates goal -> GoalExecutionService dispatches Hunter -> leads.
+
         Args:
             task: Task specification with parameters.
 
         Returns:
             AgentResult with success status and output data.
         """
+        # CRITICAL: Hunter lead discovery requires a goal trigger
+        if not task.get("goal_id"):
+            logger.warning(
+                "[HUNTER] Lead discovery requires a goal. Skipping autonomous discovery. "
+                "task_keys=%s",
+                list(task.keys()),
+            )
+            return AgentResult(
+                success=False,
+                data=None,
+                error="Lead discovery requires a goal trigger",
+            )
+
         # OODA ACT: Log skill consideration before native execution
         await self._log_skill_consideration()
 
-        logger.warning("[HUNTER] execute() called - starting lead discovery")
+        logger.warning("[HUNTER] execute() called - starting lead discovery for goal=%s", task["goal_id"])
 
         # Load skill knowledge at the START of lead discovery (fail-open)
         await self._load_skill_knowledge()
@@ -1553,6 +1570,18 @@ class HunterAgent(SkillAwareAgent):
         )
         total = max(0.0, min(100.0, total))
 
+        # --- Signal-driven quality scoring ---
+        # Leads with real signal events get a bonus; pure ICP matches get capped
+        has_real_signals = len(trigger_signals) > 0
+        signal_bonus = 0
+        if has_real_signals:
+            signal_bonus = 20
+            total = min(100.0, total + signal_bonus)
+            quality_tier = "signal_enriched"
+        else:
+            total = min(total, 50.0)
+            quality_tier = "icp_only"
+
         now_iso = datetime.now(UTC).isoformat()
         sub_industry_label = ""
         if self._sub_industry_context:
@@ -1585,6 +1614,11 @@ class HunterAgent(SkillAwareAgent):
                 "weight": weights["buying_readiness"],
                 "weighted": round(buying_score * weights["buying_readiness"], 1),
                 "signals": buying_signals,
+            },
+            "signal_quality": {
+                "signal_bonus": signal_bonus,
+                "signals_found": trigger_signals,
+                "quality_tier": quality_tier,
             },
             "scoring_context": {
                 "sub_industry": sub_industry_label,

@@ -1229,6 +1229,7 @@ class GoalExecutionService:
 
         if agent_type == "hunter":
             task = {
+                "goal_id": goal.get("id", ""),
                 "icp": {
                     "industry": config.get("industry", "Life Sciences"),
                     "size": config.get("company_size", ""),
@@ -2345,6 +2346,25 @@ class GoalExecutionService:
             fit_score = int(raw_score) if raw_score else 0
 
             lead_id = str(uuid4())
+
+            # Use enriched discovery_score if available (from Hunter's 4-dim model)
+            discovery_score = lead_data.get("discovery_score", {})
+            signal_quality = discovery_score.get("signal_quality", {})
+            score_breakdown = {
+                "icp_match": int(
+                    discovery_score.get("icp_fit", {}).get("score", fit_score)
+                ),
+                "signal_bonus": signal_quality.get("signal_bonus", 0),
+                "total": fit_score,
+                "signals_found": signal_quality.get("signals_found", []),
+                "quality_tier": signal_quality.get(
+                    "quality_tier", "icp_only"
+                ),
+            }
+
+            # Use trigger signals as the signals list
+            signals = signal_quality.get("signals_found", []) or lead_data.get("gaps", [])
+
             try:
                 self._db.table("discovered_leads").insert(
                     {
@@ -2355,11 +2375,8 @@ class GoalExecutionService:
                         "company_data": company,
                         "contacts": contacts,
                         "fit_score": fit_score,
-                        "score_breakdown": {
-                            "overall_score": fit_score,
-                            "factors": lead_data.get("fit_reasons", []),
-                        },
-                        "signals": lead_data.get("gaps", []),
+                        "score_breakdown": score_breakdown,
+                        "signals": signals,
                         "review_status": "pending",
                         "source": "goal_execution",
                         "created_at": now,

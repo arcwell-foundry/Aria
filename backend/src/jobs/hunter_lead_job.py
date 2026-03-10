@@ -133,9 +133,10 @@ async def run_hunter_lead_generation_job() -> dict[str, Any]:
                 logger.warning("No ICP found for user %s, skipping", user_id)
                 continue
 
-            # Build hunter task from ICP
+            # Build hunter task from ICP (goal_id required for lead discovery)
             icp_data = icp.icp_data
             hunter_task = {
+                "goal_id": goal_id,
                 "icp": {
                     "industry": icp_data.industry[0] if icp_data.industry else "Biotechnology",
                     "size": _build_size_str(icp_data.company_size),
@@ -184,6 +185,22 @@ async def run_hunter_lead_generation_job() -> dict[str, Any]:
                 now = datetime.now(UTC)
                 company_name = company.get("name", "Unknown")
 
+                # Use enriched discovery_score if available
+                discovery_score = lead_data.get("discovery_score", {})
+                signal_quality = discovery_score.get("signal_quality", {})
+                score_breakdown = {
+                    "icp_match": int(
+                        discovery_score.get("icp_fit", {}).get("score", fit_score)
+                    ),
+                    "signal_bonus": signal_quality.get("signal_bonus", 0),
+                    "total": int(fit_score),
+                    "signals_found": signal_quality.get("signals_found", []),
+                    "quality_tier": signal_quality.get(
+                        "quality_tier", "icp_only"
+                    ),
+                }
+                signals = signal_quality.get("signals_found", [])
+
                 db.table("discovered_leads").insert({
                     "id": lead_id,
                     "user_id": user_id,
@@ -192,8 +209,8 @@ async def run_hunter_lead_generation_job() -> dict[str, Any]:
                     "company_data": company,
                     "contacts": contacts,
                     "fit_score": int(fit_score),
-                    "score_breakdown": {},
-                    "signals": [],
+                    "score_breakdown": score_breakdown,
+                    "signals": signals,
                     "review_status": "pending",
                     "source": source,
                     "lead_memory_id": None,
