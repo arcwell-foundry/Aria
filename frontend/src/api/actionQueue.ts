@@ -2,7 +2,7 @@ import { apiClient } from "./client";
 
 // Enums matching backend
 export type ActionAgent = "scout" | "analyst" | "hunter" | "operator" | "scribe" | "strategist";
-export type ActionType = "email_draft" | "crm_update" | "research" | "meeting_prep" | "lead_gen";
+export type ActionType = "email_draft" | "crm_update" | "research" | "meeting_prep" | "lead_gen" | "lead_discovered";
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 export type ActionStatus =
   | "pending"

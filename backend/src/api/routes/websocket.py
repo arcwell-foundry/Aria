@@ -475,6 +475,16 @@ async def _handle_user_message(
                     quick_action_match.get("action_type"),
                 )
 
+        # --- Direct Execute Detection (BEFORE intent classification) ---
+        direct_execute_match = None
+        if not was_signal_enriched and not quick_action_match:
+            direct_execute_match = ChatService._match_direct_execute(message_text)
+            if direct_execute_match:
+                logger.info(
+                    "DIRECT_EXECUTE_WS: Pattern matched, routing to direct handler: %s",
+                    direct_execute_match.get("action_type"),
+                )
+
         # Get or create working memory
         working_memory = await service._working_memory_manager.get_or_create(
             conversation_id=conversation_id,
@@ -616,7 +626,7 @@ async def _handle_user_message(
         # data was injected into the message at the top of this handler.
         # Quick actions bypass LLM intent classification entirely.
         intent_result = None
-        if not was_signal_enriched and not quick_action_match:
+        if not was_signal_enriched and not quick_action_match and not direct_execute_match:
             # --- Inline Intent Detection (ALWAYS runs — even with pending plans) ---
             # A new action request like "find companies" must create a new goal,
             # not be blocked by a stale plan_ready goal from an earlier request.
@@ -664,6 +674,55 @@ async def _handle_user_message(
                     "suggestions": result.get("suggestions", []),
                     "conversation_id": conversation_id,
                     "intent_detected": "quick_action",
+                }
+            )
+            return
+
+        # --- Direct Execute Routing (deck creation, email draft, search) ---
+        if direct_execute_match or (intent_result and intent_result.get("is_direct_execute")):
+            execute_intent = direct_execute_match or intent_result
+            logger.info(
+                "DIRECT_EXECUTE_WS: Routing to handler, action_type=%s",
+                execute_intent.get("action_type"),
+            )
+
+            try:
+                result = await service._handle_direct_execute(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message=message_text,
+                    intent=execute_intent,
+                    working_memory=working_memory,
+                    conversation_messages=conversation_messages,
+                )
+            except Exception:
+                logger.exception(
+                    "WS direct execute handling failed",
+                    extra={"user_id": user_id},
+                )
+                await websocket.send_json(
+                    {
+                        "type": "aria.message",
+                        "message": "I tried to handle that directly but ran into a problem. Please try again.",
+                        "rich_content": [],
+                        "ui_commands": [],
+                        "suggestions": ["Try again"],
+                        "conversation_id": conversation_id,
+                        "intent_detected": "direct_execute",
+                    }
+                )
+                return
+
+            # Send response via WebSocket
+            await websocket.send_json(
+                {
+                    "type": "aria.message",
+                    "message": result.get("response", ""),
+                    "rich_content": result.get("rich_content", []),
+                    "ui_commands": result.get("ui_commands", []),
+                    "suggestions": result.get("suggestions", []),
+                    "conversation_id": conversation_id,
+                    "intent_detected": "direct_execute",
                 }
             )
             return
@@ -1043,34 +1102,10 @@ async def _handle_user_message(
                     "Failed to persist C1 results to database: %s", c1_persist_err
                 )
 
-        # --- Trigger plan execution if approved via chat ---
-        if plan_approved_via_chat and pending_plan_goal_id:
-            try:
-                from datetime import UTC, datetime
-
-                from src.services.goal_execution import GoalExecutionService
-
-                db = get_supabase_client()
-                now = datetime.now(UTC).isoformat()
-                db.table("goals").update(
-                    {"status": "active", "started_at": now, "updated_at": now}
-                ).eq("id", pending_plan_goal_id).eq("user_id", user_id).execute()
-
-                exec_service = GoalExecutionService()
-                await exec_service.execute_goal_async(
-                    pending_plan_goal_id, user_id
-                )
-                logger.info(
-                    "Plan approved via chat — execution started",
-                    extra={
-                        "goal_id": pending_plan_goal_id,
-                        "user_id": user_id,
-                    },
-                )
-            except Exception as approve_err:
-                logger.warning(
-                    "Failed to auto-approve plan via chat: %s", approve_err
-                )
+        # --- Plan execution trigger REMOVED ---
+        # chat.py's _handle_plan_approval_from_chat already calls
+        # execute_goal_async(). This duplicate trigger caused every
+        # agent to run twice, producing duplicate leads and messages.
 
         # Intent detection is now handled inline before streaming (see above)
 

@@ -2,7 +2,7 @@ import { apiClient } from "./client";
 
 // Enums matching backend
 export type GoalType = "lead_gen" | "research" | "outreach" | "analysis" | "custom";
-export type GoalStatus = "draft" | "active" | "paused" | "complete" | "failed";
+export type GoalStatus = "draft" | "plan_ready" | "active" | "paused" | "complete" | "failed";
 export type AgentStatus = "pending" | "running" | "complete" | "failed";
 
 // Request types

@@ -37,6 +37,7 @@ import { DelegationTreeDrawer } from '@/components/traces/DelegationTreeDrawer';
 // Status colors
 const GOAL_STATUS_COLORS: Record<GoalStatus, string> = {
   draft: 'var(--text-secondary)',
+  plan_ready: 'var(--warning)',
   active: 'var(--success)',
   paused: 'var(--warning)',
   complete: 'var(--success)',
@@ -640,7 +641,7 @@ export function ActionsPage() {
     ?.filter((a) => ['completed', 'rejected', 'failed'].includes(a.status))
     .slice(0, 5) ?? [];
 
-  const activeGoals = goals?.filter((g) => g.status === 'active' || g.status === 'paused') ?? [];
+  const activeGoals = goals?.filter((g) => g.status === 'active' || g.status === 'paused' || g.status === 'plan_ready') ?? [];
   const completedGoals = goals?.filter((g) => g.status === 'complete').slice(0, 5) ?? [];
   const hasGoals = activeGoals.length > 0;
   const hasPending = pendingActions.length > 0;

@@ -389,6 +389,11 @@ class GoalService:
             milestones = goal.get("goal_milestones") or []
             goal["milestone_total"] = len(milestones)
             goal["milestone_complete"] = sum(1 for m in milestones if m.get("status") == "complete")
+            # Compute progress from milestones if not already set
+            if milestones and not goal.get("progress"):
+                goal["progress"] = int(
+                    (goal["milestone_complete"] / goal["milestone_total"]) * 100
+                )
 
         logger.info(
             "Dashboard retrieved",

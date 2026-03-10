@@ -581,21 +581,17 @@ class GoalExecutionService:
         agent_type = goal.get("config", {}).get("agent_type", "")
         results: list[dict[str, Any]] = []
 
+        # Send a single "Working on it" message at start (no per-agent spam)
+        try:
+            await ws_manager.send_aria_message(
+                user_id=user_id,
+                message="Working on this now. I'll let you know when it's ready.",
+            )
+        except Exception:
+            logger.debug("Failed to send working-on-it message", exc_info=True)
+
         if agent_type:
             # Single agent goal (activation goals have one agent_type in config)
-            # Send starting message
-            try:
-                from src.services.conversational_presenter import ConversationalPresenter
-
-                presenter = ConversationalPresenter()
-                starting_msg, _, _ = presenter.present_agent_starting(
-                    agent_type=agent_type, goal_config=goal.get("config", {}),
-                )
-                if starting_msg:
-                    await ws_manager.send_aria_message(user_id=user_id, message=starting_msg)
-            except Exception:
-                logger.debug("Failed to send agent starting message", exc_info=True)
-
             result = await self._execute_agent(
                 user_id=user_id,
                 goal=goal,
@@ -604,28 +600,7 @@ class GoalExecutionService:
             )
             results.append(result)
 
-            # Present agent result conversationally in chat thread
-            try:
-                from src.services.conversational_presenter import ConversationalPresenter
-
-                presenter = ConversationalPresenter()
-                msg, rich, sugg = presenter.present_agent_result(
-                    user_id=user_id,
-                    agent_type=agent_type,
-                    result=result,
-                    goal_title=goal.get("title", ""),
-                )
-                if msg:
-                    await ws_manager.send_aria_message(
-                        user_id=user_id,
-                        message=msg,
-                        rich_content=rich,
-                        suggestions=sugg,
-                    )
-            except Exception:
-                logger.debug("Agent result presentation failed", exc_info=True)
-
-            # Notify frontend of agent completion
+            # Progress update only (no chat message per agent)
             try:
                 await ws_manager.send_progress_update(
                     user_id=user_id,
@@ -646,19 +621,6 @@ class GoalExecutionService:
             for idx, agent in enumerate(agents_list):
                 a_type = agent.get("agent_type", "")
 
-                # Send starting message
-                try:
-                    from src.services.conversational_presenter import ConversationalPresenter
-
-                    presenter = ConversationalPresenter()
-                    starting_msg, _, _ = presenter.present_agent_starting(
-                        agent_type=a_type, goal_config=goal.get("config", {}),
-                    )
-                    if starting_msg:
-                        await ws_manager.send_aria_message(user_id=user_id, message=starting_msg)
-                except Exception:
-                    logger.debug("Failed to send agent starting message", exc_info=True)
-
                 result = await self._execute_agent(
                     user_id=user_id,
                     goal=goal,
@@ -668,28 +630,7 @@ class GoalExecutionService:
                 )
                 results.append(result)
 
-                # Present agent result conversationally in chat thread
-                try:
-                    from src.services.conversational_presenter import ConversationalPresenter
-
-                    presenter = ConversationalPresenter()
-                    msg, rich, sugg = presenter.present_agent_result(
-                        user_id=user_id,
-                        agent_type=a_type,
-                        result=result,
-                        goal_title=goal.get("title", ""),
-                    )
-                    if msg:
-                        await ws_manager.send_aria_message(
-                            user_id=user_id,
-                            message=msg,
-                            rich_content=rich,
-                            suggestions=sugg,
-                        )
-                except Exception:
-                    logger.debug("Agent result presentation failed", exc_info=True)
-
-                # Notify frontend of agent completion
+                # Progress update only (no chat message per agent)
                 try:
                     pct = int(((idx + 1) / len(agents_list)) * 100)
                     await ws_manager.send_progress_update(
@@ -2371,8 +2312,10 @@ class GoalExecutionService:
                 ),
             }
 
-            # Use trigger signals as the signals list
-            signals = signal_quality.get("signals_found", []) or lead_data.get("gaps", [])
+            # Use trigger signals as the signals list.
+            # Never fall back to ICP gaps (e.g. "Industry mismatch") — those
+            # are internal scoring notes, not market events.
+            signals = signal_quality.get("signals_found", [])
 
             try:
                 self._db.table("discovered_leads").insert(
@@ -2536,6 +2479,22 @@ class GoalExecutionService:
     # contacts, email drafts, and scoring AFTER all agents complete.
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _parse_requested_lead_count(goal_title: str) -> int:
+        """Parse a requested lead count from goal title (e.g., "Find me 3 CDMOs" -> 3).
+
+        Defaults to 5 if no number found.
+        """
+        import re
+
+        # Match patterns like "find 3", "top 5", "3 companies", "3 CDMOs"
+        match = re.search(r'\b(\d{1,2})\b', goal_title or "")
+        if match:
+            n = int(match.group(1))
+            if 1 <= n <= 20:
+                return n
+        return 5
+
     async def _assemble_lead_gen_results(
         self,
         goal_id: str,
@@ -2546,6 +2505,9 @@ class GoalExecutionService:
         Enriches discovered_leads rows (already persisted by _persist_hunter_leads)
         with market signals (why now), fit analysis (why us), improved contacts,
         scoring, and email drafts.
+
+        Deduplicates by company_name (case-insensitive), keeps highest fit_score,
+        and limits to the user's requested count (parsed from goal title, default 5).
 
         Only runs for goal_type == 'lead_gen'. Each Exa call has a 10s timeout.
         Total assembly is capped at 30s per lead.
@@ -2565,20 +2527,21 @@ class GoalExecutionService:
             goal_id, user_id,
         )
 
-        # 1. Fetch discovered_leads created during this goal's execution
-        goal_time_result = (
+        # 0. Parse requested lead count from goal title
+        goal_meta_result = (
             self._db.table("goals")
-            .select("started_at")
+            .select("started_at, title")
             .eq("id", goal_id)
             .limit(1)
             .execute()
         )
-        goal_started_at = (
-            goal_time_result.data[0].get("started_at")
-            if goal_time_result.data
-            else None
-        )
+        goal_meta = goal_meta_result.data[0] if goal_meta_result.data else {}
+        goal_started_at = goal_meta.get("started_at")
+        goal_title = goal_meta.get("title", "")
+        requested_count = self._parse_requested_lead_count(goal_title)
+        logger.info("[LEAD-ASSEMBLY] Requested lead count: %d (from title: %s)", requested_count, goal_title)
 
+        # 1. Fetch discovered_leads created during this goal's execution
         leads_query = (
             self._db.table("discovered_leads")
             .select("id, company_name, company_data, contacts, fit_score, score_breakdown, signals")
@@ -2594,9 +2557,20 @@ class GoalExecutionService:
             logger.warning("[LEAD-ASSEMBLY] No discovered_leads found for goal=%s", goal_id)
             return []
 
+        # 1b. Deduplicate by company_name (case-insensitive), keep highest fit_score
+        seen_companies: dict[str, dict[str, Any]] = {}
+        for row in lead_rows:
+            key = (row.get("company_name") or "Unknown").strip().lower()
+            existing = seen_companies.get(key)
+            if not existing or (row.get("fit_score", 0) or 0) > (existing.get("fit_score", 0) or 0):
+                seen_companies[key] = row
+        lead_rows = sorted(seen_companies.values(), key=lambda r: r.get("fit_score", 0) or 0, reverse=True)
+        # Limit to requested count for enrichment
+        lead_rows = lead_rows[:requested_count]
+
         logger.warning(
-            "[LEAD-ASSEMBLY] Found %d leads to enrich for goal=%s",
-            len(lead_rows), goal_id,
+            "[LEAD-ASSEMBLY] %d deduplicated leads to enrich for goal=%s (requested=%d)",
+            len(lead_rows), goal_id, requested_count,
         )
 
         # 2. Load ICP for fit analysis
@@ -2833,12 +2807,13 @@ class GoalExecutionService:
                     "draft_count": 0,
                 })
 
-        # Sort by score descending
+        # Sort by score descending and limit to requested count
         assembled_leads.sort(key=lambda x: x.get("score", 0), reverse=True)
+        assembled_leads = assembled_leads[:requested_count]
 
         logger.warning(
-            "[LEAD-ASSEMBLY] Assembly complete: %d leads enriched for goal=%s",
-            len(assembled_leads), goal_id,
+            "[LEAD-ASSEMBLY] Assembly complete: %d leads enriched for goal=%s (limit=%d)",
+            len(assembled_leads), goal_id, requested_count,
         )
         return assembled_leads
 
@@ -2990,6 +2965,26 @@ class GoalExecutionService:
             logger.debug("[LEAD-ASSEMBLY] Fit analysis generation failed for %s: %s", company_name, e)
             return ""
 
+    @staticmethod
+    def _is_valid_contact(contact: dict[str, Any], company_name: str) -> bool:
+        """Validate that a contact dict represents a real person.
+
+        Rejects placeholder formats ("VP Sales at Company"), sentence-length
+        text (>60 chars), and names with too many words (>5).
+        """
+        name = contact.get("name", "")
+        if not name or len(name) > 60:
+            return False
+        # Reject "Title at Company" placeholder format
+        if " at " in name:
+            after_at = name.split(" at ", 1)[-1].strip()
+            if after_at.lower() in company_name.lower() or company_name.lower() in after_at.lower():
+                return False
+        # Too many words = probably a sentence, not a name
+        if name.count(" ") > 5:
+            return False
+        return True
+
     async def _enrich_lead_contacts(
         self,
         exa: Any,
@@ -3016,6 +3011,7 @@ class GoalExecutionService:
             "CEO",
         ]
         enriched: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
 
         for role in target_roles[:3]:
             try:
@@ -3024,8 +3020,18 @@ class GoalExecutionService:
                     timeout=10.0,
                 )
                 if result and (result.linkedin_url or result.name):
-                    enriched.append({
-                        "name": result.name or f"{role} at {company_name}",
+                    contact_name = result.name or ""
+                    # Skip if no real name returned
+                    if not contact_name or contact_name.endswith(f"at {company_name}"):
+                        continue
+                    # Deduplicate by name (case-insensitive)
+                    name_key = contact_name.strip().lower()
+                    if name_key in seen_names:
+                        continue
+                    seen_names.add(name_key)
+
+                    contact = {
+                        "name": contact_name,
                         "title": result.title or role,
                         "email": "",
                         "linkedin_url": result.linkedin_url or "",
@@ -3036,13 +3042,31 @@ class GoalExecutionService:
                             else "Executive",
                         "confidence": result.confidence if hasattr(result, "confidence") else 0.5,
                         "source": "exa_search_person",
-                    })
+                    }
+                    if self._is_valid_contact(contact, company_name):
+                        enriched.append(contact)
             except asyncio.TimeoutError:
                 logger.debug("[LEAD-ASSEMBLY] Contact search timed out for %s at %s", role, company_name)
             except Exception as e:
                 logger.debug("[LEAD-ASSEMBLY] Contact search failed for %s at %s: %s", role, company_name, e)
 
-        return enriched if enriched else existing_contacts
+        # Also validate existing contacts before falling back
+        if not enriched:
+            valid_existing = []
+            existing_seen: set[str] = set()
+            for c in existing_contacts:
+                if not isinstance(c, dict):
+                    continue
+                if not self._is_valid_contact(c, company_name):
+                    continue
+                name_key = c.get("name", "").strip().lower()
+                if name_key in existing_seen:
+                    continue
+                existing_seen.add(name_key)
+                valid_existing.append(c)
+            return valid_existing
+
+        return enriched
 
     async def _create_lead_email_drafts(
         self,
@@ -4318,13 +4342,24 @@ class GoalExecutionService:
         Creates an asyncio.Task running _run_goal_background, updates
         goal status to 'active' (if not already), and returns immediately.
 
+        Guards against duplicate launches: if a task is already running
+        for this goal_id, returns immediately without spawning another.
+
         Args:
             goal_id: The goal to execute.
             user_id: The user who owns this goal.
 
         Returns:
-            Dict with goal_id and status 'executing'.
+            Dict with goal_id and status 'executing' or 'already_executing'.
         """
+        # Guard: prevent duplicate execution
+        if goal_id in self._active_tasks and not self._active_tasks[goal_id].done():
+            logger.info(
+                "Goal already executing, skipping duplicate launch",
+                extra={"goal_id": goal_id, "user_id": user_id},
+            )
+            return {"goal_id": goal_id, "status": "already_executing"}
+
         # Only update status if not already active (approve endpoint may have set it)
         now = datetime.now(UTC).isoformat()
         goal_check = (
@@ -5207,8 +5242,21 @@ class GoalExecutionService:
             # Per-task completion messages removed — results are collected
             # silently and a single summary is sent when the goal completes.
 
+            # Update matching goal_milestone to 'complete'
+            task_title = task.get("title", "")
+            try:
+                self._db.table("goal_milestones").update({
+                    "status": "complete",
+                    "completed_at": datetime.now(UTC).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }).eq("goal_id", goal_id).ilike(
+                    "title", f"%{task_title[:50]}%"
+                ).eq("status", "pending").execute()
+            except Exception:
+                logger.debug("Failed to update milestone to complete for %s", task_title)
+
             return {
-                "task_title": task.get("title", ""),
+                "task_title": task_title,
                 "agent_type": agent_type,
                 "success": result.get("success", False),
             }
@@ -5234,6 +5282,18 @@ class GoalExecutionService:
                     },
                 )
             )
+
+            # Update matching goal_milestone to 'failed'
+            task_title = task.get("title", "")
+            try:
+                self._db.table("goal_milestones").update({
+                    "status": "failed",
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }).eq("goal_id", goal_id).ilike(
+                    "title", f"%{task_title[:50]}%"
+                ).eq("status", "pending").execute()
+            except Exception:
+                pass
 
             # Emit step-completed WS event (failure)
             try:
@@ -5549,13 +5609,12 @@ class GoalExecutionService:
             summary = ""
 
             if assembled_leads:
-                # --- Rich per-company lead-gen completion message ---
+                # --- Clean per-company lead-gen completion message ---
                 lead_lines: list[str] = []
                 total_drafts = sum(l.get("draft_count", 0) for l in assembled_leads)
                 for idx, lead in enumerate(assembled_leads, 1):
                     cn = lead.get("company_name", "Unknown")
                     sc = lead.get("score", 0)
-                    qt = lead.get("quality_tier", "").replace("_", " ").title()
                     sig = lead.get("signal_summary", "")
                     fit = lead.get("fit_analysis", "")
                     contacts_list = lead.get("contacts", [])
@@ -5570,25 +5629,20 @@ class GoalExecutionService:
                         elif cname:
                             contact_strs.append(cname)
 
-                    lines = [f"**{idx}. {cn}** — Score: {sc}/100 ({qt})"]
+                    lines = [f"**{idx}. {cn}** (Score: {sc})"]
                     if sig:
-                        lines.append(f"   Why now: {sig[:150]}")
+                        lines.append(f"Signal: {sig[:150]}")
                     if fit:
-                        lines.append(f"   Why us: {fit[:150]}")
+                        lines.append(f"Fit: {fit[:150]}")
                     if contact_strs:
-                        lines.append(f"   Contacts: {', '.join(contact_strs)}")
+                        lines.append(f"Contacts: {', '.join(contact_strs)}")
                     if dc:
-                        lines.append(f"   Drafts ready: {dc} outreach email{'s' if dc != 1 else ''} prepared")
+                        lines.append(f"{dc} outreach email{'s' if dc != 1 else ''} drafted")
                     lead_lines.append("\n".join(lines))
 
-                header = (
-                    f"I found **{len(assembled_leads)} companies** matching your criteria."
-                    + (f" Here's what I discovered:" if assembled_leads else "")
-                )
+                header = f"I found {len(assembled_leads)} companies matching your criteria."
                 body = "\n\n".join(lead_lines)
-                footer = "\n\nThese leads are in your Action Queue for approval. Approve to add to your pipeline."
-                if total_drafts:
-                    footer = f"\n\n**{total_drafts} email drafts** prepared across all leads." + footer
+                footer = "\n\nApprove these leads to add to your pipeline, or ask me to refine."
 
                 message = f"{header}\n\n{body}{footer}"
                 summary = message
@@ -5791,6 +5845,20 @@ class GoalExecutionService:
                 ]
             else:
                 retro_suggestions = ["Show details", "Rate this goal", "What's next?"]
+
+            # Sanitize message: strip raw internal tags that should never
+            # appear in user-facing text
+            import re as _re
+
+            for _tag in [
+                "goal_retrospective", "lead_gen_results",
+                "GOAL_EXECUTION_START", "goal_completion",
+                "[PLAN_APPROVED]",
+            ]:
+                message = message.replace(_tag, "")
+            # Strip any remaining XML-like internal tags
+            message = _re.sub(r"</?(?:goal_retrospective|lead_gen_results|GOAL_EXECUTION_START)[^>]*>", "", message)
+            message = message.strip()
 
             await ws_manager.send_aria_message(
                 user_id=user_id,

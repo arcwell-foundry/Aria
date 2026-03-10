@@ -4025,9 +4025,19 @@ class ChatService:
                     quick_action_match.get("action_type"),
                 )
 
-        # --- Inline Intent Detection: route goals before conversational LLM ---
-        # Skip if signal-enriched OR quick action matched - those bypass LLM classification
+        # --- Direct Execute Detection (BEFORE intent classification) ---
+        direct_execute_match = None
         if not was_signal_enriched and not quick_action_match:
+            direct_execute_match = ChatService._match_direct_execute(message)
+            if direct_execute_match:
+                logger.info(
+                    "DIRECT_EXECUTE: Pattern matched in process_message: %s",
+                    direct_execute_match.get("action_type"),
+                )
+
+        # --- Inline Intent Detection: route goals before conversational LLM ---
+        # Skip if signal-enriched, quick action, or direct execute matched
+        if not was_signal_enriched and not quick_action_match and not direct_execute_match:
             intent_start = time.perf_counter()
             intent_result = await self._classify_intent(user_id, message)
             intent_ms = (time.perf_counter() - intent_start) * 1000
@@ -4043,6 +4053,22 @@ class ChatService:
                 conversation_id=conversation_id,
                 message=message,
                 intent=action_intent,
+                working_memory=working_memory,
+                conversation_messages=conversation_messages,
+            )
+
+        # --- Direct Execute Routing (deck creation, email draft, search) ---
+        if direct_execute_match or (intent_result and intent_result.get("is_direct_execute")):
+            execute_intent = direct_execute_match or intent_result
+            logger.info(
+                "DIRECT_EXECUTE: Routing to handler in process_message: %s",
+                execute_intent.get("action_type"),
+            )
+            return await self._handle_direct_execute(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message=message,
+                intent=execute_intent,
                 working_memory=working_memory,
                 conversation_messages=conversation_messages,
             )
