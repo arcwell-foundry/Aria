@@ -2984,7 +2984,7 @@ class ChatService:
                 "citations": [],
                 "conversation_id": conversation_id,
                 "rich_content": [],
-                "ui_commands": [{"action": "navigate", "route": "/actions"}],
+                "ui_commands": [],
                 "suggestions": [
                     "Try planning again",
                     "What went wrong?",

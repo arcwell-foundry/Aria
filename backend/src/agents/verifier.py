@@ -10,6 +10,7 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from src.agents.base import AgentResult, BaseAgent
@@ -99,26 +100,29 @@ VERIFICATION_POLICIES: dict[str, VerificationPolicy] = {
 
 # Fallback system prompt when PersonaBuilder is unavailable
 # TODO: Replace with PersonaBuilder. See Jarvis Voice Rules in persona.py.
-_FALLBACK_SYSTEM_PROMPT = """\
-You are ARIA's Verifier - a skeptical, rigorous quality reviewer for life sciences \
-commercial outputs. Your job is to find problems, not to be encouraging.
-
-Rules:
-- Off-label claims are NEVER acceptable.
-- Every citation must reference a real, verifiable source.
-- Data older than 30 days must be flagged as stale.
-- Unsupported medical claims must be caught and reported.
-- When in doubt, flag it - false negatives are worse than false positives.
-
-You must return a JSON object with exactly these fields:
-{
-  "passed": boolean,
-  "issues": ["list of specific problems found"],
-  "confidence": float between 0.0 and 1.0,
-  "suggestions": ["list of concrete fixes"]
-}
-
-Return ONLY the JSON object, no other text."""
+def _fallback_system_prompt() -> str:
+    """Build fallback system prompt with current date context."""
+    today = datetime.now(UTC).strftime("%B %d, %Y")
+    return (
+        "You are ARIA's Verifier - a skeptical, rigorous quality reviewer for life sciences "
+        "commercial outputs. Your job is to find problems, not to be encouraging.\n\n"
+        f"IMPORTANT: Today's date is {today}. When evaluating data freshness, use this date "
+        "as the reference point. Data from recent months is NOT fabricated or from the future.\n\n"
+        "Rules:\n"
+        "- Off-label claims are NEVER acceptable.\n"
+        "- Every citation must reference a real, verifiable source.\n"
+        "- Data older than 30 days must be flagged as stale.\n"
+        "- Unsupported medical claims must be caught and reported.\n"
+        "- When in doubt, flag it - false negatives are worse than false positives.\n\n"
+        "You must return a JSON object with exactly these fields:\n"
+        "{\n"
+        '  "passed": boolean,\n'
+        '  "issues": ["list of specific problems found"],\n'
+        '  "confidence": float between 0.0 and 1.0,\n'
+        '  "suggestions": ["list of concrete fixes"]\n'
+        "}\n\n"
+        "Return ONLY the JSON object, no other text."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -239,8 +243,10 @@ class VerifierAgent(BaseAgent):
     ) -> str:
         """Build system prompt using PersonaBuilder or fallback."""
         checks_str = ", ".join(policy.checks)
+        today = datetime.now(UTC).strftime("%B %d, %Y")
         task_desc = (
             f"Critically verify agent output using policy '{policy.name}'. "
+            f"Today's date is {today} — use this for all data freshness evaluations. "
             f"Checks to perform: {checks_str}. "
             f"You are a skeptical reviewer - assume nothing is correct until proven. "
             f"Flag any unsupported claims, hallucinated data, compliance risks, "
@@ -255,7 +261,7 @@ class VerifierAgent(BaseAgent):
         if persona_prompt is not None:
             return persona_prompt
 
-        return _FALLBACK_SYSTEM_PROMPT
+        return _fallback_system_prompt()
 
     @staticmethod
     def _build_verification_request(
@@ -265,9 +271,11 @@ class VerifierAgent(BaseAgent):
         """Build the user message for the verification LLM call."""
         output_json = json.dumps(agent_output, indent=2, default=str)
         checks_str = "\n".join(f"  - {check}" for check in policy.checks)
+        today = datetime.now(UTC).strftime("%B %d, %Y")
 
         return (
             f"## Verification Task: {policy.name}\n\n"
+            f"**Current date: {today}** — use this as the reference for data freshness checks.\n\n"
             f"{policy.description}\n\n"
             f"### Checks to perform:\n{checks_str}\n\n"
             f"### Agent output to verify:\n```json\n{output_json}\n```\n\n"

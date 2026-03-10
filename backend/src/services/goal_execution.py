@@ -798,9 +798,6 @@ class GoalExecutionService:
                 user_id=user_id,
                 message=msg,
                 rich_content=rich,
-                ui_commands=[
-                    {"action": "navigate", "route": f"/actions/goals/{goal_id}"},
-                ],
                 suggestions=sugg,
             )
         except Exception:
@@ -952,20 +949,7 @@ class GoalExecutionService:
                 "user_id": user_id,
             }
 
-            # Send starting message
-            try:
-                from src.services.conversational_presenter import ConversationalPresenter
-
-                presenter = ConversationalPresenter()
-                starting_msg, _, _ = presenter.present_agent_starting(
-                    agent_type=agent_type,
-                    task=task,
-                    goal_config=task.get("config", {}),
-                )
-                if starting_msg:
-                    await ws_manager.send_aria_message(user_id=user_id, message=starting_msg)
-            except Exception:
-                logger.debug("Failed to send agent starting message", exc_info=True)
+            # Per-step starting messages removed — single start message is sufficient.
 
             # Execute with retry logic
             max_retries = 2
@@ -1482,43 +1466,34 @@ class GoalExecutionService:
         from src.core.adaptive_coordinator import AdaptiveDecisionType
 
         if decision.decision_type == AdaptiveDecisionType.RETRY_SAME:
-            # Send quality feedback message before retrying
+            # Log quality feedback to aria_activity (not chat — internal only)
             try:
-                from src.services.conversational_presenter import ConversationalPresenter
-
-                presenter = ConversationalPresenter()
-                qf_msg, _, _ = presenter.present_quality_feedback(
-                    agent_type=agent_type,
-                    issues=verification_result.issues,
-                    decision="retry",
+                await self._activity.record(
+                    user_id=user_id,
+                    agent=agent_type,
+                    activity_type="quality_feedback",
+                    title=f"Quality check: {agent_type} retrying",
+                    description="; ".join(verification_result.issues[:3]),
+                    confidence=verification_result.confidence,
+                    related_entity_type="goal",
+                    related_entity_id=goal.get("id", ""),
+                    metadata={"decision": "retry", "issues": verification_result.issues},
                 )
-                if qf_msg:
-                    await ws_manager.send_aria_message(user_id=user_id, message=qf_msg)
-                    # Send step_retrying WS event
-                    await ws_manager.send_step_retrying(
-                        user_id=user_id,
-                        goal_id=goal.get("id", ""),
-                        step_id=agent_type,
-                        agent=agent_type,
-                        retry_count=1,
-                        reason="; ".join(verification_result.issues[:2]),
-                    )
-                    # Persist to conversation
-                    if conversation_id:
-                        try:
-                            from src.services.conversations import ConversationService
-
-                            conv_svc = ConversationService(self._db)
-                            await conv_svc.save_message(
-                                conversation_id=conversation_id,
-                                role="assistant",
-                                content=qf_msg,
-                                metadata={"type": "quality_feedback", "data": {"agent": agent_type, "decision": "retry"}},
-                            )
-                        except Exception:
-                            logger.debug("Failed to persist quality feedback message")
             except Exception:
-                logger.debug("Failed to send quality feedback for retry", exc_info=True)
+                logger.debug("Failed to record quality feedback activity")
+
+            # Send step_retrying WS event (frontend progress UI, not chat)
+            try:
+                await ws_manager.send_step_retrying(
+                    user_id=user_id,
+                    goal_id=goal.get("id", ""),
+                    step_id=agent_type,
+                    agent=agent_type,
+                    retry_count=1,
+                    reason="; ".join(verification_result.issues[:2]),
+                )
+            except Exception:
+                logger.debug("Failed to send step_retrying WS event")
 
             # Inject verification feedback into context and retry
             retry_context = dict(context)
@@ -1575,33 +1550,19 @@ class GoalExecutionService:
         issues: list[str],
         conversation_id: str | None,
     ) -> None:
-        """Send quality escalation feedback message to user. Never raises."""
+        """Log quality escalation to aria_activity (not chat). Never raises."""
         try:
-            from src.services.conversational_presenter import ConversationalPresenter
-
-            presenter = ConversationalPresenter()
-            qf_msg, _, _ = presenter.present_quality_feedback(
-                agent_type=agent_type,
-                issues=issues,
-                decision="escalate",
+            await self._activity.record(
+                user_id=user_id,
+                agent=agent_type,
+                activity_type="quality_feedback",
+                title=f"Quality escalation: {agent_type} output needs review",
+                description="; ".join(issues[:3]),
+                confidence=0.3,
+                metadata={"decision": "escalate", "issues": issues},
             )
-            if qf_msg:
-                await ws_manager.send_aria_message(user_id=user_id, message=qf_msg)
-                if conversation_id:
-                    try:
-                        from src.services.conversations import ConversationService
-
-                        conv_svc = ConversationService(self._db)
-                        await conv_svc.save_message(
-                            conversation_id=conversation_id,
-                            role="assistant",
-                            content=qf_msg,
-                            metadata={"type": "quality_feedback", "data": {"agent": agent_type, "decision": "escalate"}},
-                        )
-                    except Exception:
-                        logger.debug("Failed to persist quality escalation message")
         except Exception:
-            logger.debug("Failed to send quality escalation feedback", exc_info=True)
+            logger.debug("Failed to record quality escalation activity", exc_info=True)
 
     async def _retry_agent_execution(
         self,
@@ -2337,6 +2298,22 @@ class GoalExecutionService:
             goal_id,
         )
 
+        # Look up ICP profile for this user (use most recent active one)
+        icp_id: str | None = None
+        try:
+            icp_result = (
+                self._db.table("lead_icp_profiles")
+                .select("id")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if icp_result and icp_result.data:
+                icp_id = icp_result.data[0]["id"]
+        except Exception:
+            logger.debug("[PERSIST-HUNTER] Could not look up ICP profile, continuing with None", exc_info=True)
+
         persisted = 0
         for lead_data in leads:
             company = lead_data.get("company", {})
@@ -2350,6 +2327,38 @@ class GoalExecutionService:
             # Use enriched discovery_score if available (from Hunter's 4-dim model)
             discovery_score = lead_data.get("discovery_score", {})
             signal_quality = discovery_score.get("signal_quality", {})
+
+            # If no signal_quality from Hunter, check market_signals table
+            if not signal_quality.get("signals_found"):
+                try:
+                    sig_result = (
+                        self._db.table("market_signals")
+                        .select("signal_type, headline")
+                        .eq("user_id", user_id)
+                        .ilike("company_name", f"%{company_name.replace('%', '').replace('_', '')}%")
+                        .order("detected_at", desc=True)
+                        .limit(5)
+                        .execute()
+                    )
+                    if sig_result and sig_result.data:
+                        found_signals = [s.get("headline", s.get("signal_type", "")) for s in sig_result.data]
+                        signal_quality = {
+                            "signal_bonus": 20,
+                            "signals_found": found_signals,
+                            "quality_tier": "signal_enriched",
+                        }
+                        fit_score = min(100, fit_score + 20)
+                    else:
+                        signal_quality = {
+                            "signal_bonus": 0,
+                            "signals_found": [],
+                            "quality_tier": "icp_only",
+                        }
+                        fit_score = min(fit_score, 50)
+                except Exception:
+                    logger.debug("[PERSIST-HUNTER] Market signal lookup failed for %s", company_name)
+                    signal_quality = {"signal_bonus": 0, "signals_found": [], "quality_tier": "icp_only"}
+
             score_breakdown = {
                 "icp_match": int(
                     discovery_score.get("icp_fit", {}).get("score", fit_score)
@@ -2370,7 +2379,7 @@ class GoalExecutionService:
                     {
                         "id": lead_id,
                         "user_id": user_id,
-                        "icp_id": None,
+                        "icp_id": icp_id,
                         "company_name": company_name,
                         "company_data": company,
                         "contacts": contacts,
@@ -2390,6 +2399,44 @@ class GoalExecutionService:
                     fit_score,
                     goal_id,
                 )
+
+                # Submit to action queue for user approval
+                try:
+                    contact_count = len(contacts) if isinstance(contacts, list) else 0
+                    quality_tier = score_breakdown.get("quality_tier", "icp_only")
+                    self._db.table("aria_action_queue").insert(
+                        {
+                            "user_id": user_id,
+                            "agent": "hunter",
+                            "action_type": "lead_discovered",
+                            "title": f"New lead: {company_name} (Score: {fit_score})",
+                            "description": (
+                                f"{contact_count} contact{'s' if contact_count != 1 else ''}. "
+                                f"Quality: {quality_tier}."
+                            ),
+                            "risk_level": "LOW",
+                            "status": "pending",
+                            "payload": {
+                                "discovered_lead_id": lead_id,
+                                "company_name": company_name,
+                                "fit_score": fit_score,
+                                "quality_tier": quality_tier,
+                                "contact_count": contact_count,
+                                "goal_id": goal_id,
+                            },
+                            "reasoning": (
+                                f"Hunter discovered {company_name} with fit score {fit_score}. "
+                                f"{'Signal-enriched with market data.' if quality_tier == 'signal_enriched' else 'ICP match only — no market signals found.'}"
+                            ),
+                        }
+                    ).execute()
+                except Exception as aq_err:
+                    logger.error(
+                        "[PERSIST-HUNTER] Failed to submit action queue for %s: %s",
+                        company_name,
+                        aq_err,
+                        exc_info=True,
+                    )
             except Exception as e:
                 logger.error(
                     "[PERSIST-HUNTER] Failed to persist discovered lead %s: %s",
@@ -3518,7 +3565,6 @@ class GoalExecutionService:
                     }
                 ],
                 ui_commands=[
-                    {"action": "navigate", "route": f"/actions/goals/{goal_id}"},
                     {
                         "action": "update_intel_panel",
                         "content": {
@@ -3842,6 +3888,29 @@ class GoalExecutionService:
             total_tasks = len(tasks)
             completed_tasks = 0
 
+            # Send ONE "working on it" message at execution start (not per-task)
+            try:
+                goal_title = goal.get("title", "your goal")
+                await ws_manager.send_aria_message(
+                    user_id=user_id,
+                    message=f"Working on this now. I'll let you know when it's ready.",
+                )
+                if plan_conversation_id:
+                    try:
+                        from src.services.conversations import ConversationService
+
+                        conv_svc = ConversationService(self._db)
+                        await conv_svc.save_message(
+                            conversation_id=plan_conversation_id,
+                            role="assistant",
+                            content="Working on this now. I'll let you know when it's ready.",
+                            metadata={"type": "goal_execution_start", "data": {"goal_id": goal_id}},
+                        )
+                    except Exception:
+                        logger.debug("Failed to persist execution start message")
+            except Exception:
+                logger.debug("Failed to send execution start message", exc_info=True)
+
             if execution_mode in ("parallel", "reused_workflow", "playbook"):
                 # Parallel execution: group tasks by dependency layers
                 layers = self._build_dependency_layers(tasks)
@@ -4060,25 +4129,7 @@ class GoalExecutionService:
                                 + "; ".join(seq_notes)
                             )
 
-                    # Send handoff message between sequential agents
-                    if prev_task_result is not None and task_idx < len(tasks):
-                        try:
-                            from src.services.conversational_presenter import ConversationalPresenter
-
-                            presenter = ConversationalPresenter()
-                            prev_agent = prev_task_result.get("agent_type", "")
-                            next_agent = task.get("agent_type", "analyst")
-                            handoff_msg, _, _ = presenter.present_handoff(
-                                prev_agent=prev_agent,
-                                prev_result=prev_task_result,
-                                next_agent=next_agent,
-                            )
-                            if handoff_msg:
-                                await ws_manager.send_aria_message(
-                                    user_id=user_id, message=handoff_msg
-                                )
-                        except Exception:
-                            logger.debug("Failed to send handoff message", exc_info=True)
+                    # Handoff messages removed — results collected silently.
 
                     try:
                         task_result = await self._execute_task_with_events(
@@ -4470,33 +4521,8 @@ class GoalExecutionService:
         except Exception:
             logger.warning("Failed to send step_started WS event", extra={"goal_id": goal_id})
 
-        # Send context-aware "starting" message before agent execution
-        try:
-            from src.services.conversational_presenter import ConversationalPresenter
-
-            presenter = ConversationalPresenter()
-            starting_msg, _, _ = presenter.present_agent_starting(
-                agent_type=agent_type,
-                task=task,
-                goal_config=goal.get("config", {}),
-            )
-            if starting_msg:
-                await ws_manager.send_aria_message(user_id=user_id, message=starting_msg)
-                if conversation_id:
-                    try:
-                        from src.services.conversations import ConversationService
-
-                        conv_svc = ConversationService(self._db)
-                        await conv_svc.save_message(
-                            conversation_id=conversation_id,
-                            role="assistant",
-                            content=starting_msg,
-                            metadata={"type": "agent_starting", "data": {"agent": agent_type, "goal_id": goal_id}},
-                        )
-                    except Exception:
-                        logger.debug("Failed to persist agent starting message")
-        except Exception:
-            logger.debug("Failed to send agent starting message", exc_info=True)
+        # Per-task starting messages removed — a single "Working on it"
+        # message is sent at goal execution start instead.
 
         try:
             # Extract resource_status and system_notes from the task
@@ -4552,47 +4578,8 @@ class GoalExecutionService:
             except Exception:
                 logger.warning("Failed to send step_completed WS event", extra={"goal_id": goal_id})
 
-            # Send conversational progress update to the user
-            task_title = task.get("title", "task")
-            summary = result.get("summary", "")
-            summary_snippet = f": {summary[:200]}" if summary else ""
-            progress_content = f"**{task_title}** complete{summary_snippet}."
-            try:
-                await ws_manager.send_aria_message(
-                    user_id=user_id,
-                    message=progress_content,
-                )
-            except Exception:
-                logger.debug(
-                    "Failed to send conversational progress",
-                    extra={"goal_id": goal_id},
-                )
-
-            # Persist progress message so it survives page refresh
-            if conversation_id:
-                try:
-                    from src.services.conversations import ConversationService
-
-                    conv_svc = ConversationService(self._db)
-                    await conv_svc.save_message(
-                        conversation_id=conversation_id,
-                        role="assistant",
-                        content=progress_content,
-                        metadata={
-                            "type": "task_progress",
-                            "data": {
-                                "goal_id": goal_id,
-                                "task_title": task_title,
-                                "agent": agent_type,
-                                "status": "complete",
-                            },
-                        },
-                    )
-                except Exception:
-                    logger.debug(
-                        "Failed to persist progress message",
-                        extra={"goal_id": goal_id},
-                    )
+            # Per-task completion messages removed — results are collected
+            # silently and a single summary is sent when the goal completes.
 
             return {
                 "task_title": task.get("title", ""),
@@ -4635,48 +4622,8 @@ class GoalExecutionService:
             except Exception:
                 logger.warning("Failed to send step_completed WS event", extra={"goal_id": goal_id})
 
-            # Send conversational failure notice to the user
-            task_title = task.get("title", "task")
-            failure_content = (
-                f"**{task_title}** ran into an issue. "
-                f"I'll try an alternative approach for the remaining steps."
-            )
-            try:
-                await ws_manager.send_aria_message(
-                    user_id=user_id,
-                    message=failure_content,
-                )
-            except Exception:
-                logger.debug(
-                    "Failed to send conversational failure notice",
-                    extra={"goal_id": goal_id},
-                )
-
-            # Persist failure message so it survives page refresh
-            if conversation_id:
-                try:
-                    from src.services.conversations import ConversationService
-
-                    conv_svc = ConversationService(self._db)
-                    await conv_svc.save_message(
-                        conversation_id=conversation_id,
-                        role="assistant",
-                        content=failure_content,
-                        metadata={
-                            "type": "task_progress",
-                            "data": {
-                                "goal_id": goal_id,
-                                "task_title": task_title,
-                                "agent": agent_type,
-                                "status": "failed",
-                            },
-                        },
-                    )
-                except Exception:
-                    logger.debug(
-                        "Failed to persist failure message",
-                        extra={"goal_id": goal_id},
-                    )
+            # Per-task failure messages removed — failures are logged and
+            # surfaced in the final goal completion summary instead.
 
             return {
                 "task_title": task.get("title", ""),
@@ -5014,7 +4961,6 @@ class GoalExecutionService:
                 message=message,
                 rich_content=rich_content_items,
                 ui_commands=[
-                    {"action": "navigate", "route": f"/actions/goals/{goal_id}"},
                     {
                         "action": "show_notification",
                         "notification_type": "success",

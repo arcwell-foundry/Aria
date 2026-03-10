@@ -52,6 +52,7 @@ class ActionExecutor:
                 "regulatory_displacement": self._execute_displacement_outreach,
                 "competitive_pricing_response": self._execute_pricing_response,
                 "lead_discovery": self._execute_lead_discovery,
+                "lead_discovered": self._execute_lead_promotion,
                 "conference_outreach": self._execute_conference_outreach,
                 "clinical_trial_outreach": self._execute_clinical_trial_outreach,
                 "debrief_review": self._execute_debrief_review,
@@ -956,6 +957,161 @@ Respond in this exact JSON format:
         from src.services.debrief_approval_handler import handle_debrief_approval
 
         return await handle_debrief_approval(action, user_id, self._db)
+
+    async def _execute_lead_promotion(
+        self, user_id: str, action: dict, payload: dict
+    ) -> dict[str, Any]:
+        """Promote a discovered_lead to lead_memories when approved.
+
+        Creates lead_memories, lead_memory_stakeholders, and lead_memory_events
+        records, then links the discovered_lead back via lead_memory_id.
+        """
+        from uuid import uuid4
+
+        discovered_lead_id = payload.get("discovered_lead_id")
+        if not discovered_lead_id:
+            return {"status": "error", "summary": "No discovered_lead_id in payload"}
+
+        # 1. Read the discovered lead
+        try:
+            dl_result = (
+                self._db.table("discovered_leads")
+                .select("*")
+                .eq("id", discovered_lead_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if not dl_result.data:
+                return {"status": "error", "summary": "Discovered lead not found"}
+            dl = dl_result.data[0]
+        except Exception as e:
+            logger.error("[ActionExecutor] Failed to read discovered lead: %s", e)
+            return {"status": "error", "summary": str(e)}
+
+        company_name = dl.get("company_name", "Unknown")
+        company_data = dl.get("company_data", {})
+        contacts = dl.get("contacts", [])
+        fit_score = dl.get("fit_score", 50)
+        score_breakdown = dl.get("score_breakdown", {})
+        now = datetime.now(timezone.utc).isoformat()
+        lead_memory_id = str(uuid4())
+
+        # 2. Create lead_memories record
+        try:
+            self._db.table("lead_memories").insert({
+                "id": lead_memory_id,
+                "user_id": user_id,
+                "company_name": company_name,
+                "lifecycle_stage": "lead",
+                "status": "active",
+                "health_score": fit_score,
+                "first_touch_at": now,
+                "last_activity_at": now,
+                "metadata": {
+                    "source": "hunter_discovery",
+                    "discovered_lead_id": discovered_lead_id,
+                    "score_breakdown": score_breakdown,
+                    "company_data": company_data,
+                },
+                "created_at": now,
+                "updated_at": now,
+            }).execute()
+        except Exception as e:
+            logger.error("[ActionExecutor] Failed to create lead_memory: %s", e)
+            return {"status": "error", "summary": f"Failed to create lead memory: {e}"}
+
+        # 3. Create lead_memory_stakeholders for each contact
+        stakeholder_count = 0
+        if isinstance(contacts, list):
+            for contact in contacts:
+                if not isinstance(contact, dict):
+                    continue
+                email = contact.get("email", "")
+                if not email:
+                    continue
+                try:
+                    # Infer role from title
+                    title = contact.get("title", "").lower()
+                    role = "user"
+                    if any(kw in title for kw in ("vp", "director", "head", "chief", "president")):
+                        role = "decision_maker"
+                    elif any(kw in title for kw in ("manager", "lead", "senior")):
+                        role = "influencer"
+
+                    self._db.table("lead_memory_stakeholders").insert({
+                        "lead_memory_id": lead_memory_id,
+                        "contact_email": email,
+                        "contact_name": contact.get("name", ""),
+                        "title": contact.get("title", ""),
+                        "role": role,
+                        "influence_level": 7 if role == "decision_maker" else 5,
+                        "sentiment": "neutral",
+                        "created_at": now,
+                        "updated_at": now,
+                    }).execute()
+                    stakeholder_count += 1
+                except Exception as e:
+                    logger.warning("[ActionExecutor] Failed to create stakeholder: %s", e)
+
+        # 4. Create lead_memory_events (discovery event)
+        try:
+            self._db.table("lead_memory_events").insert({
+                "lead_memory_id": lead_memory_id,
+                "event_type": "discovery",
+                "subject": f"Lead discovered: {company_name}",
+                "content": (
+                    f"Hunter agent discovered {company_name} with fit score {fit_score}. "
+                    f"Quality tier: {score_breakdown.get('quality_tier', 'unknown')}. "
+                    f"{stakeholder_count} contacts identified."
+                ),
+                "occurred_at": now,
+                "source": "hunter_agent",
+                "metadata": {"score_breakdown": score_breakdown},
+                "created_at": now,
+            }).execute()
+        except Exception as e:
+            logger.warning("[ActionExecutor] Failed to create discovery event: %s", e)
+
+        # 5. Update discovered_leads with approval and link
+        try:
+            self._db.table("discovered_leads").update({
+                "review_status": "approved",
+                "lead_memory_id": lead_memory_id,
+                "reviewed_at": now,
+                "updated_at": now,
+            }).eq("id", discovered_lead_id).execute()
+        except Exception as e:
+            logger.warning("[ActionExecutor] Failed to update discovered lead: %s", e)
+
+        # 6. Record activity
+        try:
+            self._db.table("aria_activity").insert({
+                "user_id": user_id,
+                "agent": "hunter",
+                "activity_type": "lead_promoted",
+                "title": f"Lead promoted: {company_name}",
+                "description": (
+                    f"{company_name} promoted from discovered lead to active lead memory. "
+                    f"Fit score: {fit_score}. {stakeholder_count} stakeholders added."
+                ),
+                "metadata": {
+                    "lead_memory_id": lead_memory_id,
+                    "discovered_lead_id": discovered_lead_id,
+                    "fit_score": fit_score,
+                },
+            }).execute()
+        except Exception as e:
+            logger.warning("[ActionExecutor] Failed to record promotion activity: %s", e)
+
+        return {
+            "status": "completed",
+            "summary": (
+                f"{company_name} promoted to active lead. "
+                f"{stakeholder_count} contacts added."
+            ),
+            "lead_memory_id": lead_memory_id,
+        }
 
     async def _execute_generic(
         self, user_id: str, action: dict, payload: dict
