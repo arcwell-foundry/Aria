@@ -872,6 +872,35 @@ async def _run_scout_signal_scan() -> None:
         logger.exception("Scout signal scan scheduler run failed")
 
 
+async def _run_signal_radar_scan() -> None:
+    """Run SignalRadar multi-source intelligence scan.
+
+    FIX 1B: This job complements scout_signal_scan by using additional sources:
+    - RSS feeds (BioPharma Dive, STAT, Endpoints, etc.)
+    - FDA openFDA API (approvals, warning letters)
+    - ClinicalTrials.gov
+    - SEC EDGAR filings
+    - Google Patents
+    - PR Newswire / GlobeNewswire
+    - LinkedIn company pages
+
+    Runs every 30 minutes, offset 15 minutes from scout_signal_scan.
+    """
+    try:
+        from src.agents.capabilities.signal_radar import run_signal_radar_cron
+
+        result = await run_signal_radar_cron()
+
+        if result and result.get("users_scanned", 0) > 0:
+            logger.info(
+                "SignalRadar scan complete: %d users scanned, %d signals detected",
+                result.get("users_scanned", 0),
+                result.get("signals_detected", 0),
+            )
+    except Exception:
+        logger.exception("SignalRadar scan scheduler run failed")
+
+
 async def _run_daily_briefing_check() -> None:
     """Run daily briefing generation check for all users."""
     try:
@@ -2289,6 +2318,14 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(minute="*/15"),  # Every 15 minutes
             id="scout_signal_scan",
             name="Proactive Scout market signal scan",
+            replace_existing=True,
+        )
+        # FIX 1B: SignalRadar multi-source intelligence scan (FDA, clinical trials, etc.)
+        _scheduler.add_job(
+            _run_signal_radar_scan,
+            trigger=CronTrigger(minute="30"),  # Run at :30 offset from scout scan (:00, :15)
+            id="signal_radar_scan",
+            name="SignalRadar multi-source intelligence scan (FDA, patents, clinical trials)",
             replace_existing=True,
         )
         _scheduler.add_job(

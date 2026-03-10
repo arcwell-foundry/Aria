@@ -8,9 +8,14 @@ the ProactiveRouter based on relevance score.
 High-relevance signals (>= 0.8) are additionally evaluated by the
 ProactiveGoalProposer to generate actionable goal proposals delivered
 via WebSocket (or queued for next login).
+
+FIXES APPLIED:
+- FIX 1A: Update monitored_entities.last_checked_at after each user scan
+- FIX 1C: Second pass for ICP-relevant industry term scanning
 """
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from src.core.business_hours import get_active_user_ids, get_user_timezone, is_business_hours
@@ -24,6 +29,20 @@ logger = logging.getLogger(__name__)
 # Minimum relevance score to trigger a goal proposal (not just a notification)
 _GOAL_PROPOSAL_THRESHOLD = 0.8
 
+# FIX 1C: Default ICP-relevant industry search terms for life sciences
+DEFAULT_INDUSTRY_SEARCH_TERMS = [
+    "CDMO facility expansion",
+    "biologics manufacturing funding",
+    "bioprocessing equipment procurement",
+    "GMP capacity addition",
+    "cell therapy manufacturing scale-up",
+    "bioreactor capacity expansion",
+    "downstream processing investment",
+    "upstream bioprocessing innovation",
+    "pharmaceutical cold chain expansion",
+    "biomanufacturing workforce hiring",
+]
+
 
 async def run_scout_signal_scan_job() -> dict[str, Any]:
     """Run Scout agent signal scan for all active users.
@@ -33,6 +52,8 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
     2. Instantiate ScoutAgent and execute entity search
     3. Deduplicate against existing market_signals
     4. Store new signals and route via ProactiveRouter
+    5. FIX 1A: Update monitored_entities.last_checked_at
+    6. FIX 1C: Run industry term scan for ICP-relevant signals
 
     Returns:
         Summary dict with scan statistics.
@@ -45,16 +66,19 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
         "signals_routed_medium": 0,
         "signals_routed_low": 0,
         "goal_proposals_generated": 0,
+        "industry_signals_detected": 0,
+        "monitored_entities_updated": 0,
         "errors": 0,
     }
 
     db = SupabaseClient.get_client()
     router = ProactiveRouter()
-    user_ids = get_active_user_ids()
+    all_user_ids = get_active_user_ids()
+    processed_user_ids: list[str] = []  # Track users we actually processed
 
-    logger.info("Scout signal scan: processing %d users", len(user_ids))
+    logger.info("Scout signal scan: processing %d users", len(all_user_ids))
 
-    for user_id in user_ids:
+    for user_id in all_user_ids:
         try:
             tz = get_user_timezone(user_id)
             if not is_business_hours(tz):
@@ -62,6 +86,7 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                 continue
 
             stats["users_checked"] += 1
+            processed_user_ids.append(user_id)
 
             # Look up company_id for dynamic alias resolution
             company_id: str | None = None
@@ -274,6 +299,23 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
             )
             stats["errors"] += 1
 
+    # FIX 1A: Update monitored_entities.last_checked_at for all processed users
+    for user_id in processed_user_ids:
+        try:
+            db.table("monitored_entities").update(
+                {"last_checked_at": datetime.now(UTC).isoformat()}
+            ).eq("user_id", user_id).eq("is_active", True).execute()
+            stats["monitored_entities_updated"] += 1
+        except Exception:
+            logger.debug("Failed to update last_checked_at for user %s", user_id)
+
+    # FIX 1C: Scan for ICP-relevant industry terms (second pass)
+    try:
+        industry_stats = await _scan_industry_terms(db, processed_user_ids)
+        stats["industry_signals_detected"] = industry_stats.get("signals_detected", 0)
+    except Exception:
+        logger.debug("Industry term scan failed", exc_info=True)
+
     # Post-scan deduplication: cluster near-duplicate signals
     try:
         from src.intelligence.signal_deduplication import SignalDeduplicator
@@ -379,6 +421,132 @@ async def _get_scan_entities(db: Any, user_id: str) -> list[str]:
             pass
 
     return list(entities)
+
+
+async def _scan_industry_terms(db: Any, user_ids: list[str]) -> dict[str, Any]:
+    """FIX 1C: Scan for ICP-relevant industry term signals.
+
+    Searches Exa for industry-wide signals that don't map to specific competitors
+    but are relevant to the user's ICP and market. Uses search_vocabulary from
+    memory_semantic, watch_topics keywords, and default life sciences terms.
+
+    Args:
+        db: Supabase client
+        user_ids: List of user IDs to scan for
+
+    Returns:
+        Dict with signals_detected count
+    """
+    stats = {"signals_detected": 0}
+
+    for user_id in user_ids[:5]:  # Limit to 5 users per scan to avoid API limits
+        try:
+            # Gather user-specific search terms
+            search_terms: set[str] = set(DEFAULT_INDUSTRY_SEARCH_TERMS)
+
+            # 1. Get search_vocabulary from memory_semantic
+            try:
+                vocab_result = (
+                    db.table("memory_semantic")
+                    .select("fact")
+                    .eq("user_id", user_id)
+                    .eq("entity_type", "search_vocabulary")
+                    .limit(20)
+                    .execute()
+                )
+                for row in vocab_result.data or []:
+                    fact = row.get("fact", "")
+                    if fact and len(fact) > 3:
+                        search_terms.add(fact[:100])
+            except Exception:
+                pass
+
+            # 2. Get watch_topics keywords
+            try:
+                topics_result = (
+                    db.table("watch_topics")
+                    .select("keywords")
+                    .eq("user_id", user_id)
+                    .eq("is_active", True)
+                    .limit(10)
+                    .execute()
+                )
+                for row in topics_result.data or []:
+                    keywords = row.get("keywords", [])
+                    if isinstance(keywords, list):
+                        for kw in keywords[:5]:
+                            if kw and len(kw) > 3:
+                                search_terms.add(kw[:100])
+            except Exception:
+                pass
+
+            # 3. Run Scout agent for industry terms
+            try:
+                from src.agents.scout import ScoutAgent
+                from src.core.llm import LLMClient
+
+                scout = ScoutAgent(llm_client=LLMClient(), user_id=user_id)
+                result = await scout.execute(
+                    {
+                        "entities": list(search_terms)[:15],  # Limit to 15 terms
+                        "signal_types": ["news", "funding", "regulatory", "partnership"],
+                        "industry_scan": True,  # Flag to indicate broad industry scan
+                    }
+                )
+
+                if result.success and result.data:
+                    signals = result.data if isinstance(result.data, list) else []
+
+                    for signal in signals:
+                        headline = signal.get("headline", "")
+                        if not headline:
+                            continue
+
+                        # Check if this signal already exists
+                        company_name = signal.get("company_name", "Industry")
+                        if company_name == "Unknown":
+                            company_name = "Industry"
+
+                        if await _signal_exists(db, user_id, headline, company_name):
+                            continue
+
+                        # Store as industry signal
+                        try:
+                            cleaned_summary = clean_signal_summary(
+                                raw_text=signal.get("summary", ""),
+                                headline=headline,
+                                max_length=500,
+                            )
+                            db.table("market_signals").insert(
+                                {
+                                    "user_id": user_id,
+                                    "company_name": company_name,
+                                    "signal_type": signal.get("signal_type", "market_trend"),
+                                    "headline": headline,
+                                    "summary": cleaned_summary,
+                                    "source_name": signal.get("source", "industry_scan"),
+                                    "source_url": signal.get("source_url"),
+                                    "relevance_score": signal.get("relevance_score", 0.5),
+                                    "metadata": {
+                                        **signal.get("metadata", {}),
+                                        "scan_type": "industry_term",
+                                    },
+                                }
+                            ).execute()
+                            stats["signals_detected"] += 1
+                        except Exception:
+                            logger.debug("Failed to store industry signal: %s", headline[:80])
+
+            except Exception:
+                logger.debug("Industry term Scout scan failed for user %s", user_id)
+
+        except Exception:
+            logger.debug("Industry term scan failed for user %s", user_id, exc_info=True)
+
+    if stats["signals_detected"] > 0:
+        logger.info("Industry term scan detected %d signals", stats["signals_detected"])
+
+    return stats
 
 
 async def _signal_exists(
