@@ -33,6 +33,62 @@ class DeckServiceError(Exception):
     pass
 
 
+async def _get_aria_knowledge_context(db: Client) -> str:
+    """Fetch all aria_knowledge rows and format as concise context for prompts.
+
+    Returns:
+        Formatted string describing ARIA's identity, agents, capabilities,
+        integrations, and constraints. Empty string if unavailable.
+    """
+    try:
+        result = db.table("aria_knowledge").select("category, name, description").execute()
+        rows = result.data or []
+        if not rows:
+            return ""
+
+        by_category: dict[str, list[dict[str, str]]] = {}
+        for row in rows:
+            by_category.setdefault(row["category"], []).append(row)
+
+        parts = ["## About ARIA (use this for accurate self-description)\n"]
+
+        # Identity
+        for row in by_category.get("identity", []):
+            parts.append(f"- {row['name']}: {row['description']}")
+
+        # Agents
+        agents = by_category.get("agent", [])
+        if agents:
+            parts.append("\n### AI Agents")
+            for row in agents:
+                parts.append(f"- **{row['name']}**: {row['description']}")
+
+        # Capabilities
+        caps = by_category.get("capability", [])
+        if caps:
+            parts.append("\n### Capabilities")
+            for row in caps:
+                parts.append(f"- **{row['name']}**: {row['description']}")
+
+        # Integrations
+        integrations = by_category.get("integration", [])
+        if integrations:
+            parts.append("\n### Integrations")
+            parts.append(", ".join(row["name"] for row in integrations))
+
+        # Constraints
+        constraints = by_category.get("does_not_do", [])
+        if constraints:
+            parts.append("\n### What ARIA does NOT do")
+            for row in constraints:
+                parts.append(f"- {row['description']}")
+
+        return "\n".join(parts)
+    except Exception:
+        logger.exception("Failed to fetch aria_knowledge context for deck generation")
+        return ""
+
+
 async def create_deck_from_context(
     db: Client,
     user_id: str,
@@ -84,70 +140,57 @@ async def create_deck_from_context(
         meeting_title,
     )
 
-    # Create internal deck record
-    deck_id = str(uuid.uuid4())
-    deck_record = {
-        "id": deck_id,
-        "user_id": user_id,
-        "calendar_event_id": meeting_id,
-        "title": f"Presentation for {meeting_title}",
-        "status": "generating",
-        "source": "meeting_context",
-        "created_at": datetime.now(UTC).isoformat(),
-    }
-
+    # Generate deck via Gamma API first (deck_url is NOT NULL in DB)
     try:
-        # Store initial record
-        db.table("decks").insert(deck_record).execute()
-    except Exception as e:
-        logger.warning("Failed to create deck record (may already exist): %s", e)
-
-    try:
-        # Generate the deck
         client = get_gamma_client()
         result = await client.generate(
             input_text=prompt,
             text_mode=GammaTextMode.GENERATE,
         )
-
-        # Update record with result
-        update_data = {
-            "status": "completed",
-            "gamma_id": result.gamma_id,
-            "deck_url": result.gamma_url,
-            "completed_at": datetime.now(UTC).isoformat(),
-        }
-
-        db.table("decks").update(update_data).eq("id", deck_id).execute()
-
-        # Store in memory_semantic for future reference
-        await _store_deck_memory(db, user_id, deck_id, meeting_title, result.gamma_url)
-
-        # Post to meeting chat if requested
-        if post_to_meeting:
-            await _post_deck_to_meeting(meeting_id, result.gamma_url, meeting_title)
-
-        logger.info(
-            "Deck created successfully: deck_id=%s gamma_url=%s",
-            deck_id,
-            result.gamma_url,
-        )
-
-        return {
-            "deck_id": deck_id,
-            "gamma_url": result.gamma_url,
-            "gamma_id": result.gamma_id,
-            "status": "completed",
-            "credits_used": result.credits_deducted,
-        }
-
     except GammaClientError as e:
-        # Update record with failure
-        db.table("decks").update({
-            "status": "failed",
-        }).eq("id", deck_id).execute()
-
         raise DeckServiceError(f"Failed to generate deck: {e}") from e
+
+    # Now create the deck record with all data including deck_url
+    deck_id = str(uuid.uuid4())
+    deck_record = {
+        "id": deck_id,
+        "user_id": user_id,
+        "meeting_id": meeting_id,
+        "title": f"Presentation for {meeting_title}",
+        "status": "completed",
+        "source": "meeting_context",
+        "gamma_id": result.gamma_id,
+        "gamma_url": result.gamma_url,
+        "created_at": datetime.now(UTC).isoformat(),
+        "completed_at": datetime.now(UTC).isoformat(),
+    }
+
+    try:
+        db.table("decks").insert(deck_record).execute()
+        logger.info("Created deck record: deck_id=%s", deck_id)
+    except Exception:
+        logger.exception("Failed to create deck record: deck_id=%s user_id=%s", deck_id, user_id)
+
+    # Store in memory_semantic for future reference
+    await _store_deck_memory(db, user_id, deck_id, meeting_title, result.gamma_url)
+
+    # Post to meeting chat if requested
+    if post_to_meeting:
+        await _post_deck_to_meeting(meeting_id, result.gamma_url, meeting_title)
+
+    logger.info(
+        "Deck created successfully: deck_id=%s gamma_url=%s",
+        deck_id,
+        result.gamma_url,
+    )
+
+    return {
+        "deck_id": deck_id,
+        "gamma_url": result.gamma_url,
+        "gamma_id": result.gamma_id,
+        "status": "completed",
+        "credits_used": result.credits_deducted,
+    }
 
 
 async def create_adhoc_deck(
@@ -189,62 +232,57 @@ async def create_adhoc_deck(
         deck_title,
     )
 
-    # Create internal deck record
-    deck_id = str(uuid.uuid4())
-    deck_record = {
-        "id": deck_id,
-        "user_id": user_id,
-        "title": deck_title,
-        "status": "generating",
-        "source": "adhoc",
-        "created_at": datetime.now(UTC).isoformat(),
-    }
+    # Enrich prompt with ARIA self-knowledge so decks about ARIA are accurate
+    aria_context = await _get_aria_knowledge_context(db)
+    if aria_context:
+        prompt = f"{aria_context}\n\n---\n\n{prompt}"
 
-    try:
-        db.table("decks").insert(deck_record).execute()
-    except Exception as e:
-        logger.warning("Failed to create deck record: %s", e)
-
+    # Generate deck via Gamma API first (deck_url is NOT NULL in DB)
     try:
         client = get_gamma_client()
         result = await client.generate(
             input_text=prompt,
             text_mode=mode,
         )
-
-        # Update record with result
-        update_data = {
-            "status": "completed",
-            "gamma_id": result.gamma_id,
-            "deck_url": result.gamma_url,
-            "completed_at": datetime.now(UTC).isoformat(),
-        }
-
-        db.table("decks").update(update_data).eq("id", deck_id).execute()
-
-        # Store in memory_semantic
-        await _store_deck_memory(db, user_id, deck_id, deck_title, result.gamma_url)
-
-        logger.info(
-            "Ad-hoc deck created: deck_id=%s gamma_url=%s",
-            deck_id,
-            result.gamma_url,
-        )
-
-        return {
-            "deck_id": deck_id,
-            "gamma_url": result.gamma_url,
-            "gamma_id": result.gamma_id,
-            "status": "completed",
-            "credits_used": result.credits_deducted,
-        }
-
     except GammaClientError as e:
-        db.table("decks").update({
-            "status": "failed",
-        }).eq("id", deck_id).execute()
-
         raise DeckServiceError(f"Failed to generate deck: {e}") from e
+
+    # Now create the deck record with all data including deck_url
+    deck_id = str(uuid.uuid4())
+    deck_record = {
+        "id": deck_id,
+        "user_id": user_id,
+        "title": deck_title,
+        "status": "completed",
+        "source": "adhoc",
+        "gamma_id": result.gamma_id,
+        "gamma_url": result.gamma_url,
+        "created_at": datetime.now(UTC).isoformat(),
+        "completed_at": datetime.now(UTC).isoformat(),
+    }
+
+    try:
+        db.table("decks").insert(deck_record).execute()
+        logger.info("Created deck record: deck_id=%s", deck_id)
+    except Exception:
+        logger.exception("Failed to create deck record: deck_id=%s user_id=%s", deck_id, user_id)
+
+    # Store in memory_semantic
+    await _store_deck_memory(db, user_id, deck_id, deck_title, result.gamma_url)
+
+    logger.info(
+        "Ad-hoc deck created: deck_id=%s gamma_url=%s",
+        deck_id,
+        result.gamma_url,
+    )
+
+    return {
+        "deck_id": deck_id,
+        "gamma_url": result.gamma_url,
+        "gamma_id": result.gamma_id,
+        "status": "completed",
+        "credits_used": result.credits_deducted,
+    }
 
 
 async def list_user_decks(

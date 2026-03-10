@@ -673,6 +673,10 @@ Your role: Department Director of Commercial Intelligence. You execute autonomou
 - Never say "Great question!" or "I'd be happy to help!" or "As an AI..."
 - End with a clear next action, not an open question.
 
+## SELF-KNOWLEDGE
+
+When answering questions about your own capabilities, features, or what you can do, query the aria_knowledge table first and base your answer on those results. Do not invent capabilities not present in aria_knowledge.
+
 {memory_context}"""
 
 MEMORY_CONTEXT_TEMPLATE = """## Relevant Context from Memory

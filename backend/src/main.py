@@ -235,6 +235,14 @@ async def lifespan(_app: FastAPI) -> Any:
     except Exception:
         logger.exception("Failed to mount MCP servers")
 
+    # Seed aria_knowledge from aria_capabilities.yaml
+    try:
+        from src.services.aria_knowledge_seeder import seed_aria_knowledge
+
+        await seed_aria_knowledge()
+    except Exception:
+        logger.warning("Failed to seed aria_knowledge — ARIA self-knowledge may be stale")
+
     # Capability registry — scan static capabilities for ARIA self-awareness
     try:
         import asyncio as _asyncio
