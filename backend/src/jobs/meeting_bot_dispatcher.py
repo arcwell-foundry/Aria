@@ -194,6 +194,29 @@ async def run_meeting_bot_dispatcher() -> dict:
                     },
                 )
 
+                # Route to universal memory writer
+                try:
+                    from src.services.memory_writer import write_memory
+
+                    attendees = event.get("attendees") or []
+                    attendee_emails = []
+                    for att in attendees:
+                        if isinstance(att, str):
+                            attendee_emails.append(att)
+                        elif isinstance(att, dict):
+                            email = att.get("email")
+                            if email:
+                                attendee_emails.append(email)
+
+                    await write_memory(db, user_id, "calendar_event_synced", {
+                        "calendar_event_id": event_id,
+                        "title": event.get("title"),
+                        "attendee_emails": attendee_emails,
+                        "start_time": event.get("start_time"),
+                    })
+                except Exception:
+                    logger.exception("Failed to route calendar_event_synced via memory_writer")
+
             except MeetingBaaSError as e:
                 result["errors"] += 1
                 logger.error(

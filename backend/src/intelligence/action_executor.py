@@ -54,6 +54,7 @@ class ActionExecutor:
                 "lead_discovery": self._execute_lead_discovery,
                 "conference_outreach": self._execute_conference_outreach,
                 "clinical_trial_outreach": self._execute_clinical_trial_outreach,
+                "debrief_review": self._execute_debrief_review,
             }
             handler = handlers.get(action_type, self._execute_generic)
             result = await handler(user_id, action_data, payload)
@@ -947,6 +948,14 @@ Respond in this exact JSON format:
             "status": "completed",
             "summary": f"Lead {company_name} added to pipeline with enrichment data.",
         }
+
+    async def _execute_debrief_review(
+        self, user_id: str, action: dict, payload: dict
+    ) -> dict[str, Any]:
+        """Execute debrief approval: generate follow-up emails + memory facts."""
+        from src.services.debrief_approval_handler import handle_debrief_approval
+
+        return await handle_debrief_approval(action, user_id, self._db)
 
     async def _execute_generic(
         self, user_id: str, action: dict, payload: dict

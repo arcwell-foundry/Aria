@@ -2341,6 +2341,27 @@ class EmailAnalyzer:
                     "scanned_at": datetime.now(UTC).isoformat(),
                 }
             ).execute()
+
+            # Route to universal memory writer
+            try:
+                from src.services.memory_writer import write_memory
+
+                await write_memory(self._db, user_id, "email_scanned", {
+                    "email_id": categorized.email_id,
+                    "sender_email": categorized.sender_email,
+                    "sender_name": categorized.sender_name,
+                    "subject": categorized.subject,
+                    "snippet": snippet_text,
+                    "category": categorized.category,
+                    "urgency": categorized.urgency,
+                    "scanned_at": datetime.now(UTC).isoformat(),
+                    "confidence": 0.7,
+                })
+            except Exception:
+                logger.exception(
+                    "EMAIL_ANALYZER: Failed to route email_scanned via memory_writer"
+                )
+
         except Exception as e:
             logger.warning(
                 "EMAIL_ANALYZER: Failed to log scan decision for email %s: %s",
