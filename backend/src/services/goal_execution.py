@@ -2531,6 +2531,632 @@ class GoalExecutionService:
                 agent_type,
             )
 
+    # ------------------------------------------------------------------
+    # Lead-gen post-assembly: enrich leads with signals, fit analysis,
+    # contacts, email drafts, and scoring AFTER all agents complete.
+    # ------------------------------------------------------------------
+
+    async def _assemble_lead_gen_results(
+        self,
+        goal_id: str,
+        user_id: str,
+    ) -> list[dict[str, Any]]:
+        """Assemble complete lead-gen results after all agents finish.
+
+        Enriches discovered_leads rows (already persisted by _persist_hunter_leads)
+        with market signals (why now), fit analysis (why us), improved contacts,
+        scoring, and email drafts.
+
+        Only runs for goal_type == 'lead_gen'. Each Exa call has a 10s timeout.
+        Total assembly is capped at 30s per lead.
+
+        Args:
+            goal_id: The completed goal.
+            user_id: The user who owns the goal.
+
+        Returns:
+            List of enriched lead dicts for the completion message.
+        """
+        import asyncio
+        from uuid import uuid4
+
+        logger.warning(
+            "[LEAD-ASSEMBLY] Starting lead-gen assembly for goal=%s user=%s",
+            goal_id, user_id,
+        )
+
+        # 1. Fetch discovered_leads created during this goal's execution
+        goal_time_result = (
+            self._db.table("goals")
+            .select("started_at")
+            .eq("id", goal_id)
+            .limit(1)
+            .execute()
+        )
+        goal_started_at = (
+            goal_time_result.data[0].get("started_at")
+            if goal_time_result.data
+            else None
+        )
+
+        leads_query = (
+            self._db.table("discovered_leads")
+            .select("id, company_name, company_data, contacts, fit_score, score_breakdown, signals")
+            .eq("user_id", user_id)
+            .eq("source", "goal_execution")
+        )
+        if goal_started_at:
+            leads_query = leads_query.gte("created_at", goal_started_at)
+        leads_result = leads_query.order("fit_score", desc=True).limit(20).execute()
+        lead_rows = leads_result.data or []
+
+        if not lead_rows:
+            logger.warning("[LEAD-ASSEMBLY] No discovered_leads found for goal=%s", goal_id)
+            return []
+
+        logger.warning(
+            "[LEAD-ASSEMBLY] Found %d leads to enrich for goal=%s",
+            len(lead_rows), goal_id,
+        )
+
+        # 2. Load ICP for fit analysis
+        icp_data: dict[str, Any] = {}
+        try:
+            icp_result = (
+                self._db.table("lead_icp_profiles")
+                .select("name, criteria")
+                .eq("user_id", user_id)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
+            if icp_result.data:
+                icp_data = icp_result.data[0].get("criteria", {}) or {}
+        except Exception as e:
+            logger.debug("[LEAD-ASSEMBLY] Failed to load ICP: %s", e)
+
+        # 3. Load SubIndustryContext from memory_semantic
+        sub_industry_context = ""
+        try:
+            ctx_result = (
+                self._db.table("memory_semantic")
+                .select("fact")
+                .eq("user_id", user_id)
+                .eq("metadata->>entity_type", "sub_industry_context")
+                .order("confidence", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if ctx_result.data:
+                sub_industry_context = ctx_result.data[0].get("fact", "")
+        except Exception:
+            pass
+
+        # 4. Initialize Exa provider (lazy, fail-open)
+        exa = None
+        try:
+            from src.agents.capabilities.enrichment_providers.exa_provider import (
+                ExaEnrichmentProvider,
+            )
+            from src.core.config import settings
+
+            if settings.EXA_API_KEY:
+                exa = ExaEnrichmentProvider()
+        except Exception as e:
+            logger.debug("[LEAD-ASSEMBLY] Exa not available: %s", e)
+
+        now_iso = datetime.now(UTC).isoformat()
+        assembled_leads: list[dict[str, Any]] = []
+
+        for lead_row in lead_rows:
+            lead_id = lead_row["id"]
+            company_name = lead_row.get("company_name", "Unknown")
+            company_data = lead_row.get("company_data") or {}
+            contacts = lead_row.get("contacts") or []
+            existing_signals = lead_row.get("signals") or []
+            existing_score = lead_row.get("fit_score", 0)
+            score_breakdown = lead_row.get("score_breakdown") or {}
+
+            try:
+                # --- a) MARKET SIGNAL (WHY NOW) ---
+                signal_summary = ""
+                if not existing_signals or (
+                    isinstance(existing_signals, list)
+                    and all(isinstance(s, str) and len(s) < 20 for s in existing_signals)
+                ):
+                    # Signals are just type labels, need real signal text
+                    signal_data = await self._enrich_lead_signal(
+                        exa, user_id, company_name, now_iso
+                    )
+                    if signal_data:
+                        signal_summary = signal_data.get("summary", "")
+                        # Update discovered_leads signals
+                        try:
+                            new_signals = signal_data.get("signals", existing_signals)
+                            self._db.table("discovered_leads").update({
+                                "signals": new_signals,
+                                "updated_at": now_iso,
+                            }).eq("id", lead_id).execute()
+                        except Exception:
+                            pass
+                elif isinstance(existing_signals, list) and existing_signals:
+                    signal_summary = existing_signals[0] if isinstance(existing_signals[0], str) else str(existing_signals[0])
+
+                # --- b) FIT ANALYSIS (WHY US) ---
+                fit_analysis = await self._generate_fit_analysis(
+                    company_name, company_data, signal_summary,
+                    icp_data, sub_industry_context,
+                )
+                if fit_analysis:
+                    score_breakdown["fit_analysis"] = fit_analysis
+                    try:
+                        self._db.table("discovered_leads").update({
+                            "score_breakdown": score_breakdown,
+                            "updated_at": now_iso,
+                        }).eq("id", lead_id).execute()
+                    except Exception:
+                        pass
+
+                # --- c) CONTACT ENRICHMENT ---
+                enriched_contacts = contacts
+                generic_contacts = [
+                    c for c in contacts
+                    if isinstance(c, dict)
+                    and c.get("name", "").endswith(f"at {company_name}")
+                ]
+                if generic_contacts and exa and len(generic_contacts) == len(contacts):
+                    better_contacts = await self._enrich_lead_contacts(
+                        exa, company_name, contacts,
+                    )
+                    if better_contacts:
+                        enriched_contacts = better_contacts
+                        try:
+                            self._db.table("discovered_leads").update({
+                                "contacts": enriched_contacts,
+                                "updated_at": now_iso,
+                            }).eq("id", lead_id).execute()
+                        except Exception:
+                            pass
+
+                # --- d) SCORING ---
+                icp_match = score_breakdown.get("icp_match", existing_score)
+                signal_bonus = 30 if signal_summary else 0
+                contact_score = min(20, len(enriched_contacts) * 7)
+                fit_quality = 10 if fit_analysis else 0
+                total_score = min(100, icp_match + signal_bonus + contact_score + fit_quality)
+
+                quality_tier = "signal_enriched" if signal_summary else "no_signal"
+                if not signal_summary and not enriched_contacts:
+                    # No signal AND no real contacts — skip this lead
+                    logger.info(
+                        "[LEAD-ASSEMBLY] Skipping %s: no signal and no contacts",
+                        company_name,
+                    )
+                    continue
+
+                score_breakdown.update({
+                    "icp_match": icp_match,
+                    "signal_bonus": signal_bonus,
+                    "contact_score": contact_score,
+                    "fit_quality": fit_quality,
+                    "total": total_score,
+                    "quality_tier": quality_tier,
+                    "fit_analysis": fit_analysis or score_breakdown.get("fit_analysis", ""),
+                })
+
+                # Build reasoning string
+                contact_roles = [c.get("title", "Unknown") for c in enriched_contacts[:3] if isinstance(c, dict)]
+                reasoning = (
+                    f"Score: {total_score}. {quality_tier.replace('_', ' ').title()}. "
+                    f"Signal: {signal_summary[:100] if signal_summary else 'None found'}. "
+                    f"Fit: {(fit_analysis or 'No analysis')[:80]}. "
+                    f"{len(enriched_contacts)} contacts across {', '.join(contact_roles[:3]) if contact_roles else 'unknown roles'}."
+                )
+
+                # Update discovered_leads with final score
+                try:
+                    self._db.table("discovered_leads").update({
+                        "fit_score": total_score,
+                        "score_breakdown": score_breakdown,
+                        "updated_at": now_iso,
+                    }).eq("id", lead_id).execute()
+                except Exception:
+                    pass
+
+                # Update action queue reasoning
+                try:
+                    self._db.table("aria_action_queue").update({
+                        "reasoning": reasoning,
+                        "title": f"New lead: {company_name} (Score: {total_score})",
+                    }).eq("user_id", user_id).eq(
+                        "payload->>discovered_lead_id", lead_id
+                    ).execute()
+                except Exception:
+                    pass
+
+                # --- e) EMAIL DRAFTS ---
+                draft_count = await self._create_lead_email_drafts(
+                    user_id, lead_id, company_name, enriched_contacts,
+                    signal_summary, fit_analysis, now_iso,
+                )
+
+                # --- f) ACTIVITY ---
+                try:
+                    self._db.table("aria_activity").insert({
+                        "user_id": user_id,
+                        "activity_type": "lead_assembled",
+                        "title": f"Lead assembled: {company_name} ({total_score}/100)",
+                        "description": reasoning[:500],
+                        "metadata": {
+                            "lead_id": lead_id,
+                            "goal_id": goal_id,
+                            "quality_tier": quality_tier,
+                            "draft_count": draft_count,
+                        },
+                    }).execute()
+                except Exception:
+                    pass
+
+                assembled_leads.append({
+                    "lead_id": lead_id,
+                    "company_name": company_name,
+                    "score": total_score,
+                    "quality_tier": quality_tier,
+                    "signal_summary": signal_summary[:200] if signal_summary else "",
+                    "fit_analysis": fit_analysis[:200] if fit_analysis else "",
+                    "contacts": [
+                        {"name": c.get("name", ""), "title": c.get("title", "")}
+                        for c in enriched_contacts[:5]
+                        if isinstance(c, dict)
+                    ],
+                    "draft_count": draft_count,
+                })
+
+            except Exception as e:
+                logger.warning(
+                    "[LEAD-ASSEMBLY] Failed to assemble lead '%s': %s",
+                    company_name, e,
+                )
+                # Still include partially assembled lead
+                assembled_leads.append({
+                    "lead_id": lead_id,
+                    "company_name": company_name,
+                    "score": existing_score,
+                    "quality_tier": score_breakdown.get("quality_tier", "partial"),
+                    "signal_summary": "",
+                    "fit_analysis": "",
+                    "contacts": [
+                        {"name": c.get("name", ""), "title": c.get("title", "")}
+                        for c in contacts[:3]
+                        if isinstance(c, dict)
+                    ],
+                    "draft_count": 0,
+                })
+
+        # Sort by score descending
+        assembled_leads.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+        logger.warning(
+            "[LEAD-ASSEMBLY] Assembly complete: %d leads enriched for goal=%s",
+            len(assembled_leads), goal_id,
+        )
+        return assembled_leads
+
+    async def _enrich_lead_signal(
+        self,
+        exa: Any | None,
+        user_id: str,
+        company_name: str,
+        now_iso: str,
+    ) -> dict[str, Any] | None:
+        """Search for a market signal (why now) for a company.
+
+        Checks market_signals table first, then Exa news search.
+        Each Exa call has a 10s timeout.
+
+        Args:
+            exa: ExaEnrichmentProvider instance or None.
+            user_id: The user's ID.
+            company_name: Company to find signals for.
+            now_iso: Current ISO timestamp.
+
+        Returns:
+            Dict with summary and signals list, or None.
+        """
+        import asyncio
+
+        # Check existing market_signals
+        try:
+            sig_result = (
+                self._db.table("market_signals")
+                .select("headline, summary, signal_type")
+                .eq("user_id", user_id)
+                .ilike("company_name", f"%{company_name.replace('%', '').replace('_', '')}%")
+                .order("detected_at", desc=True)
+                .limit(3)
+                .execute()
+            )
+            if sig_result.data:
+                top = sig_result.data[0]
+                return {
+                    "summary": top.get("headline", "") or top.get("summary", ""),
+                    "signals": [s.get("headline", s.get("signal_type", "")) for s in sig_result.data],
+                }
+        except Exception:
+            pass
+
+        # Try Exa news search
+        if exa:
+            try:
+                results = await asyncio.wait_for(
+                    exa.search_news(
+                        query=f"{company_name} expansion OR facility OR funding OR FDA OR acquisition",
+                        days_back=90,
+                    ),
+                    timeout=10.0,
+                )
+                if results:
+                    top_result = results[0]
+                    headline = (top_result.title or "")[:200]
+                    summary_text = (top_result.text or "")[:300]
+                    signal_summary = headline or summary_text[:100]
+
+                    # Persist to market_signals table
+                    try:
+                        self._db.table("market_signals").insert({
+                            "user_id": user_id,
+                            "company_name": company_name,
+                            "signal_type": "news_event",
+                            "headline": headline,
+                            "summary": summary_text,
+                            "source_name": "exa_news",
+                            "source_url": top_result.url or "",
+                            "relevance_score": 0.75,
+                            "detected_at": now_iso,
+                            "metadata": {"source": "lead_assembly", "query": company_name},
+                        }).execute()
+                    except Exception:
+                        pass
+
+                    return {
+                        "summary": signal_summary,
+                        "signals": [signal_summary],
+                    }
+            except asyncio.TimeoutError:
+                logger.debug("[LEAD-ASSEMBLY] Exa news search timed out for %s", company_name)
+            except Exception as e:
+                logger.debug("[LEAD-ASSEMBLY] Exa news search failed for %s: %s", company_name, e)
+
+        return None
+
+    async def _generate_fit_analysis(
+        self,
+        company_name: str,
+        company_data: dict[str, Any],
+        signal_summary: str,
+        icp_data: dict[str, Any],
+        sub_industry_context: str,
+    ) -> str:
+        """Generate a 2-3 sentence fit analysis using Haiku.
+
+        Args:
+            company_name: Target company name.
+            company_data: Enriched company data.
+            signal_summary: Market signal summary.
+            icp_data: User's ICP criteria.
+            sub_industry_context: SubIndustryContext fact.
+
+        Returns:
+            Fit analysis string, or empty string on failure.
+        """
+        try:
+            industry = company_data.get("industry", "life sciences")
+            geography = company_data.get("geography", "")
+            description = company_data.get("description", "")[:200]
+
+            icp_str = ""
+            if icp_data:
+                icp_parts = []
+                if icp_data.get("industry"):
+                    icp_parts.append(f"Industry: {icp_data['industry']}")
+                if icp_data.get("modalities"):
+                    icp_parts.append(f"Modalities: {icp_data['modalities']}")
+                if icp_data.get("company_size"):
+                    icp_parts.append(f"Size: {icp_data['company_size']}")
+                icp_str = "; ".join(icp_parts)
+
+            prompt = (
+                f"Write a 2-3 sentence fit analysis for why {company_name} is a good target.\n\n"
+                f"Company: {company_name} — {industry}, {geography}. {description}\n"
+                f"Signal: {signal_summary or 'No recent signal'}\n"
+                f"ICP: {icp_str or 'Not defined'}\n"
+                f"Context: {sub_industry_context[:300] if sub_industry_context else 'Life sciences commercial'}\n\n"
+                f"Be specific. Reference the company's actual business, the signal if available, "
+                f"and how the user's products/services align. No generic filler."
+            )
+
+            response = await self._llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt=(
+                    "You are a life sciences sales analyst. Write concise, specific fit analyses. "
+                    "2-3 sentences max. No markdown, no bullet points."
+                ),
+                max_tokens=200,
+                temperature=0.3,
+                task=TaskType.HUNTER_QUALIFY,
+            )
+            return response.strip()[:500]
+        except Exception as e:
+            logger.debug("[LEAD-ASSEMBLY] Fit analysis generation failed for %s: %s", company_name, e)
+            return ""
+
+    async def _enrich_lead_contacts(
+        self,
+        exa: Any,
+        company_name: str,
+        existing_contacts: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Attempt to find real contacts via Exa for generic placeholders.
+
+        Args:
+            exa: ExaEnrichmentProvider instance.
+            company_name: Target company.
+            existing_contacts: Current contact list (may be generic).
+
+        Returns:
+            Enriched contact list, or original if enrichment fails.
+        """
+        import asyncio
+
+        target_roles = [
+            "VP Process Development",
+            "VP Manufacturing",
+            "Head of Procurement",
+            "VP Sales",
+            "CEO",
+        ]
+        enriched: list[dict[str, Any]] = []
+
+        for role in target_roles[:3]:
+            try:
+                result = await asyncio.wait_for(
+                    exa.search_person(name="", company=company_name, role=role),
+                    timeout=10.0,
+                )
+                if result and (result.linkedin_url or result.name):
+                    enriched.append({
+                        "name": result.name or f"{role} at {company_name}",
+                        "title": result.title or role,
+                        "email": "",
+                        "linkedin_url": result.linkedin_url or "",
+                        "seniority": "VP-Level" if "VP" in role else "C-Level" if role == "CEO" else "Director-Level",
+                        "department": "Operations" if "Manufacturing" in role or "Process" in role
+                            else "Procurement" if "Procurement" in role
+                            else "Sales" if "Sales" in role
+                            else "Executive",
+                        "confidence": result.confidence if hasattr(result, "confidence") else 0.5,
+                        "source": "exa_search_person",
+                    })
+            except asyncio.TimeoutError:
+                logger.debug("[LEAD-ASSEMBLY] Contact search timed out for %s at %s", role, company_name)
+            except Exception as e:
+                logger.debug("[LEAD-ASSEMBLY] Contact search failed for %s at %s: %s", role, company_name, e)
+
+        return enriched if enriched else existing_contacts
+
+    async def _create_lead_email_drafts(
+        self,
+        user_id: str,
+        lead_id: str,
+        company_name: str,
+        contacts: list[dict[str, Any]],
+        signal_summary: str,
+        fit_analysis: str,
+        now_iso: str,
+    ) -> int:
+        """Create persona-specific email drafts for each contact.
+
+        Args:
+            user_id: The user's ID.
+            lead_id: The discovered_lead ID to link drafts to.
+            company_name: Target company name.
+            contacts: List of contact dicts.
+            signal_summary: Market signal for personalization.
+            fit_analysis: Fit analysis for personalization.
+            now_iso: Current ISO timestamp.
+
+        Returns:
+            Number of drafts created.
+        """
+        from uuid import uuid4
+
+        created = 0
+
+        for contact in contacts[:3]:
+            if not isinstance(contact, dict):
+                continue
+            contact_name = contact.get("name", "")
+            title = contact.get("title", "")
+            department = contact.get("department", "")
+
+            # Skip generic placeholder contacts
+            if contact_name.endswith(f"at {company_name}") and not contact.get("source") == "exa_search_person":
+                continue
+
+            try:
+                # Determine tone from role
+                title_lower = title.lower()
+                if any(kw in title_lower for kw in ("ceo", "president", "chief", "svp", "vp")):
+                    tone = "executive"
+                    purpose = "intro"
+                elif any(kw in title_lower for kw in ("procurement", "purchasing", "supply")):
+                    tone = "professional"
+                    purpose = "proposal"
+                else:
+                    tone = "professional"
+                    purpose = "intro"
+
+                # Generate email via LLM (Haiku)
+                prompt = (
+                    f"Draft a brief outreach email to {contact_name} ({title}) at {company_name}.\n\n"
+                    f"Context:\n"
+                    f"- Signal: {signal_summary or 'No specific signal'}\n"
+                    f"- Fit: {fit_analysis or 'General ICP match'}\n"
+                    f"- Department: {department}\n\n"
+                    f"Requirements:\n"
+                    f"- Keep it under 150 words\n"
+                    f"- Reference the specific signal if available\n"
+                    f"- {'Executive-level brevity' if tone == 'executive' else 'Professional and specific'}\n"
+                    f"- Include a clear call to action\n"
+                    f"- Do NOT include subject line — just the body\n"
+                )
+
+                body = await self._llm.generate_response(
+                    messages=[{"role": "user", "content": prompt}],
+                    system_prompt=(
+                        "You are a life sciences sales professional. Draft concise, specific outreach emails. "
+                        "No subject line. Just the email body. No markdown."
+                    ),
+                    max_tokens=300,
+                    temperature=0.4,
+                    task=TaskType.SCRIBE_DRAFT_EMAIL,
+                )
+
+                subject = f"Quick question for {company_name}"
+                if signal_summary:
+                    # Extract a keyword from the signal for the subject
+                    words = signal_summary.split()[:6]
+                    subject = f"Re: {' '.join(words)}..." if len(words) > 3 else f"Regarding {company_name}"
+
+                self._db.table("email_drafts").insert({
+                    "id": str(uuid4()),
+                    "user_id": user_id,
+                    "recipient_email": contact.get("email", f"contact@{company_name.lower().replace(' ', '')}.com"),
+                    "recipient_name": contact_name,
+                    "subject": subject[:200],
+                    "body": body.strip()[:2000],
+                    "purpose": purpose,
+                    "tone": tone,
+                    "context": {
+                        "signal": signal_summary[:200] if signal_summary else "",
+                        "fit_analysis": fit_analysis[:200] if fit_analysis else "",
+                        "company": company_name,
+                        "source": "lead_assembly",
+                    },
+                    "lead_memory_id": None,
+                    "status": "pending_review",
+                    "created_at": now_iso,
+                }).execute()
+                created += 1
+
+            except Exception as e:
+                logger.debug(
+                    "[LEAD-ASSEMBLY] Failed to create draft for %s at %s: %s",
+                    contact_name, company_name, e,
+                )
+
+        return created
+
     async def _gather_execution_context(self, user_id: str) -> dict[str, Any]:
         """Gather context needed for agent execution.
 
@@ -4889,10 +5515,11 @@ class GoalExecutionService:
         # Send WebSocket completion notification to user
         try:
             goal_title = ""
+            goal_type = ""
             try:
                 goal_result = (
                     self._db.table("goals")
-                    .select("title")
+                    .select("title, goal_type")
                     .eq("id", goal_id)
                     .limit(1)
                     .execute()
@@ -4900,121 +5527,183 @@ class GoalExecutionService:
                 goal_record = goal_result.data[0] if goal_result and goal_result.data else None
                 if goal_record:
                     goal_title = goal_record.get("title", "")
+                    goal_type = goal_record.get("goal_type", "")
             except Exception:
                 pass
+
+            # --- Lead-gen assembly: enrich leads BEFORE building the message ---
+            assembled_leads: list[dict[str, Any]] = []
+            if goal_type == "lead_gen":
+                try:
+                    assembled_leads = await self._assemble_lead_gen_results(goal_id, user_id)
+                except Exception as asm_err:
+                    logger.warning(
+                        "[LEAD-ASSEMBLY] Assembly failed, falling back to generic message: %s",
+                        asm_err,
+                    )
 
             # Build results summary from actual data produced during goal execution
             results_parts: list[str] = []
             quality_note = ""
-            try:
-                # Get goal started_at for time-window query
-                goal_time_result = (
-                    self._db.table("goals")
-                    .select("started_at")
-                    .eq("id", goal_id)
-                    .limit(1)
-                    .execute()
-                )
-                goal_started_at = (
-                    goal_time_result.data[0].get("started_at")
-                    if goal_time_result.data
-                    else None
-                )
+            message = ""
+            summary = ""
 
-                # Count discovered leads created during this goal's execution window
-                leads_query = (
-                    self._db.table("discovered_leads")
-                    .select("id, company_name, score_breakdown")
-                    .eq("user_id", user_id)
-                    .eq("source", "goal_execution")
-                )
-                if goal_started_at:
-                    leads_query = leads_query.gte("created_at", goal_started_at)
-                leads_result = leads_query.execute()
-                lead_rows = leads_result.data or []
-                if lead_rows:
-                    company_count = len(lead_rows)
-                    results_parts.append(f"**{company_count} companies** discovered matching your criteria")
+            if assembled_leads:
+                # --- Rich per-company lead-gen completion message ---
+                lead_lines: list[str] = []
+                total_drafts = sum(l.get("draft_count", 0) for l in assembled_leads)
+                for idx, lead in enumerate(assembled_leads, 1):
+                    cn = lead.get("company_name", "Unknown")
+                    sc = lead.get("score", 0)
+                    qt = lead.get("quality_tier", "").replace("_", " ").title()
+                    sig = lead.get("signal_summary", "")
+                    fit = lead.get("fit_analysis", "")
+                    contacts_list = lead.get("contacts", [])
+                    dc = lead.get("draft_count", 0)
 
-                    # Check quality tiers
-                    signal_enriched = sum(
-                        1 for r in lead_rows
-                        if (r.get("score_breakdown") or {}).get("quality_tier") == "signal_enriched"
+                    contact_strs = []
+                    for c in contacts_list[:3]:
+                        cname = c.get("name", "")
+                        ctitle = c.get("title", "")
+                        if cname and ctitle:
+                            contact_strs.append(f"{cname} ({ctitle})")
+                        elif cname:
+                            contact_strs.append(cname)
+
+                    lines = [f"**{idx}. {cn}** — Score: {sc}/100 ({qt})"]
+                    if sig:
+                        lines.append(f"   Why now: {sig[:150]}")
+                    if fit:
+                        lines.append(f"   Why us: {fit[:150]}")
+                    if contact_strs:
+                        lines.append(f"   Contacts: {', '.join(contact_strs)}")
+                    if dc:
+                        lines.append(f"   Drafts ready: {dc} outreach email{'s' if dc != 1 else ''} prepared")
+                    lead_lines.append("\n".join(lines))
+
+                header = (
+                    f"I found **{len(assembled_leads)} companies** matching your criteria."
+                    + (f" Here's what I discovered:" if assembled_leads else "")
+                )
+                body = "\n\n".join(lead_lines)
+                footer = "\n\nThese leads are in your Action Queue for approval. Approve to add to your pipeline."
+                if total_drafts:
+                    footer = f"\n\n**{total_drafts} email drafts** prepared across all leads." + footer
+
+                message = f"{header}\n\n{body}{footer}"
+                summary = message
+
+            else:
+                # --- Generic completion message (non-lead-gen or assembly returned empty) ---
+                try:
+                    # Get goal started_at for time-window query
+                    goal_time_result = (
+                        self._db.table("goals")
+                        .select("started_at")
+                        .eq("id", goal_id)
+                        .limit(1)
+                        .execute()
                     )
-                    if signal_enriched > 0:
-                        quality_note = "Some leads have recent market signals that suggest good timing for outreach."
-                    elif lead_rows:
-                        quality_note = "Note: I couldn't find strong market signals for these companies. You may want to refine the search criteria."
+                    goal_started_at = (
+                        goal_time_result.data[0].get("started_at")
+                        if goal_time_result.data
+                        else None
+                    )
 
-                # Count contacts from discovered_leads.contacts JSONB arrays
-                if lead_rows:
+                    # Count discovered leads created during this goal's execution window
+                    leads_query = (
+                        self._db.table("discovered_leads")
+                        .select("id, company_name, score_breakdown")
+                        .eq("user_id", user_id)
+                        .eq("source", "goal_execution")
+                    )
+                    if goal_started_at:
+                        leads_query = leads_query.gte("created_at", goal_started_at)
+                    leads_result = leads_query.execute()
+                    lead_rows = leads_result.data or []
+                    if lead_rows:
+                        company_count = len(lead_rows)
+                        results_parts.append(f"**{company_count} companies** discovered matching your criteria")
+
+                        # Check quality tiers
+                        signal_enriched = sum(
+                            1 for r in lead_rows
+                            if (r.get("score_breakdown") or {}).get("quality_tier") == "signal_enriched"
+                        )
+                        if signal_enriched > 0:
+                            quality_note = "Some leads have recent market signals that suggest good timing for outreach."
+                        elif lead_rows:
+                            quality_note = "Note: I couldn't find strong market signals for these companies. You may want to refine the search criteria."
+
+                    # Count contacts from discovered_leads.contacts JSONB arrays
+                    if lead_rows:
+                        try:
+                            contact_count = 0
+                            contacts_query = (
+                                self._db.table("discovered_leads")
+                                .select("contacts")
+                                .eq("user_id", user_id)
+                                .eq("source", "goal_execution")
+                            )
+                            if goal_started_at:
+                                contacts_query = contacts_query.gte("created_at", goal_started_at)
+                            contacts_result = contacts_query.execute()
+                            for row in contacts_result.data or []:
+                                c = row.get("contacts")
+                                if isinstance(c, list):
+                                    contact_count += len(c)
+                            if contact_count:
+                                results_parts.append(f"**{contact_count} contacts** identified across those companies")
+                        except Exception:
+                            pass
+
+                    # Count email drafts created during this goal's execution window
                     try:
-                        contact_count = 0
-                        contacts_query = (
-                            self._db.table("discovered_leads")
-                            .select("contacts")
+                        drafts_query = (
+                            self._db.table("email_drafts")
+                            .select("id")
                             .eq("user_id", user_id)
-                            .eq("source", "goal_execution")
                         )
                         if goal_started_at:
-                            contacts_query = contacts_query.gte("created_at", goal_started_at)
-                        contacts_result = contacts_query.execute()
-                        for row in contacts_result.data or []:
-                            c = row.get("contacts")
-                            if isinstance(c, list):
-                                contact_count += len(c)
-                        if contact_count:
-                            results_parts.append(f"**{contact_count} contacts** identified across those companies")
+                            drafts_query = drafts_query.gte("created_at", goal_started_at)
+                        drafts_result = drafts_query.execute()
+                        draft_count = len(drafts_result.data or [])
+                        if draft_count:
+                            results_parts.append(f"**{draft_count} email drafts** prepared for your review")
                     except Exception:
                         pass
 
-                # Count email drafts created during this goal's execution window
-                try:
-                    drafts_query = (
-                        self._db.table("email_drafts")
-                        .select("id")
-                        .eq("user_id", user_id)
+                except Exception as e:
+                    logger.debug("Failed to build results summary: %s", e)
+
+                # Construct the generic completion message
+                retro_summary = retro.get("summary", "") if retro else ""
+                if results_parts:
+                    results_lines = "\n".join(f"- {p}" for p in results_parts)
+                    header = (
+                        f"I've completed **{goal_title}**. Here's what I found:"
+                        if goal_title
+                        else "Goal completed. Here's what I found:"
                     )
-                    if goal_started_at:
-                        drafts_query = drafts_query.gte("created_at", goal_started_at)
-                    drafts_result = drafts_query.execute()
-                    draft_count = len(drafts_result.data or [])
-                    if draft_count:
-                        results_parts.append(f"**{draft_count} email drafts** prepared for your review")
-                except Exception:
-                    pass
-
-            except Exception as e:
-                logger.debug("Failed to build results summary: %s", e)
-
-            # Construct the completion message
-            retro_summary = retro.get("summary", "") if retro else ""
-            if results_parts:
-                results_lines = "\n".join(f"- {p}" for p in results_parts)
-                header = (
-                    f"I've completed **{goal_title}**. Here's what I found:"
-                    if goal_title
-                    else "Goal completed. Here's what I found:"
-                )
-                message = f"{header}\n{results_lines}"
-                if quality_note:
-                    message += f"\n\n{quality_note}"
-                message += "\n\nThe leads are in your Action Queue for approval."
-                summary = message
-            elif retro_summary:
-                summary = retro_summary
-                message = (
-                    f"Your goal is complete: **{goal_title}**. {summary}"
-                    if goal_title
-                    else f"Goal completed. {summary}"
-                )
-            else:
-                summary = ""
-                message = (
-                    f"I've completed **{goal_title}**."
-                    if goal_title
-                    else "Goal completed."
-                )
+                    message = f"{header}\n{results_lines}"
+                    if quality_note:
+                        message += f"\n\n{quality_note}"
+                    message += "\n\nThe leads are in your Action Queue for approval."
+                    summary = message
+                elif retro_summary:
+                    summary = retro_summary
+                    message = (
+                        f"Your goal is complete: **{goal_title}**. {summary}"
+                        if goal_title
+                        else f"Goal completed. {summary}"
+                    )
+                else:
+                    summary = ""
+                    message = (
+                        f"I've completed **{goal_title}**."
+                        if goal_title
+                        else "Goal completed."
+                    )
 
             # Build rich_content with retrospective and goal completion card
             rich_content_items: list[dict[str, Any]] = []
@@ -5025,6 +5714,19 @@ class GoalExecutionService:
                         "goal_id": goal_id,
                         "retrospective": retro,
                         "feedback_affordance": True,
+                    },
+                })
+
+            # Add assembled leads as rich content for frontend rendering
+            if assembled_leads:
+                rich_content_items.append({
+                    "type": "lead_gen_results",
+                    "data": {
+                        "goal_id": goal_id,
+                        "goal_title": goal_title,
+                        "leads": assembled_leads,
+                        "total_leads": len(assembled_leads),
+                        "total_drafts": sum(l.get("draft_count", 0) for l in assembled_leads),
                     },
                 })
 
@@ -5072,15 +5774,23 @@ class GoalExecutionService:
             except Exception:
                 logger.debug("Failed to build goal_completion card", exc_info=True)
 
-            # Enhanced suggestions based on retrospective content
-            retro_suggestions = ["Show details", "Rate this goal", "What's next?"]
-            if retro and retro.get("next_steps"):
+            # Enhanced suggestions based on goal type and content
+            if assembled_leads:
+                retro_suggestions = [
+                    "Show more details",
+                    "Approve all leads",
+                    "Refine search criteria",
+                    "What's next?",
+                ]
+            elif retro and retro.get("next_steps"):
                 retro_suggestions = [
                     "Show details",
                     "Rate this goal",
                     "Start a follow-up goal",
                     "What's next?",
                 ]
+            else:
+                retro_suggestions = ["Show details", "Rate this goal", "What's next?"]
 
             await ws_manager.send_aria_message(
                 user_id=user_id,

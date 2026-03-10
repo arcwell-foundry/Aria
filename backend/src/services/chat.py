@@ -872,6 +872,23 @@ class ChatService:
         # (compiled regex, goal_type, description template)
         (re.compile(r"\b(?:find|identify|discover|source|list)\b.{0,40}\b(?:compan|firm|vendor|supplier|provider|prospect|lead|account)", re.I),
          "lead_gen", "Find and qualify target companies"),
+
+        # --- Lead gen: explicit numeric + entity patterns ---
+        (re.compile(r"\bfind\s+(?:me\s+)?\d+\s+(?:companies|leads|CDMOs|CROs|biotechs|pharma)", re.I),
+         "lead_gen", "Find and qualify target companies"),
+        (re.compile(r"\bdiscover\s+\d*\s*(?:companies|leads|prospects)", re.I),
+         "lead_gen", "Discover target companies"),
+        (re.compile(r"\bbuild\s+(?:a\s+|my\s+)?pipeline\b", re.I),
+         "lead_gen", "Build lead pipeline"),
+        (re.compile(r"\bsearch\s+for\s+(?:\d+\s+)?(?:companies|leads|CDMOs|CROs)", re.I),
+         "lead_gen", "Search for target companies"),
+        (re.compile(r"\bidentify\s+\d+\s+(?:companies|leads|targets)", re.I),
+         "lead_gen", "Identify target companies"),
+        (re.compile(r"\b(?:find|generate|get)\s+(?:me\s+)?(?:some\s+)?(?:new\s+)?(?:leads|prospects)\b", re.I),
+         "lead_gen", "Generate leads"),
+        (re.compile(r"\bwho\s+should\s+I\s+(?:target|reach out to|contact)\b", re.I),
+         "lead_gen", "Identify target companies"),
+
         (re.compile(r"\b(?:research|investigate|look into|dig into|explore)\b.{0,40}\b(?:compan|firm|market|sector|industry|competitor|landscape|space|pipeline|strateg|portfolio)", re.I),
          "research", "Research and analyze market landscape"),
         (re.compile(r"\b(?:draft|write|compose|prepare|create)\b.{0,40}\b(?:email|outreach|message|proposal|follow[- ]?up|intro)", re.I),
