@@ -10,7 +10,7 @@ import logging
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, List
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
@@ -2948,4 +2948,202 @@ async def get_therapeutic_trends_with_narratives(
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve therapeutic trends.",
+        ) from e
+
+
+# --- Real-Time Web Intelligence Research (Exa + Perplexity) ---
+
+
+class ResearchRequest(BaseModel):
+    """Request for parallel web intelligence research."""
+
+    query: str = Field(..., description="Research query string")
+    entity_name: str | None = Field(None, description="Optional entity name for signal linking")
+    deep: bool = Field(False, description="Use deep research (sonar-pro)")
+
+
+class ResearchSourceResult(BaseModel):
+    """Result from a single intelligence source."""
+
+    source: str
+    answer: str
+    citations: List[str] = Field(default_factory=list)
+    model: str = ""
+    error: str | None = None
+
+
+class ResearchResponse(BaseModel):
+    """Combined response from Exa and Perplexity."""
+
+    exa: ResearchSourceResult | None = None
+    perplexity: ResearchSourceResult | None = None
+    saved_to_memory: bool = False
+
+
+@router.post("/research", response_model=ResearchResponse)
+async def web_intelligence_research(
+    current_user: CurrentUser,
+    request: ResearchRequest,
+) -> ResearchResponse:
+    """Execute parallel web intelligence research using Exa and Perplexity.
+
+    Queries both Exa and Perplexity in parallel for comprehensive market intelligence,
+    then combines and results. Writes the combined insight to semantic memory
+    for persistence.
+
+    Args:
+        current_user: Authenticated user.
+        request: Research request with query and optional entity_name, and deep flag.
+
+    Returns:
+        ResearchResponse with results from both sources.
+    """
+    import asyncio
+
+    from src.agents.capabilities.enrichment_providers.exa_provider import ExaEnrichmentProvider
+    from src.integrations.perplexity.client import get_perplexity_client
+
+    exa_result: ResearchSourceResult | None = None
+    perplexity_result: ResearchSourceResult | None = None
+
+    # Run both searches in parallel
+    exa_provider = ExaEnrichmentProvider()
+    perplexity_client = get_perplexity_client()
+
+    async def fetch_exa() -> list[dict[str, Any]]:
+        """Fetch Exa results."""
+        try:
+                results = await exa_provider.search_fast(
+                    query=request.query,
+                    num_results=10,
+                )
+                return [
+                    {
+                        "title": r.title,
+                        "url": r.url,
+                        "snippet": (r.text or "")[:500],
+                        "score": r.score,
+                    }
+                    for r in results
+                ]
+        except Exception as e:
+            logger.warning("Exa search failed: %s", e)
+            return []
+
+    async def fetch_perplexity() -> dict[str, Any]:
+        """Fetch Perplexity results."""
+        if not perplexity_client.is_configured:
+            return {}
+        try:
+                if request.deep:
+                    result = await perplexity_client.research(request.query)
+                else:
+                    result = await perplexity_client.search(request.query)
+                return {
+                    "answer": result.get("answer", ""),
+                    "citations": result.get("citations", []),
+                    "model": result.get("model", "sonar"),
+                }
+        except Exception as e:
+            logger.warning("Perplexity search failed: %s", e)
+            return {}
+
+    try:
+        exa_results, perplexity_results = await asyncio.gather(
+            fetch_exa(),
+            fetch_perplexity(),
+            return_exceptions=True,  # Never let one failure break the whole request
+        )
+
+        # Build response objects
+        exa_response: ResearchSourceResult | None = None
+        perplexity_response: ResearchSourceResult | None = None
+
+        if exa_results:
+            first_snippet = exa_results[0].get("snippet", "") if exa_results else ""
+            exa_response = ResearchSourceResult(
+                source="exa",
+                answer=first_snippet,
+                citations=[r.get("url", "") for r in exa_results if r.get("url")],
+                model="search_fast",
+            )
+        else:
+            exa_response = ResearchSourceResult(
+                source="exa",
+                answer="",
+                citations=[],
+                error="Exa search returned no results or API not configured",
+            )
+
+        if perplexity_results and perplexity_results.get("answer"):
+            perplexity_response = ResearchSourceResult(
+                source="perplexity",
+                answer=perplexity_results.get("answer", ""),
+                citations=perplexity_results.get("citations", []),
+                model=perplexity_results.get("model", "sonar"),
+            )
+        else:
+            perplexity_response = ResearchSourceResult(
+                source="perplexity",
+                answer="",
+                citations=[],
+                error="Perplexity not configured or returned no results",
+            )
+
+        # Write combined result to semantic memory
+        saved_to_memory = False
+        combined_answer = ""
+        if exa_response and exa_response.answer:
+            combined_answer += f"[Exa] {exa_response.answer}\n"
+        if perplexity_response and perplexity_response.answer:
+            combined_answer += f"[Perplexity] {perplexity_response.answer}\n"
+
+        if combined_answer and request.entity_name:
+            try:
+                db = get_supabase_client()
+                db.table("memory_semantic").insert(
+                    {
+                        "user_id": str(current_user.id),
+                        "fact": f"Research on {request.entity_name}: {combined_answer[:500]}",
+                        "confidence": 0.7,
+                        "source": "scout_agent",
+                        "metadata": {
+                            "query": request.query,
+                            "entity_name": request.entity_name,
+                            "sources_used": [
+                                s for s in [exa_response, perplexity_response] if s
+                            ],
+                        },
+                    }
+                ).execute()
+                saved_to_memory = True
+                logger.info("Research result saved to memory_semantic")
+            except Exception as e:
+                logger.warning("Failed to save research to memory: %s", e)
+
+        logger.info(
+            "Web intelligence research completed",
+            extra={
+                "user_id": current_user.id,
+                "query": request.query[:100],
+                "exa_results": len(exa_results) if exa_results else 0,
+                "perplexity_configured": perplexity_client.is_configured,
+                "saved_to_memory": saved_to_memory,
+            },
+        )
+
+        return ResearchResponse(
+            exa=exa_response,
+            perplexity=perplexity_response,
+            saved_to_memory=saved_to_memory,
+        )
+
+    except Exception as e:
+        logger.exception(
+            "Web intelligence research failed",
+            extra={"user_id": current_user.id},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Research request failed. Please try again.",
         ) from e

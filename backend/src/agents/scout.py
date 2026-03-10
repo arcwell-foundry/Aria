@@ -144,6 +144,22 @@ class ScoutAgent(SkillAwareAgent):
                 logger.warning("ScoutAgent: Failed to initialize ExaEnrichmentProvider: %s", e)
         return self._exa_provider
 
+    def _get_perplexity_client(self) -> Any:
+        """Lazily initialize and return the PerplexityClient."""
+        if not hasattr(self, "_perplexity_client") or self._perplexity_client is None:
+            try:
+                from src.integrations.perplexity.client import get_perplexity_client
+
+                self._perplexity_client = get_perplexity_client()
+                if self._perplexity_client.is_configured:
+                    logger.info("ScoutAgent: PerplexityClient initialized")
+                else:
+                    logger.info("ScoutAgent: PerplexityClient not configured")
+            except Exception as e:
+                logger.warning("ScoutAgent: Failed to initialize PerplexityClient: %s", e)
+                self._perplexity_client = None
+        return self._perplexity_client
+
     def _check_tool_connected(
         self,
         resource_status: list[dict[str, Any]],
@@ -648,12 +664,19 @@ class ScoutAgent(SkillAwareAgent):
             news_results = await self._news_search(query=entity, limit=5, days_back=days_back)
             social_results = await self._social_monitor(entity=entity, limit=5)
 
+            # Also query Perplexity for real-time web intelligence
+            perplexity_result = await self._perplexity_search(
+                query=f"{entity} latest news announcements funding this month",
+                deep=False,  # Use fast sonar for signal detection
+            )
+
             # Combine all gathered results for LLM classification
             gathered_data = {
                 "entity": entity,
                 "web_results": web_results,
                 "news_results": news_results,
                 "social_mentions": social_results,
+                "perplexity_intelligence": perplexity_result,
             }
 
             # Use Claude to classify signals from gathered intelligence
@@ -911,3 +934,47 @@ class ScoutAgent(SkillAwareAgent):
         except Exception as e:
             logger.warning(f"find_similar failed for '{url}': {e}")
             return []
+
+    async def _perplexity_search(
+        self,
+        query: str,
+        deep: bool = False,
+    ) -> dict[str, Any]:
+        """Search with Perplexity for real-time web intelligence with citations.
+
+        Uses Perplexity's Sonar models to get answers with source citations.
+        Complements Exa search by providing synthesized answers rather than
+        raw search results.
+
+        Args:
+            query: Search query string.
+            deep: Use sonar-pro for deeper research (slower but more comprehensive).
+
+        Returns:
+            Dict with 'answer', 'citations', or empty dict on failure.
+        """
+        if not query or query.strip() == "":
+            return {}
+
+        logger.info("Perplexity search: query='%s' deep=%s", query[:100], deep)
+
+        perplexity = self._get_perplexity_client()
+        if not perplexity or not perplexity.is_configured:
+            logger.debug("Perplexity not configured, skipping search")
+            return {}
+
+        try:
+            if deep:
+                result = await perplexity.research(query)
+            else:
+                result = await perplexity.search(query)
+
+            return {
+                "answer": result.get("answer", ""),
+                "citations": result.get("citations", []),
+                "model": result.get("model", "sonar"),
+            }
+
+        except Exception as e:
+            logger.warning("Perplexity search failed for '%s': %s", query[:100], e)
+            return {}

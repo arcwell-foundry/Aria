@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     EXA_API_KEY: str = ""
     EXA_WEBHOOK_SECRET: str = ""  # Webhook signature verification secret
 
+    # Perplexity API (real-time web intelligence — optional)
+    PERPLEXITY_API_KEY: str = ""
+
     # Application Settings
     APP_SECRET_KEY: SecretStr = SecretStr("")
     APP_ENV: Literal["development", "staging", "production"] = "development"
@@ -177,6 +180,11 @@ class Settings(BaseSettings):
     def exa_configured(self) -> bool:
         """Check if Exa API is configured for web enrichment."""
         return bool(self.EXA_API_KEY)
+
+    @property
+    def perplexity_configured(self) -> bool:
+        """Check if Perplexity API is configured for real-time web intelligence."""
+        return bool(self.PERPLEXITY_API_KEY)
 
     @property
     def thesys_configured(self) -> bool:
