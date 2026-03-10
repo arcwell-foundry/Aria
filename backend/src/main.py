@@ -37,6 +37,7 @@ from src.api.routes import (
     companion,  # Phase 8: Companion personality routes
     compliance,
     debriefs,
+    decks,  # Gamma AI-powered presentations
     deep_sync,  # US-942: Deep sync API routes
     drafts,
     email,  # Real-time email urgency detection
@@ -371,6 +372,7 @@ app.include_router(companion_narrative_router, prefix="/api/v1")  # US-807: Narr
 app.include_router(companion_improvement_router, prefix="/api/v1")  # US-809: Self-Improvement
 app.include_router(compliance.router, prefix="/api/v1")
 app.include_router(debriefs.router, prefix="/api/v1")
+app.include_router(decks.router, prefix="/api/v1")  # Gamma AI-powered presentations
 app.include_router(drafts.router, prefix="/api/v1")
 app.include_router(email.router, prefix="/api/v1")
 app.include_router(email_intelligence_settings.router, prefix="/api/v1")

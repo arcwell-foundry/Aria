@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     # Perplexity API (real-time web intelligence — optional)
     PERPLEXITY_API_KEY: str = ""
 
+    # Gamma API (AI-powered presentations — optional)
+    GAMMA_API_KEY: SecretStr | None = None
+
     # Application Settings
     APP_SECRET_KEY: SecretStr = SecretStr("")
     APP_ENV: Literal["development", "staging", "production"] = "development"
@@ -185,6 +188,11 @@ class Settings(BaseSettings):
     def perplexity_configured(self) -> bool:
         """Check if Perplexity API is configured for real-time web intelligence."""
         return bool(self.PERPLEXITY_API_KEY)
+
+    @property
+    def gamma_configured(self) -> bool:
+        """Check if Gamma API is configured for AI-powered presentations."""
+        return bool(self.GAMMA_API_KEY and self.GAMMA_API_KEY.get_secret_value())
 
     @property
     def thesys_configured(self) -> bool:

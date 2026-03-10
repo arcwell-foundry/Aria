@@ -42,6 +42,11 @@ class MeetingBaaSClient:
             "Content-Type": "application/json",
         }
 
+    @property
+    def is_configured(self) -> bool:
+        """Check if the client has a valid API key."""
+        return bool(self.api_key)
+
     async def create_bot(
         self,
         meeting_url: str,
@@ -141,6 +146,39 @@ class MeetingBaaSClient:
                 )
                 response.raise_for_status()
                 logger.info("MeetingBaaS bot deleted", extra={"bot_id": bot_id})
+                return response.json()
+            except httpx.HTTPStatusError as e:
+                self._handle_http_error(e)
+                raise
+            except httpx.RequestError as e:
+                logger.error("MeetingBaaS connection error: %s", e)
+                raise MeetingBaaSError(f"Connection error: {e}") from e
+
+    async def send_chat_message(self, bot_id: str, message: str) -> dict[str, Any]:
+        """Send a chat message through a bot in a meeting.
+
+        Args:
+            bot_id: The bot ID to send the message through.
+            message: The message to send.
+
+        Returns:
+            Dict with message confirmation.
+
+        Raises:
+            MeetingBaaSError: If the API returns an error.
+        """
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            try:
+                response = await client.post(
+                    f"{BASE_URL}/bots/{bot_id}/chat",
+                    headers=self.headers,
+                    json={"message": message},
+                )
+                response.raise_for_status()
+                logger.info(
+                    "MeetingBaaS chat message sent",
+                    extra={"bot_id": bot_id, "message_len": len(message)},
+                )
                 return response.json()
             except httpx.HTTPStatusError as e:
                 self._handle_http_error(e)
