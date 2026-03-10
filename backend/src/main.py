@@ -19,6 +19,7 @@ from src.api.routes import (
     admin,
     admin_dashboard,
     admin_tools,
+    backfill,
     ambient_onboarding,
     analytics,
     aria_capabilities,  # ARIA self-awareness capability registry
@@ -348,6 +349,7 @@ app.include_router(ambient_onboarding.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(admin_dashboard.router, prefix="/api/v1")
 app.include_router(admin_tools.router, prefix="/api/v1")
+app.include_router(backfill.router, prefix="/api/v1")  # Admin memory backfill
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(aria_capabilities.router, prefix="/api/v1")  # ARIA self-awareness
 app.include_router(aria_config.router, prefix="/api/v1")
