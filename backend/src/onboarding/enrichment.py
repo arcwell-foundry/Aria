@@ -356,6 +356,22 @@ class CompanyEnrichmentEngine:
                 )
             )
 
+            # Seed lead gen intelligence from enrichment classification
+            try:
+                from src.services.lead_gen_intelligence import seed_lead_gen_intelligence
+
+                await seed_lead_gen_intelligence(
+                    user_id=user_id,
+                    company_type=result.classification.company_type,
+                    modality=result.classification.primary_modality,
+                    posture=result.classification.company_posture,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Lead gen intelligence seeding after enrichment failed",
+                    extra={"user_id": user_id, "error": str(e)},
+                )
+
             # Record episodic memory
             await self._record_episodic(user_id, company_name, result)
 

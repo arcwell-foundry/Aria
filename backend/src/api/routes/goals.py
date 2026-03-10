@@ -310,10 +310,7 @@ async def approve_goal_plan(
 
     from fastapi import HTTPException
 
-    from src.core.ws import ws_manager
     from src.db.supabase import SupabaseClient
-    from src.models.ws_events import AriaMessageEvent
-    from src.services.conversations import ConversationService
 
     db = SupabaseClient.get_client()
 
@@ -406,59 +403,9 @@ async def approve_goal_plan(
     service = _get_execution_service()
     await service.execute_goal_async(goal_id, current_user.id)
 
-    # Persist a confirmation message to the conversation
-    try:
-        if not conversation_id:
-            conv_result = (
-                db.table("conversations")
-                .select("id")
-                .eq("user_id", current_user.id)
-                .order("updated_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            conversation_id = conv_result.data[0]["id"] if conv_result.data else None
-        if conversation_id:
-            conv_service = ConversationService(db)
-            await conv_service.save_message(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=(
-                    f"Starting execution on **{goal['title']}**. "
-                    f"I'll keep you updated as each phase completes."
-                ),
-                metadata={
-                    "type": "plan_approved",
-                    "data": {"goal_id": goal_id, "title": goal["title"]},
-                },
-            )
-    except Exception as e:
-        logger.warning("Failed to persist approval message: %s", e)
-
-    # Emit conversational WebSocket message
-    try:
-        event = AriaMessageEvent(
-            message=(
-                f"Starting execution on **{goal['title']}**. "
-                f"I'll keep you updated as each phase completes."
-            ),
-            rich_content=[],
-            ui_commands=[
-                {
-                    "action": "update_sidebar_badge",
-                    "sidebar_item": "goals",
-                    "badge_count": 1,
-                }
-            ],
-            suggestions=[
-                "Show me the progress",
-                "What step is running now?",
-                "Pause if anything looks off",
-            ],
-        )
-        await ws_manager.send_to_user(current_user.id, event)
-    except Exception as e:
-        logger.warning("Failed to send approval WebSocket event: %s", e)
+    # Start message is sent by goal_execution.py's _run_goal_background
+    # ("Working on this now. I'll let you know when it's ready.")
+    # to avoid duplicate start messages in chat.
 
     logger.info(
         "Goal plan approved and execution started",

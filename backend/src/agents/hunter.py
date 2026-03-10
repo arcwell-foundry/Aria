@@ -66,6 +66,40 @@ def _extract_json_from_text(text: str) -> Any:
     raise json.JSONDecodeError("No valid JSON found in text", text, 0)
 
 
+# Blocklist for consulting/advisory firms that aren't real manufacturing targets
+_CONSULTING_BLOCKLIST = {
+    "mckinsey", "deloitte", "accenture", "bcg", "boston consulting",
+    "bain", "kpmg", "pwc", "ey", "ernst & young",
+    "herspiegel", "trinity partners", "iqvia consulting",
+    "zs associates", "simon-kucher",
+}
+
+_CONSULTING_KEYWORDS = {"consulting", "advisory", "advisors", "consultants"}
+
+
+def _is_consulting_or_advisory(name: str) -> bool:
+    """Check if a company name indicates a consulting/advisory firm.
+
+    Returns True if the name matches known consulting firms or contains
+    consulting-related keywords without life sciences manufacturing context.
+    """
+    name_lower = name.lower().strip()
+
+    # Check against known blocklist
+    for blocked in _CONSULTING_BLOCKLIST:
+        if blocked in name_lower:
+            return True
+
+    # Check for consulting keywords — allow if combined with bio/life sciences
+    has_consulting_keyword = any(kw in name_lower for kw in _CONSULTING_KEYWORDS)
+    has_bio_keyword = any(
+        kw in name_lower
+        for kw in ("bio", "life science", "pharma", "genomic", "cell", "gene")
+    )
+
+    return has_consulting_keyword and not has_bio_keyword
+
+
 class HunterAgent(SkillAwareAgent):
     """Discovers and qualifies new leads based on ICP.
 
@@ -196,7 +230,49 @@ class HunterAgent(SkillAwareAgent):
             logger.warning("[HUNTER] Failed to load active ICP: %s", e)
             self._active_icp = None
 
-        # 3. Load domain context from knowledge_base.md
+        # 3. Load search vocabulary from memory_semantic
+        try:
+            result = (
+                db.table("memory_semantic")
+                .select("fact")
+                .eq("user_id", self.user_id)
+                .eq("metadata->>entity_type", "search_vocabulary")
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                self._search_vocabulary = result.data[0]["fact"]
+                logger.info("[HUNTER] Loaded search vocabulary from memory_semantic")
+            else:
+                self._search_vocabulary = ""
+                logger.info("[HUNTER] No search vocabulary found in memory_semantic")
+        except Exception as e:
+            logger.warning("[HUNTER] Failed to load search vocabulary: %s", e)
+            self._search_vocabulary = ""
+
+        # 4. Load target company examples from memory_semantic
+        try:
+            result = (
+                db.table("memory_semantic")
+                .select("fact")
+                .eq("user_id", self.user_id)
+                .eq("metadata->>entity_type", "target_examples")
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                self._target_examples = result.data[0]["fact"]
+                logger.info("[HUNTER] Loaded target company examples from memory_semantic")
+            else:
+                self._target_examples = ""
+                logger.info("[HUNTER] No target examples found in memory_semantic")
+        except Exception as e:
+            logger.warning("[HUNTER] Failed to load target examples: %s", e)
+            self._target_examples = ""
+
+        # 5. Load domain context from knowledge_base.md
         try:
             import os
 
@@ -352,9 +428,27 @@ class HunterAgent(SkillAwareAgent):
         target_count = task["target_count"]
         exclusions = task.get("exclusions", [])
 
-        # Step 1: Build search query from ICP industry
+        # Step 1: Build search query using search vocabulary + ICP industry
         industry = icp.get("industry", "")
-        search_query = industry if isinstance(industry, str) else industry[0] if industry else ""
+        industry_str = industry if isinstance(industry, str) else industry[0] if industry else ""
+
+        # Prefer domain-specific search terms from memory_semantic over generic industry
+        search_vocab = getattr(self, "_search_vocabulary", "")
+        if search_vocab:
+            # Extract quoted terms from the search vocabulary fact
+            import re
+            quoted_terms = re.findall(r'"([^"]+)"', search_vocab)
+            if quoted_terms:
+                # Use the first 3 most specific terms for the search query
+                search_query = " OR ".join(quoted_terms[:3])
+                logger.warning(
+                    "[HUNTER] Using domain-specific search query from memory_semantic: %s",
+                    search_query[:100],
+                )
+            else:
+                search_query = industry_str
+        else:
+            search_query = industry_str
 
         # Step 2: Search for companies (limit = target_count * 3 to have pool)
         search_limit = target_count * 3
@@ -463,8 +557,16 @@ class HunterAgent(SkillAwareAgent):
         if not exa:
             raise RuntimeError("ExaEnrichmentProvider not available")
 
+        # Build a more targeted Exa query using search vocabulary if available
+        search_vocab = getattr(self, "_search_vocabulary", "")
+        if search_vocab and "CDMO" in search_vocab:
+            # Use domain-specific query instead of generic
+            exa_query = query
+        else:
+            exa_query = f"{query} companies life sciences commercial"
+
         results = await exa.search_fast(
-            query=f"{query} companies life sciences commercial",
+            query=exa_query,
             num_results=limit * 2,
         )
 
@@ -483,12 +585,31 @@ class HunterAgent(SkillAwareAgent):
             )
         search_context = "\n".join(search_context_parts)
 
+        # Inject target examples and search vocabulary for better extraction
+        target_examples = getattr(self, "_target_examples", "")
+        examples_context = ""
+        if target_examples:
+            examples_context = (
+                f"\n\nIMPORTANT CONTEXT — These are the TYPES of companies we want to find "
+                f"(manufacturers, CDMOs, equipment suppliers — NOT consulting firms):\n"
+                f"{target_examples}\n"
+            )
+
         # Use LLM to extract real companies from the search results
         prompt = (
             f"Below are web search results about '{query}' companies.\n\n"
             f"{wrap_external_data(search_context, 'exa_company_search')}\n\n"
+            f"{examples_context}"
             f"From these search results, identify up to {limit} distinct REAL companies "
             f"that are mentioned. Extract the actual company name — NOT the article title.\n\n"
+            f"CRITICAL FILTERING RULES:\n"
+            f"- Only include companies that MANUFACTURE, PRODUCE, or PROVIDE equipment/services "
+            f"for life sciences/bioprocessing.\n"
+            f"- EXCLUDE consulting firms, advisory companies, market research firms, "
+            f"real estate companies, and financial services companies.\n"
+            f"- If a company name contains 'Consulting', 'Advisory', 'Partners' (without "
+            f"'Life Sciences' or 'Bio'), 'McKinsey', 'Deloitte', 'Accenture', 'BCG', "
+            f"'Trinity' (real estate), skip it.\n\n"
             f"For each company, provide:\n"
             f'- "name": the real company name (e.g. "Nautilus Biotechnology", not an article headline)\n'
             f'- "domain": company website domain if visible in the URL/content\n'
@@ -531,6 +652,10 @@ class HunterAgent(SkillAwareAgent):
                 continue
             name = c.get("name", "").strip()
             if not name or name.lower() in seen_names:
+                continue
+            # Post-extraction consulting firm filter
+            if _is_consulting_or_advisory(name):
+                logger.info("[HUNTER] Filtered out non-manufacturer: %s", name)
                 continue
             seen_names.add(name.lower())
             companies.append(

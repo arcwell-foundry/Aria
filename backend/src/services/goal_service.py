@@ -683,12 +683,13 @@ class GoalService:
         except (json.JSONDecodeError, Exception) as exc:
             logger.warning("Retrospective parse failed: %s", exc)
             retro_data = {
-                "summary": "Retrospective generation failed.",
+                "summary": "",
                 "what_worked": [],
                 "what_didnt": [],
                 "time_analysis": {},
                 "agent_effectiveness": {},
                 "learnings": [],
+                "_generation_failed": True,
             }
 
         now = datetime.now(UTC).isoformat()

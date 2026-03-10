@@ -3004,10 +3004,10 @@ class ChatService:
                 "intent_detected": "goal",
             }
 
-        # Build brief ARIA response text
-        response_text = (
-            f"Let me break this down. Here's my proposed plan for **{title}**:"
-        )
+        # Plan message is sent via WebSocket + persisted by goal_execution.py's
+        # plan_goal(). We only return a minimal acknowledgment here so the SSE
+        # stream completes without duplicating the plan card.
+        response_text = ""
 
         # Add to working memory
         working_memory.add_message("assistant", response_text)
@@ -3022,34 +3022,13 @@ class ChatService:
             conversation_context=conversation_messages[-2:],
         )
 
-        # Build rich_content from the plan result
-        rich_content: list[dict[str, Any]] = [
-            {
-                "type": "execution_plan",
-                "data": {
-                    "goal_id": goal_id,
-                    "title": title,
-                    "tasks": plan_result.get("tasks", []),
-                    "missing_integrations": plan_result.get("missing_integrations", []),
-                    "approval_points": plan_result.get("approval_points", []),
-                    "estimated_total_minutes": plan_result.get("estimated_total_minutes", 0),
-                    "readiness_score": plan_result.get("readiness_score", 100),
-                    "connected_integrations": plan_result.get("connected_integrations", []),
-                },
-            }
-        ]
-
         return {
             "message": response_text,
             "citations": [],
             "conversation_id": conversation_id,
-            "rich_content": rich_content,
+            "rich_content": [],
             "ui_commands": [],
-            "suggestions": [
-                "Approve the plan",
-                "Tell me more about this approach",
-                "Modify the plan",
-            ],
+            "suggestions": [],
             "timing": {
                 "memory_query_ms": 0,
                 "llm_response_ms": 0,

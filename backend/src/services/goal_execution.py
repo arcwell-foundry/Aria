@@ -4781,11 +4781,33 @@ class GoalExecutionService:
 
         # Generate retrospective
         retro = None
+        retro_failed = False
         try:
             goal_service = GoalService()
             retro = await goal_service.generate_retrospective(user_id, goal_id)
+            # Check if retrospective generation actually failed internally
+            if retro and retro.get("_generation_failed"):
+                retro_failed = True
+                retro = None
         except Exception as e:
             logger.warning("Failed to generate retrospective: %s", e)
+            retro_failed = True
+
+        # Log retrospective failure to aria_activity (not to chat)
+        if retro_failed:
+            try:
+                await self._activity.record(
+                    user_id=user_id,
+                    agent="strategist",
+                    activity_type="retrospective_failed",
+                    title=f"Retrospective generation failed for goal {goal_id}",
+                    description="The retrospective could not be generated. This does not affect goal results.",
+                    confidence=0.5,
+                    related_entity_type="goal",
+                    related_entity_id=goal_id,
+                )
+            except Exception:
+                logger.debug("Failed to log retrospective failure to activity")
 
         # Learn from goal completion — extract or update playbooks
         try:
@@ -4881,14 +4903,118 @@ class GoalExecutionService:
             except Exception:
                 pass
 
-            summary = (
-                retro.get("summary", "") if retro else f"Goal '{goal_title}' completed."
-            )
-            message = (
-                f"Your goal is complete: {goal_title}. {summary}"
-                if goal_title
-                else f"Goal completed. {summary}"
-            )
+            # Build results summary from actual data produced during goal execution
+            results_parts: list[str] = []
+            quality_note = ""
+            try:
+                # Get goal started_at for time-window query
+                goal_time_result = (
+                    self._db.table("goals")
+                    .select("started_at")
+                    .eq("id", goal_id)
+                    .limit(1)
+                    .execute()
+                )
+                goal_started_at = (
+                    goal_time_result.data[0].get("started_at")
+                    if goal_time_result.data
+                    else None
+                )
+
+                # Count discovered leads created during this goal's execution window
+                leads_query = (
+                    self._db.table("discovered_leads")
+                    .select("id, company_name, score_breakdown")
+                    .eq("user_id", user_id)
+                    .eq("source", "goal_execution")
+                )
+                if goal_started_at:
+                    leads_query = leads_query.gte("created_at", goal_started_at)
+                leads_result = leads_query.execute()
+                lead_rows = leads_result.data or []
+                if lead_rows:
+                    company_count = len(lead_rows)
+                    results_parts.append(f"**{company_count} companies** discovered matching your criteria")
+
+                    # Check quality tiers
+                    signal_enriched = sum(
+                        1 for r in lead_rows
+                        if (r.get("score_breakdown") or {}).get("quality_tier") == "signal_enriched"
+                    )
+                    if signal_enriched > 0:
+                        quality_note = "Some leads have recent market signals that suggest good timing for outreach."
+                    elif lead_rows:
+                        quality_note = "Note: I couldn't find strong market signals for these companies. You may want to refine the search criteria."
+
+                # Count contacts from discovered_leads.contacts JSONB arrays
+                if lead_rows:
+                    try:
+                        contact_count = 0
+                        contacts_query = (
+                            self._db.table("discovered_leads")
+                            .select("contacts")
+                            .eq("user_id", user_id)
+                            .eq("source", "goal_execution")
+                        )
+                        if goal_started_at:
+                            contacts_query = contacts_query.gte("created_at", goal_started_at)
+                        contacts_result = contacts_query.execute()
+                        for row in contacts_result.data or []:
+                            c = row.get("contacts")
+                            if isinstance(c, list):
+                                contact_count += len(c)
+                        if contact_count:
+                            results_parts.append(f"**{contact_count} contacts** identified across those companies")
+                    except Exception:
+                        pass
+
+                # Count email drafts created during this goal's execution window
+                try:
+                    drafts_query = (
+                        self._db.table("email_drafts")
+                        .select("id")
+                        .eq("user_id", user_id)
+                    )
+                    if goal_started_at:
+                        drafts_query = drafts_query.gte("created_at", goal_started_at)
+                    drafts_result = drafts_query.execute()
+                    draft_count = len(drafts_result.data or [])
+                    if draft_count:
+                        results_parts.append(f"**{draft_count} email drafts** prepared for your review")
+                except Exception:
+                    pass
+
+            except Exception as e:
+                logger.debug("Failed to build results summary: %s", e)
+
+            # Construct the completion message
+            retro_summary = retro.get("summary", "") if retro else ""
+            if results_parts:
+                results_lines = "\n".join(f"- {p}" for p in results_parts)
+                header = (
+                    f"I've completed **{goal_title}**. Here's what I found:"
+                    if goal_title
+                    else "Goal completed. Here's what I found:"
+                )
+                message = f"{header}\n{results_lines}"
+                if quality_note:
+                    message += f"\n\n{quality_note}"
+                message += "\n\nThe leads are in your Action Queue for approval."
+                summary = message
+            elif retro_summary:
+                summary = retro_summary
+                message = (
+                    f"Your goal is complete: **{goal_title}**. {summary}"
+                    if goal_title
+                    else f"Goal completed. {summary}"
+                )
+            else:
+                summary = ""
+                message = (
+                    f"I've completed **{goal_title}**."
+                    if goal_title
+                    else "Goal completed."
+                )
 
             # Build rich_content with retrospective and goal completion card
             rich_content_items: list[dict[str, Any]] = []
