@@ -589,6 +589,56 @@ class JarvisOrchestrator:
         except Exception:
             logger.warning("Action router import/init failed", exc_info=True)
 
+        # Deliver high-urgency insights immediately via notifications
+        for insight in deduplicated[:5]:
+            try:
+                if insight.urgency >= 0.7:
+                    try:
+                        from src.models.notification import NotificationType
+                        from src.services.notification_service import NotificationService
+
+                        await NotificationService.create_notification(
+                            user_id=user_id,
+                            type=NotificationType.SIGNAL_DETECTED,
+                            title=insight.title or insight.trigger_event or "Intelligence Update",
+                            message=(insight.content or "")[:500],
+                            link="/intelligence",
+                            metadata={
+                                "insight_id": str(insight.id),
+                                "classification": insight.classification,
+                            },
+                        )
+                    except Exception:
+                        logger.debug("Notification creation failed for insight %s", insight.id)
+
+                # Mark as delivered in jarvis_insights (delivery job will skip these)
+                now_iso = datetime.now(UTC).isoformat()
+                delivery_method = (
+                    "immediate" if insight.urgency >= 0.7
+                    else "check_in" if insight.urgency >= 0.5
+                    else "morning_brief"
+                )
+                self._db.table("jarvis_insights").update({
+                    "delivered_at": now_iso,
+                    "delivery_method": delivery_method,
+                }).eq("id", str(insight.id)).execute()
+
+                # Track in intelligence_delivered
+                self._db.table("intelligence_delivered").insert({
+                    "user_id": user_id,
+                    "intelligence_type": "proactive_insight",
+                    "source_id": str(insight.id),
+                    "confidence_score": insight.combined_score,
+                    "delivered_at": now_iso,
+                    "metadata": {
+                        "delivery_method": delivery_method,
+                        "classification": insight.classification,
+                        "engine_source": insight.engine_source,
+                    },
+                }).execute()
+            except Exception:
+                logger.debug("Failed to deliver/track insight %s", insight.id)
+
         return deduplicated
 
     async def get_active_insights(

@@ -1813,6 +1813,81 @@ class BriefingService:
             except Exception as e:
                 logger.warning("BriefingService: Exa enhancement failed: %s", e)
 
+        # Consume undelivered pulse_signals queued for morning_brief
+        pulse_insights: list[dict[str, Any]] = []
+        try:
+            pulse_result = (
+                self._db.table("pulse_signals")
+                .select("id, title, content, signal_category, priority_score, detected_at")
+                .eq("user_id", user_id)
+                .eq("delivery_channel", "morning_brief")
+                .is_("delivered_at", "null")
+                .order("priority_score", desc=True)
+                .limit(10)
+                .execute()
+            )
+
+            for ps in pulse_result.data or []:
+                pulse_insights.append({
+                    "id": ps["id"],
+                    "company_name": "Intelligence",
+                    "title": ps.get("title", ""),
+                    "summary": (ps.get("content") or "")[:300],
+                    "relevance_score": float(ps.get("priority_score", 0)) / 100,
+                    "detected_at": ps.get("detected_at"),
+                    "source": "pulse_engine",
+                })
+
+            # Mark consumed pulse_signals as delivered
+            if pulse_result.data:
+                consumed_ids = [ps["id"] for ps in pulse_result.data]
+                now_iso = datetime.now(UTC).isoformat()
+                self._db.table("pulse_signals").update(
+                    {"delivered_at": now_iso}
+                ).in_("id", consumed_ids).execute()
+
+                logger.info(
+                    "Briefing consumed %d pulse_signals for morning_brief",
+                    len(consumed_ids),
+                )
+
+            # Also consume jarvis_insights queued for morning brief
+            jarvis_brief = (
+                self._db.table("jarvis_insights")
+                .select("id, title, content, combined_score, classification, trigger_event")
+                .eq("user_id", user_id)
+                .eq("delivery_method", "morning_brief")
+                .is_("delivered_at", "null")
+                .order("combined_score", desc=True)
+                .limit(5)
+                .execute()
+            )
+
+            for ji in jarvis_brief.data or []:
+                pulse_insights.append({
+                    "id": ji["id"],
+                    "company_name": "Jarvis",
+                    "title": ji.get("title") or ji.get("trigger_event") or "Insight",
+                    "summary": (ji.get("content") or "")[:300],
+                    "relevance_score": float(ji.get("combined_score", 0)),
+                    "detected_at": None,
+                    "source": "jarvis_engine",
+                    "classification": ji.get("classification"),
+                })
+
+            if jarvis_brief.data:
+                jarvis_ids = [ji["id"] for ji in jarvis_brief.data]
+                now_iso = datetime.now(UTC).isoformat()
+                self._db.table("jarvis_insights").update(
+                    {"delivered_at": now_iso, "delivery_method": "morning_brief"}
+                ).in_("id", jarvis_ids).execute()
+
+        except Exception:
+            logger.debug("Failed to consume pulse_signals for briefing", exc_info=True)
+
+        # Merge pulse insights into market_trends
+        market_trends.extend(pulse_insights)
+
         return {
             "company_news": company_news[:8],
             "market_trends": market_trends,

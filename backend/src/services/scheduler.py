@@ -2142,6 +2142,327 @@ async def _run_hunter_lead_generation() -> None:
         logger.exception("Hunter lead generation scheduler run failed")
 
 
+async def _run_jarvis_insight_delivery() -> None:
+    """Deliver pending Jarvis insights to users via appropriate channels.
+
+    Runs every 5 minutes. For each user with undelivered insights:
+    - High priority (combined_score >= 0.7): Immediate WebSocket push
+    - Medium priority (>= 0.5): Add to action queue for next interaction
+    - Low priority (>= 0.3): Queue for morning brief
+    - Below 0.3: Mark as delivered silently
+
+    Updates jarvis_insights.delivered_at and writes to intelligence_delivered.
+    """
+    try:
+        from datetime import UTC, datetime
+
+        from src.core.ws import ws_manager
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+
+        # Get undelivered insights, ordered by score (highest first)
+        pending = (
+            db.table("jarvis_insights")
+            .select("id, user_id, title, content, combined_score, urgency, "
+                    "classification, insight_type, trigger_event, priority_label, "
+                    "recommended_actions")
+            .is_("delivered_at", "null")
+            .in_("status", ["new", "engaged"])
+            .order("combined_score", desc=True)
+            .limit(50)
+            .execute()
+        )
+
+        insights = pending.data or []
+        if not insights:
+            return
+
+        logger.info("Jarvis insight delivery: %d pending insights", len(insights))
+
+        delivered = 0
+        for insight in insights:
+            try:
+                user_id = insight["user_id"]
+                score = float(insight.get("combined_score") or 0)
+                title = insight.get("title") or insight.get("trigger_event") or "Intelligence Update"
+                content = (insight.get("content") or "")[:500]
+                insight_id = insight["id"]
+
+                # Determine delivery method based on priority
+                if score >= 0.7:
+                    method = "immediate"
+                    # Push via WebSocket
+                    try:
+                        await ws_manager.send_signal(
+                            user_id=user_id,
+                            signal_type="jarvis_insight",
+                            title=title[:100],
+                            severity="high" if score >= 0.85 else "medium",
+                            data={
+                                "insight_id": insight_id,
+                                "content": content,
+                                "classification": insight.get("classification"),
+                                "score": score,
+                                "recommended_actions": insight.get("recommended_actions") or [],
+                            },
+                        )
+                    except Exception:
+                        logger.debug("WebSocket delivery failed for insight %s", insight_id)
+
+                elif score >= 0.5:
+                    method = "check_in"
+                    # Add to action queue for next user interaction
+                    try:
+                        db.table("aria_action_queue").insert({
+                            "user_id": user_id,
+                            "agent": "jarvis",
+                            "action_type": "investigate_signal",
+                            "title": f"Insight: {title[:80]}",
+                            "description": content[:300],
+                            "risk_level": "low",
+                            "status": "pending",
+                            "payload": {
+                                "insight_id": insight_id,
+                                "classification": insight.get("classification"),
+                                "score": score,
+                            },
+                        }).execute()
+                    except Exception:
+                        logger.debug("Action queue insert failed for insight %s", insight_id)
+
+                elif score >= 0.3:
+                    method = "morning_brief"
+                else:
+                    method = "silent"
+
+                # Mark insight as delivered
+                now_iso = datetime.now(UTC).isoformat()
+                db.table("jarvis_insights").update({
+                    "delivered_at": now_iso,
+                    "delivery_method": method,
+                }).eq("id", insight_id).execute()
+
+                # Track in intelligence_delivered
+                try:
+                    db.table("intelligence_delivered").insert({
+                        "user_id": user_id,
+                        "intelligence_type": "proactive_insight",
+                        "source_id": insight_id,
+                        "confidence_score": score,
+                        "delivered_at": now_iso,
+                        "metadata": {
+                            "delivery_method": method,
+                            "classification": insight.get("classification"),
+                            "insight_type": insight.get("insight_type"),
+                        },
+                    }).execute()
+                except Exception:
+                    logger.debug("intelligence_delivered insert failed for %s", insight_id)
+
+                delivered += 1
+
+            except Exception:
+                logger.debug("Failed to deliver insight %s", insight.get("id"), exc_info=True)
+
+        if delivered > 0:
+            logger.info("Jarvis insight delivery complete: %d/%d delivered", delivered, len(insights))
+
+    except Exception:
+        logger.exception("Jarvis insight delivery scheduler run failed")
+
+
+async def _run_deal_health_monitor() -> None:
+    """Monitor deal/lead health every 4 hours.
+
+    Checks for:
+    - Leads with no activity in 14+ days (stale)
+    - Approved leads that have gone silent
+    Creates action queue proposals for re-engagement.
+    """
+    try:
+        from datetime import UTC, datetime, timedelta
+
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+
+        # Get all active users
+        users_result = (
+            db.table("onboarding_state")
+            .select("user_id")
+            .not_.is_("completed_at", "null")
+            .execute()
+        )
+        user_ids = [row["user_id"] for row in (users_result.data or [])]
+
+        if not user_ids:
+            return
+
+        stale_count = 0
+        proposals_created = 0
+        cutoff_14d = (datetime.now(UTC) - timedelta(days=14)).isoformat()
+
+        for user_id in user_ids:
+            try:
+                # Find leads with no recent activity (last_activity_at > 14 days ago)
+                stale_leads = (
+                    db.table("lead_memories")
+                    .select("id, company_name, stakeholder_name, status, last_activity_at")
+                    .eq("user_id", user_id)
+                    .eq("status", "active")
+                    .lt("last_activity_at", cutoff_14d)
+                    .limit(20)
+                    .execute()
+                )
+
+                for lead in stale_leads.data or []:
+                    stale_count += 1
+                    company = lead.get("company_name", "Unknown")
+                    stakeholder = lead.get("stakeholder_name", "")
+                    lead_id = lead["id"]
+
+                    # Check if we already proposed re-engagement for this lead recently
+                    existing_proposal = (
+                        db.table("aria_action_queue")
+                        .select("id")
+                        .eq("user_id", user_id)
+                        .eq("action_type", "draft_reengagement")
+                        .eq("status", "pending")
+                        .execute()
+                    )
+
+                    # Limit to avoid flooding the queue
+                    if len(existing_proposal.data or []) >= 5:
+                        continue
+
+                    # Calculate days since last activity
+                    last_activity = lead.get("last_activity_at")
+                    days_silent = 14  # minimum
+                    if last_activity:
+                        try:
+                            last_dt = datetime.fromisoformat(last_activity.replace("Z", "+00:00"))
+                            days_silent = (datetime.now(UTC) - last_dt).days
+                        except Exception:
+                            pass
+
+                    # Create re-engagement proposal
+                    try:
+                        contact_label = f"{stakeholder} at {company}" if stakeholder else company
+                        db.table("aria_action_queue").insert({
+                            "user_id": user_id,
+                            "agent": "scribe",
+                            "action_type": "draft_reengagement",
+                            "title": f"Re-engage {contact_label}",
+                            "description": (
+                                f"Your lead {contact_label} has been silent for "
+                                f"{days_silent} days. Want me to draft a re-engagement email?"
+                            ),
+                            "risk_level": "low",
+                            "status": "pending",
+                            "payload": {
+                                "lead_id": lead_id,
+                                "company_name": company,
+                                "stakeholder_name": stakeholder,
+                                "days_silent": days_silent,
+                            },
+                        }).execute()
+                        proposals_created += 1
+                    except Exception:
+                        logger.debug(
+                            "Failed to create re-engagement proposal for lead %s", lead_id
+                        )
+
+                # Also check discovered_leads that were approved but never followed up
+                try:
+                    stale_discovered = (
+                        db.table("discovered_leads")
+                        .select("id, company_name, contact_name")
+                        .eq("user_id", user_id)
+                        .eq("review_status", "approved")
+                        .is_("outreach_status", "null")
+                        .lt("created_at", cutoff_14d)
+                        .limit(10)
+                        .execute()
+                    )
+
+                    for lead in stale_discovered.data or []:
+                        stale_count += 1
+                except Exception:
+                    pass
+
+            except Exception:
+                logger.debug(
+                    "Deal health monitor failed for user %s", user_id, exc_info=True
+                )
+
+        if stale_count > 0 or proposals_created > 0:
+            logger.info(
+                "Deal health monitor: %d stale leads found, %d re-engagement proposals created",
+                stale_count,
+                proposals_created,
+            )
+
+    except Exception:
+        logger.exception("Deal health monitor scheduler run failed")
+
+
+async def _run_memory_freshness_decay() -> None:
+    """Decay confidence scores on stale memory_semantic facts.
+
+    Facts older than 30 days with confidence > 0.1 lose 0.01 confidence
+    per decay cycle. This ensures outdated intelligence naturally loses
+    priority while retaining a minimum baseline.
+    """
+    try:
+        from datetime import UTC, datetime, timedelta
+
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+
+        cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+
+        # Find facts older than 30 days with confidence > 0.1
+        stale_facts = (
+            db.table("memory_semantic")
+            .select("id, confidence")
+            .lt("updated_at", cutoff)
+            .gt("confidence", 0.1)
+            .limit(500)
+            .execute()
+        )
+
+        facts = stale_facts.data or []
+        if not facts:
+            return
+
+        decayed = 0
+        now_iso = datetime.now(UTC).isoformat()
+
+        for fact in facts:
+            try:
+                current_confidence = float(fact.get("confidence", 0.5))
+                new_confidence = round(max(0.1, current_confidence - 0.01), 3)
+
+                if new_confidence < current_confidence:
+                    db.table("memory_semantic").update({
+                        "confidence": new_confidence,
+                        "updated_at": now_iso,
+                    }).eq("id", fact["id"]).execute()
+                    decayed += 1
+            except Exception:
+                pass
+
+        if decayed > 0:
+            logger.info(
+                "Memory freshness decay: %d/%d facts decayed", decayed, len(facts)
+            )
+
+    except Exception:
+        logger.exception("Memory freshness decay scheduler run failed")
+
+
 _scheduler: Any = None
 
 
@@ -2494,20 +2815,42 @@ async def start_scheduler() -> None:
             name="Hunter agent lead generation for active goals",
             replace_existing=True,
         )
-        _scheduler.start()
-        logger.info(
-            "Background scheduler started with %d jobs — "
-            "includes proactive pipeline: scout scan every 15 min, "
-            "daily briefing check every 15 min, "
-            "health score refresh at 06:30, "
-            "stale leads check at 07:00, "
-            "weekly digest Monday 07:00, "
-            "battle card refresh Monday 07:30, "
-            "conversion score batch Monday 08:00, "
-            "email check every 15 min, "
-            "hunter lead generation every 30 min",
-            len(_scheduler.get_jobs()),
+        # --- Intelligence Delivery & Health Monitoring ---
+        _scheduler.add_job(
+            _run_jarvis_insight_delivery,
+            trigger=CronTrigger(minute="*/5"),  # Every 5 minutes
+            id="jarvis_insight_delivery",
+            name="Deliver pending Jarvis insights via WebSocket/action queue",
+            replace_existing=True,
         )
+        _scheduler.add_job(
+            _run_deal_health_monitor,
+            trigger=CronTrigger(hour="*/4"),  # Every 4 hours
+            id="deal_health_monitor",
+            name="Deal health monitor: stale lead re-engagement proposals",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_memory_freshness_decay,
+            trigger=CronTrigger(hour=2, minute=15),  # 2:15 AM daily (after salience_decay at 2:00)
+            id="memory_freshness_decay",
+            name="Daily memory_semantic confidence decay for stale facts",
+            replace_existing=True,
+        )
+        _scheduler.start()
+
+        # Log all registered jobs at startup for observability
+        jobs = _scheduler.get_jobs()
+        logger.info(
+            "Background scheduler started with %d jobs", len(jobs),
+        )
+        for job in sorted(jobs, key=lambda j: j.id):
+            logger.info(
+                "  Scheduled job: %s | trigger: %s | next_run: %s",
+                job.id,
+                job.trigger,
+                job.next_run_time,
+            )
     except ImportError:
         logger.warning("apscheduler not installed — background scheduler unavailable")
     except Exception:
