@@ -3098,20 +3098,23 @@ async def web_intelligence_research(
         if perplexity_response and perplexity_response.answer:
             combined_answer += f"[Perplexity] {perplexity_response.answer}\n"
 
-        if combined_answer and request.entity_name:
+        # Save to memory if we have results (even without entity_name)
+        if combined_answer:
+            entity_label = request.entity_name or "general"
+            memory_fact = f"Research on {entity_label}: {combined_answer[:500]}"
             try:
                 db = get_supabase_client()
                 db.table("memory_semantic").insert(
                     {
                         "user_id": str(current_user.id),
-                        "fact": f"Research on {request.entity_name}: {combined_answer[:500]}",
+                        "fact": memory_fact,
                         "confidence": 0.7,
                         "source": "scout_agent",
                         "metadata": {
                             "query": request.query,
                             "entity_name": request.entity_name,
                             "sources_used": [
-                                s for s in [exa_response, perplexity_response] if s
+                                s.source for s in [exa_response, perplexity_response] if s and not s.error
                             ],
                         },
                     }
