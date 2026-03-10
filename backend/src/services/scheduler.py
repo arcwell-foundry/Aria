@@ -11,6 +11,7 @@ is not desired.
 
 import logging
 import os
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -960,6 +961,71 @@ async def _run_meeting_bot_dispatcher() -> None:
             )
     except Exception:
         logger.exception("Meeting bot dispatcher scheduler run failed")
+
+
+async def _run_meeting_start_warning() -> None:
+    """Send push notifications for meetings starting in ~15 minutes.
+
+    Queries calendar_events for meetings starting between 13 and 17 minutes
+    from now that have an active meeting session (bot joining/in_meeting).
+    """
+    try:
+        from datetime import timedelta
+
+        from src.db.supabase import SupabaseClient
+        from src.services.push_notification_service import send_notification
+
+        db = SupabaseClient.get_client()
+        now = datetime.now(UTC)
+        window_start = (now + timedelta(minutes=13)).isoformat()
+        window_end = (now + timedelta(minutes=17)).isoformat()
+
+        # Find calendar events starting in the 13-17 minute window
+        events_resp = (
+            db.table("calendar_events")
+            .select("id, user_id, title, start_time")
+            .gte("start_time", window_start)
+            .lte("start_time", window_end)
+            .execute()
+        )
+        events = events_resp.data or []
+        if not events:
+            return
+
+        # Check which events have active meeting sessions
+        event_ids = [e["id"] for e in events]
+        sessions_resp = (
+            db.table("meeting_sessions")
+            .select("calendar_event_id")
+            .in_("calendar_event_id", event_ids)
+            .in_("status", ["joining", "in_meeting"])
+            .execute()
+        )
+        active_event_ids = {
+            row["calendar_event_id"] for row in (sessions_resp.data or [])
+        }
+
+        notified = 0
+        for event in events:
+            if event["id"] not in active_event_ids:
+                continue
+
+            await send_notification(
+                user_id=str(event["user_id"]),
+                notification_type="meeting_starting_soon",
+                payload={
+                    "meeting_title": event.get("title", "Upcoming meeting"),
+                    "start_time": event.get("start_time", ""),
+                    "calendar_event_id": str(event["id"]),
+                },
+            )
+            notified += 1
+
+        if notified:
+            logger.info("Meeting start warning: sent %d notifications", notified)
+
+    except Exception:
+        logger.exception("Meeting start warning scheduler run failed")
 
 
 async def _run_meeting_brief_generation() -> None:
@@ -2089,6 +2155,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(minute="*/5"),  # Every 5 minutes
             id="meeting_bot_dispatcher",
             name="Dispatch MeetingBaaS bots for upcoming meetings",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_meeting_start_warning,
+            trigger=CronTrigger(minute="*/5"),  # Every 5 minutes
+            id="meeting_start_warning",
+            name="Push notification for meetings starting in ~15 min",
             replace_existing=True,
         )
         _scheduler.add_job(

@@ -191,6 +191,18 @@ async def _process_transcript(payload: dict[str, Any], db: Any) -> None:
             },
         )
 
+        # Send push notification for debrief ready
+        try:
+            from src.services.push_notification_service import send_notification
+
+            await send_notification(user_id, "debrief_ready", {
+                "debrief_id": debrief_id,
+                "meeting_title": session.get("meeting_title", "Untitled meeting"),
+                "action_item_count": len(debrief_data.get("action_items") or []),
+            })
+        except Exception:
+            logger.exception("Failed to send debrief_ready notification")
+
         # Update meeting session to ended
         try:
             db.table("meeting_sessions").update({

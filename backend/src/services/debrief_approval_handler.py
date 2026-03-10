@@ -184,6 +184,19 @@ async def handle_debrief_approval(
         "memory_facts_written": memory_facts_written,
     }
 
+    # Push notification: debrief follow-up ready
+    try:
+        from src.services.push_notification_service import send_notification
+
+        await send_notification(user_id, "action_queue_item", {
+            "item_id": str(action_item.get("id", "")),
+            "title": "Debrief approved — follow-up ready",
+            "action_type": "debrief_followup",
+            "email_drafts_created": email_drafts_created,
+        })
+    except Exception:
+        logger.exception("[DebriefApproval] Failed to send action_queue_item notification")
+
     # ------------------------------------------------------------------
     # 6. Enrich future meeting briefs with relationship history (Stream C2)
     # ------------------------------------------------------------------
