@@ -89,7 +89,7 @@ async def create_deck_from_context(
     deck_record = {
         "id": deck_id,
         "user_id": user_id,
-        "meeting_id": meeting_id,
+        "calendar_event_id": meeting_id,
         "title": f"Presentation for {meeting_title}",
         "status": "generating",
         "source": "meeting_context",
@@ -114,8 +114,7 @@ async def create_deck_from_context(
         update_data = {
             "status": "completed",
             "gamma_id": result.gamma_id,
-            "gamma_url": result.gamma_url,
-            "credits_used": result.credits_deducted,
+            "deck_url": result.gamma_url,
             "completed_at": datetime.now(UTC).isoformat(),
         }
 
@@ -146,7 +145,6 @@ async def create_deck_from_context(
         # Update record with failure
         db.table("decks").update({
             "status": "failed",
-            "error_message": str(e),
         }).eq("id", deck_id).execute()
 
         raise DeckServiceError(f"Failed to generate deck: {e}") from e
@@ -196,7 +194,6 @@ async def create_adhoc_deck(
     deck_record = {
         "id": deck_id,
         "user_id": user_id,
-        "meeting_id": None,  # Not associated with a meeting
         "title": deck_title,
         "status": "generating",
         "source": "adhoc",
@@ -219,8 +216,7 @@ async def create_adhoc_deck(
         update_data = {
             "status": "completed",
             "gamma_id": result.gamma_id,
-            "gamma_url": result.gamma_url,
-            "credits_used": result.credits_deducted,
+            "deck_url": result.gamma_url,
             "completed_at": datetime.now(UTC).isoformat(),
         }
 
@@ -246,7 +242,6 @@ async def create_adhoc_deck(
     except GammaClientError as e:
         db.table("decks").update({
             "status": "failed",
-            "error_message": str(e),
         }).eq("id", deck_id).execute()
 
         raise DeckServiceError(f"Failed to generate deck: {e}") from e
@@ -256,15 +251,15 @@ async def list_user_decks(
     db: Client,
     user_id: str,
     limit: int = 20,
-    meeting_id: str | None = None,
+    calendar_event_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """List decks for a user, optionally filtered by meeting.
+    """List decks for a user, optionally filtered by calendar event.
 
     Args:
         db: Supabase client instance.
         user_id: The user's ID.
         limit: Maximum number of decks to return.
-        meeting_id: Optional meeting ID to filter by.
+        calendar_event_id: Optional calendar event ID to filter by.
 
     Returns:
         List of deck records.
@@ -277,8 +272,8 @@ async def list_user_decks(
         .limit(limit)
     )
 
-    if meeting_id:
-        query = query.eq("meeting_id", meeting_id)
+    if calendar_event_id:
+        query = query.eq("calendar_event_id", calendar_event_id)
 
     result = query.execute()
     return result.data or []

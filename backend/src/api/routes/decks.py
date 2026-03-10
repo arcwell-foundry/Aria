@@ -73,12 +73,11 @@ class DeckListResponse(BaseModel):
 
     id: str
     user_id: str
-    meeting_id: str | None
+    calendar_event_id: str | None
     title: str
     status: str
-    gamma_url: str | None
+    deck_url: str | None
     gamma_id: str | None
-    credits_used: int | None
     created_at: str
     completed_at: str | None
 
@@ -226,22 +225,22 @@ async def create_adhoc(
 async def list_decks(
     current_user: CurrentUser,
     limit: int = Query(20, ge=1, le=100, description="Maximum number of decks"),
-    meeting_id: str | None = Query(None, description="Filter by meeting ID"),
+    calendar_event_id: str | None = Query(None, description="Filter by calendar event ID"),
 ) -> list[DeckListResponse]:
     """List decks for the current user.
 
     Args:
         current_user: Authenticated user.
         limit: Maximum number of decks to return.
-        meeting_id: Optional meeting ID to filter by.
+        calendar_event_id: Optional calendar event ID to filter by.
 
     Returns:
         List of deck records.
     """
     logger.info(
-        "Listing decks: user=%s meeting=%s limit=%d",
+        "Listing decks: user=%s calendar_event=%s limit=%d",
         current_user.id,
-        meeting_id,
+        calendar_event_id,
         limit,
     )
 
@@ -250,19 +249,18 @@ async def list_decks(
         db=db,
         user_id=current_user.id,
         limit=limit,
-        meeting_id=meeting_id,
+        calendar_event_id=calendar_event_id,
     )
 
     return [
         DeckListResponse(
             id=deck["id"],
             user_id=deck["user_id"],
-            meeting_id=deck.get("meeting_id"),
+            calendar_event_id=deck.get("calendar_event_id"),
             title=deck["title"],
             status=deck["status"],
-            gamma_url=deck.get("gamma_url"),
+            deck_url=deck.get("deck_url"),
             gamma_id=deck.get("gamma_id"),
-            credits_used=deck.get("credits_used"),
             created_at=deck["created_at"],
             completed_at=deck.get("completed_at"),
         )
