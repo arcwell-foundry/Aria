@@ -235,6 +235,20 @@ async def lifespan(_app: FastAPI) -> Any:
     except Exception:
         logger.exception("Failed to mount MCP servers")
 
+    # Ensure Supabase Storage bucket 'decks' exists for PPTX file ownership
+    try:
+        from src.db.supabase import SupabaseClient
+
+        _sb = SupabaseClient.get_client()
+        _existing = _sb.storage.list_buckets()
+        if not any(b.name == "decks" for b in _existing):
+            _sb.storage.create_bucket("decks", options={"public": False})
+            logger.info("Created Supabase Storage bucket 'decks'")
+        else:
+            logger.debug("Supabase Storage bucket 'decks' already exists")
+    except Exception:
+        logger.exception("Failed to ensure 'decks' storage bucket exists")
+
     # Seed aria_knowledge from aria_capabilities.yaml
     try:
         from src.services.aria_knowledge_seeder import seed_aria_knowledge

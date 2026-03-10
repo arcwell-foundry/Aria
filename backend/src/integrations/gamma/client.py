@@ -52,6 +52,12 @@ class GammaClientError(Exception):
     pass
 
 
+class GammaExportError(GammaClientError):
+    """Raised when PPTX export fails or times out."""
+
+    pass
+
+
 class GammaClient:
     """Client for Gamma API - AI-powered presentation generation.
 
@@ -250,6 +256,59 @@ class GammaClient:
         """
         generation_id = await self.start_generation(input_text, text_mode)
         return await self.wait_for_completion(generation_id, poll_interval, max_attempts)
+
+    async def export_pptx(self, gamma_id: str) -> bytes:
+        """Export a Gamma presentation as PPTX bytes.
+
+        Calls Gamma export endpoint to download the presentation file.
+
+        Args:
+            gamma_id: Gamma's internal presentation ID.
+
+        Returns:
+            Raw PPTX file bytes.
+
+        Raises:
+            GammaExportError: If export fails or times out.
+        """
+        if not self._api_key:
+            raise GammaExportError("GAMMA_API_KEY not configured")
+
+        logger.info("Exporting PPTX for gamma_id=%s", gamma_id)
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.get(
+                    f"{self.BASE_URL}/decks/{gamma_id}/export/pptx",
+                    headers=await self._get_headers(),
+                )
+                response.raise_for_status()
+                logger.info(
+                    "PPTX export complete: gamma_id=%s size=%d bytes",
+                    gamma_id,
+                    len(response.content),
+                )
+                return response.content
+            except httpx.HTTPStatusError as e:
+                error_body = e.response.text[:500] if e.response else "No response"
+                logger.exception(
+                    "Gamma PPTX export HTTP error: %s - %s",
+                    e.response.status_code,
+                    error_body,
+                )
+                raise GammaExportError(
+                    f"Gamma PPTX export failed: {error_body}"
+                ) from e
+            except httpx.TimeoutException as e:
+                logger.exception("Gamma PPTX export timed out: gamma_id=%s", gamma_id)
+                raise GammaExportError(
+                    f"Gamma PPTX export timed out for gamma_id={gamma_id}"
+                ) from e
+            except Exception as e:
+                logger.exception("Gamma PPTX export failed: %s", e)
+                raise GammaExportError(
+                    f"Gamma PPTX export failed: {e}"
+                ) from e
 
     async def health_check(self) -> bool:
         """Verify Gamma API connectivity.

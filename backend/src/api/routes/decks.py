@@ -10,6 +10,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from src.api.deps import CurrentUser
@@ -64,6 +65,7 @@ class DeckResponse(BaseModel):
     deck_id: str
     gamma_url: str
     gamma_id: str
+    pptx_url: str | None = None
     status: str
     credits_used: int
 
@@ -73,13 +75,14 @@ class DeckListResponse(BaseModel):
 
     id: str
     user_id: str
-    calendar_event_id: str | None
+    calendar_event_id: str | None = None
     title: str
     status: str
-    deck_url: str | None
-    gamma_id: str | None
+    gamma_url: str | None = None
+    gamma_id: str | None = None
+    pptx_url: str | None = None
     created_at: str
-    completed_at: str | None
+    completed_at: str | None = None
 
 
 # ============================================================================
@@ -145,6 +148,7 @@ async def create_deck(
             deck_id=result["deck_id"],
             gamma_url=result["gamma_url"],
             gamma_id=result["gamma_id"],
+            pptx_url=result.get("pptx_url"),
             status=result["status"],
             credits_used=result["credits_used"],
         )
@@ -212,6 +216,7 @@ async def create_adhoc(
             deck_id=result["deck_id"],
             gamma_url=result["gamma_url"],
             gamma_id=result["gamma_id"],
+            pptx_url=result.get("pptx_url"),
             status=result["status"],
             credits_used=result["credits_used"],
         )
@@ -259,13 +264,54 @@ async def list_decks(
             calendar_event_id=deck.get("calendar_event_id"),
             title=deck["title"],
             status=deck["status"],
-            deck_url=deck.get("deck_url"),
+            gamma_url=deck.get("gamma_url"),
             gamma_id=deck.get("gamma_id"),
+            pptx_url=deck.get("pptx_url"),
             created_at=deck["created_at"],
             completed_at=deck.get("completed_at"),
         )
         for deck in decks
     ]
+
+
+@router.get("/{deck_id}/download")
+async def download_deck(
+    current_user: CurrentUser,
+    deck_id: str,
+) -> RedirectResponse:
+    """Download a deck's PPTX file via signed URL redirect.
+
+    Returns a 302 redirect to the Supabase Storage signed URL.
+    Returns 404 if the deck doesn't exist or has no PPTX file.
+
+    Args:
+        current_user: Authenticated user.
+        deck_id: The deck ID to download.
+
+    Returns:
+        302 redirect to the signed PPTX download URL.
+    """
+    db = SupabaseClient.get_client()
+
+    try:
+        result = (
+            db.table("decks")
+            .select("pptx_url")
+            .eq("id", deck_id)
+            .eq("user_id", current_user.id)
+            .single()
+            .execute()
+        )
+    except Exception:
+        raise HTTPException(status_code=404, detail="Deck not found")
+
+    if not result.data or not result.data.get("pptx_url"):
+        raise HTTPException(
+            status_code=404,
+            detail="PPTX file not available for this deck",
+        )
+
+    return RedirectResponse(url=result.data["pptx_url"], status_code=302)
 
 
 @router.get("/health")

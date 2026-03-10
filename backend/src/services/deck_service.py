@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -22,7 +23,7 @@ from typing import Any
 from supabase import Client
 
 from src.core.config import settings
-from src.integrations.gamma.client import GammaClient, GammaClientError, GammaTextMode, get_gamma_client
+from src.integrations.gamma.client import GammaClient, GammaClientError, GammaExportError, GammaTextMode, get_gamma_client
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,11 @@ async def create_deck_from_context(
     except Exception:
         logger.exception("Failed to create deck record: deck_id=%s user_id=%s", deck_id, user_id)
 
+    # Export PPTX and upload to Supabase Storage (non-fatal)
+    pptx_url = await _store_deck_pptx(
+        db, user_id, deck_id, result.gamma_id, f"Presentation for {meeting_title}"
+    )
+
     # Store in memory_semantic for future reference
     await _store_deck_memory(db, user_id, deck_id, meeting_title, result.gamma_url)
 
@@ -179,15 +185,17 @@ async def create_deck_from_context(
         await _post_deck_to_meeting(meeting_id, result.gamma_url, meeting_title)
 
     logger.info(
-        "Deck created successfully: deck_id=%s gamma_url=%s",
+        "Deck created successfully: deck_id=%s gamma_url=%s pptx_url=%s",
         deck_id,
         result.gamma_url,
+        pptx_url or "N/A",
     )
 
     return {
         "deck_id": deck_id,
         "gamma_url": result.gamma_url,
         "gamma_id": result.gamma_id,
+        "pptx_url": pptx_url,
         "status": "completed",
         "credits_used": result.credits_deducted,
     }
@@ -267,19 +275,24 @@ async def create_adhoc_deck(
     except Exception:
         logger.exception("Failed to create deck record: deck_id=%s user_id=%s", deck_id, user_id)
 
+    # Export PPTX and upload to Supabase Storage (non-fatal)
+    pptx_url = await _store_deck_pptx(db, user_id, deck_id, result.gamma_id, deck_title)
+
     # Store in memory_semantic
     await _store_deck_memory(db, user_id, deck_id, deck_title, result.gamma_url)
 
     logger.info(
-        "Ad-hoc deck created: deck_id=%s gamma_url=%s",
+        "Ad-hoc deck created: deck_id=%s gamma_url=%s pptx_url=%s",
         deck_id,
         result.gamma_url,
+        pptx_url or "N/A",
     )
 
     return {
         "deck_id": deck_id,
         "gamma_url": result.gamma_url,
         "gamma_id": result.gamma_id,
+        "pptx_url": pptx_url,
         "status": "completed",
         "credits_used": result.credits_deducted,
     }
@@ -371,6 +384,91 @@ def _build_meeting_prompt(context: dict[str, Any]) -> str:
     )
 
     return "\n".join(parts)
+
+
+def _slugify(text: str) -> str:
+    """Convert text to a filesystem-safe slug."""
+    slug = re.sub(r"[^\w\s-]", "", text.lower())
+    slug = re.sub(r"[-\s]+", "-", slug).strip("-")
+    return slug[:80] or "deck"
+
+
+async def _store_deck_pptx(
+    db: Client,
+    user_id: str,
+    deck_id: str,
+    gamma_id: str,
+    title: str,
+) -> str | None:
+    """Export PPTX from Gamma and upload to Supabase Storage.
+
+    1. Call gamma_client.export_pptx(gamma_id) to get bytes
+    2. Upload to Supabase Storage bucket 'decks' at {user_id}/{deck_id}/{title_slug}.pptx
+    3. Get a signed URL (expires 7 days) for download
+    4. Update decks table: SET pptx_url=signed_url, status='complete'
+    5. Write to memory_semantic via write_memory()
+    6. Return the signed_url
+
+    Non-fatal: if export fails, logs warning and returns None.
+    The gamma_url remains valid as fallback.
+    """
+    try:
+        client = get_gamma_client()
+        pptx_bytes = await client.export_pptx(gamma_id)
+
+        # Upload to Supabase Storage
+        title_slug = _slugify(title)
+        storage_path = f"{user_id}/{deck_id}/{title_slug}.pptx"
+
+        db.storage.from_("decks").upload(
+            path=storage_path,
+            file=pptx_bytes,
+            file_options={
+                "content-type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            },
+        )
+        logger.info("Uploaded PPTX to storage: %s", storage_path)
+
+        # Get signed URL (7 days = 604800 seconds)
+        signed = db.storage.from_("decks").create_signed_url(
+            path=storage_path,
+            expires_in=604800,
+        )
+        signed_url = signed.get("signedURL", "") if isinstance(signed, dict) else ""
+        if not signed_url:
+            logger.warning("Failed to get signed URL for %s", storage_path)
+            return None
+
+        # Update decks table with pptx_url
+        db.table("decks").update({
+            "pptx_url": signed_url,
+            "status": "completed",
+        }).eq("id", deck_id).execute()
+        logger.info("Updated deck %s with pptx_url", deck_id)
+
+        # Write to memory
+        from src.services.memory_writer import write_memory
+
+        await write_memory(
+            db=db,
+            user_id=user_id,
+            event_type="deck_stored",
+            data={
+                "deck_id": deck_id,
+                "title": title,
+                "pptx_url": signed_url,
+            },
+        )
+
+        return signed_url
+
+    except Exception:
+        logger.exception(
+            "Failed to export/store PPTX for deck_id=%s gamma_id=%s — gamma_url is still valid",
+            deck_id,
+            gamma_id,
+        )
+        return None
 
 
 async def _store_deck_memory(
