@@ -311,7 +311,7 @@ async def list_user_decks(
     )
 
     if calendar_event_id:
-        query = query.eq("calendar_event_id", calendar_event_id)
+        query = query.eq("meeting_id", calendar_event_id)
 
     result = query.execute()
     return result.data or []
