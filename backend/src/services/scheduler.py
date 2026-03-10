@@ -2475,16 +2475,14 @@ async def start_scheduler() -> None:
         return
 
     try:
-        from apscheduler.executors.pool import ThreadPoolExecutor
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from apscheduler.triggers.cron import CronTrigger
 
-        # Configure thread pool to prevent missed jobs under load.
-        # Default executor has only 1 thread which gets blocked by API requests.
-        executors = {
-            "default": ThreadPoolExecutor(max_workers=10),
-        }
-        _scheduler = AsyncIOScheduler(executors=executors)
+        # AsyncIOScheduler uses AsyncIOExecutor by default, which properly
+        # awaits async coroutines in the event loop. ThreadPoolExecutor was
+        # causing "coroutine was never awaited" warnings because it calls
+        # async functions as sync functions.
+        _scheduler = AsyncIOScheduler()
         _scheduler.add_job(
             _run_ambient_gap_checks,
             trigger=CronTrigger(hour=6, minute=0),  # 6:00 AM daily
