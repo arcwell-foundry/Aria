@@ -856,12 +856,17 @@ class CRMDeepSyncCapability(BaseCapability):
             }
 
             if existing_record:
+                # Update existing and increment sync_count
+                current_count = existing_record.get("sync_count", 0) or 0
+                data["sync_count"] = current_count + 1
                 client.table("integration_sync_state").update(data).eq("user_id", user_id).eq(
                     "integration_type", integration_type.value
                 ).execute()
             else:
+                # Insert new with sync_count = 1
                 data["id"] = str(uuid.uuid4())
                 data["created_at"] = now.isoformat()
+                data["sync_count"] = 1
                 client.table("integration_sync_state").insert(data).execute()
 
         except Exception as exc:

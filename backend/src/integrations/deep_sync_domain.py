@@ -34,10 +34,10 @@ class SyncDirection(str, Enum):
 class SyncStatus(str, Enum):
     """Status of a sync operation."""
 
-    SUCCESS = "SUCCESS"
-    FAILED = "FAILED"
-    PARTIAL = "PARTIAL"  # Some records succeeded, some failed
-    PENDING = "PENDING"
+    SUCCESS = "success"
+    FAILED = "failed"
+    PARTIAL = "partial"  # Some records succeeded, some failed
+    PENDING = "pending"
 
 
 class PushActionType(str, Enum):
