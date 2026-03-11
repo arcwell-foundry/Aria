@@ -310,14 +310,18 @@ async def stream_briefing(
             pre_generated = await service.get_or_generate_briefing(current_user.id)
 
             # Get LIVE data and merge
-            live_data = await service.get_live_briefing_data(current_user.id)
+            try:
+                live_data = await service.get_live_briefing_data(current_user.id)
+            except Exception as e:
+                logger.error("Live data fetch failed, using pre-generated only: %s", e)
+                live_data = {}
             content = {
                 **pre_generated,
-                "calendar": live_data["calendar"],
-                "email_summary": live_data["email_summary"],
-                "signals": live_data["signals"],
-                "tasks": live_data["tasks"],
-                "leads": live_data["leads"],
+                "calendar": live_data.get("calendar", {}),
+                "email_summary": live_data.get("email_summary", {}),
+                "signals": live_data.get("signals", {}),
+                "tasks": live_data.get("tasks", {}),
+                "leads": live_data.get("leads", {}),
                 # Keep pre-generated fields:
                 "summary": pre_generated.get("summary", ""),
                 "suggestions": pre_generated.get("suggestions", []),
@@ -429,14 +433,18 @@ async def get_today_briefing(
     if regenerate:
         content = await service.generate_briefing(current_user.id)
         # Merge with live data
-        live_data = await service.get_live_briefing_data(current_user.id)
+        try:
+            live_data = await service.get_live_briefing_data(current_user.id)
+        except Exception as e:
+            logger.error("Live data fetch failed, using pre-generated only: %s", e)
+            live_data = {}
         merged = {
             **content,
-            "calendar": live_data["calendar"],
-            "email_summary": live_data["email_summary"],
-            "signals": live_data["signals"],
-            "tasks": live_data["tasks"],
-            "leads": live_data["leads"],
+            "calendar": live_data.get("calendar", {}),
+            "email_summary": live_data.get("email_summary", {}),
+            "signals": live_data.get("signals", {}),
+            "tasks": live_data.get("tasks", {}),
+            "leads": live_data.get("leads", {}),
         }
         return {"briefing": merged, "status": "ready"}
 
@@ -445,14 +453,18 @@ async def get_today_briefing(
         pre_generated = existing.get("content")
         if isinstance(pre_generated, dict):
             # Get LIVE data and merge with pre-generated summary
-            live_data = await service.get_live_briefing_data(current_user.id)
+            try:
+                live_data = await service.get_live_briefing_data(current_user.id)
+            except Exception as e:
+                logger.error("Live data fetch failed, using pre-generated only: %s", e)
+                live_data = {}
             merged = {
                 **pre_generated,
-                "calendar": live_data["calendar"],
-                "email_summary": live_data["email_summary"],
-                "signals": live_data["signals"],
-                "tasks": live_data["tasks"],
-                "leads": live_data["leads"],
+                "calendar": live_data.get("calendar", {}),
+                "email_summary": live_data.get("email_summary", {}),
+                "signals": live_data.get("signals", {}),
+                "tasks": live_data.get("tasks", {}),
+                "leads": live_data.get("leads", {}),
                 # Keep pre-generated fields:
                 "summary": pre_generated.get("summary", ""),
                 "suggestions": pre_generated.get("suggestions", []),
@@ -511,14 +523,18 @@ async def get_latest_briefing(
         pre_generated = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
 
         # Get LIVE data and merge with pre-generated summary
-        live_data = await service.get_live_briefing_data(current_user.id)
+        try:
+            live_data = await service.get_live_briefing_data(current_user.id)
+        except Exception as e:
+            logger.error("Live data fetch failed, using pre-generated only: %s", e)
+            live_data = {}
         merged = {
             **pre_generated,
-            "calendar": live_data["calendar"],
-            "email_summary": live_data["email_summary"],
-            "signals": live_data["signals"],
-            "tasks": live_data["tasks"],
-            "leads": live_data["leads"],
+            "calendar": live_data.get("calendar", {}),
+            "email_summary": live_data.get("email_summary", {}),
+            "signals": live_data.get("signals", {}),
+            "tasks": live_data.get("tasks", {}),
+            "leads": live_data.get("leads", {}),
             # Keep pre-generated fields:
             "summary": pre_generated.get("summary", ""),
             "suggestions": pre_generated.get("suggestions", []),
@@ -540,14 +556,18 @@ async def get_latest_briefing(
         content = await service.generate_briefing(current_user.id)
 
         # Merge with live data
-        live_data = await service.get_live_briefing_data(current_user.id)
+        try:
+            live_data = await service.get_live_briefing_data(current_user.id)
+        except Exception as e:
+            logger.error("Live data fetch failed, using pre-generated only: %s", e)
+            live_data = {}
         merged = {
             **content,
-            "calendar": live_data["calendar"],
-            "email_summary": live_data["email_summary"],
-            "signals": live_data["signals"],
-            "tasks": live_data["tasks"],
-            "leads": live_data["leads"],
+            "calendar": live_data.get("calendar", {}),
+            "email_summary": live_data.get("email_summary", {}),
+            "signals": live_data.get("signals", {}),
+            "tasks": live_data.get("tasks", {}),
+            "leads": live_data.get("leads", {}),
         }
 
         # Deliver it immediately
@@ -1057,14 +1077,18 @@ async def deliver_briefing(
 
                 # Get LIVE data and merge with pre-generated summary
                 service = BriefingService()
-                live_data = await service.get_live_briefing_data(current_user.id)
+                try:
+                    live_data = await service.get_live_briefing_data(current_user.id)
+                except Exception as e:
+                    logger.error("Live data fetch failed, using pre-generated only: %s", e)
+                    live_data = {}
                 fallback_content = {
                     **pre_generated,
-                    "calendar": live_data["calendar"],
-                    "email_summary": live_data["email_summary"],
-                    "signals": live_data["signals"],
-                    "tasks": live_data["tasks"],
-                    "leads": live_data["leads"],
+                    "calendar": live_data.get("calendar", {}),
+                    "email_summary": live_data.get("email_summary", {}),
+                    "signals": live_data.get("signals", {}),
+                    "tasks": live_data.get("tasks", {}),
+                    "leads": live_data.get("leads", {}),
                     # Keep pre-generated fields:
                     "summary": pre_generated.get("summary", ""),
                     "suggestions": pre_generated.get("suggestions", []),
@@ -1117,14 +1141,18 @@ async def deliver_briefing(
                 pre_generated = await service.generate_briefing(current_user.id)
 
             # Get LIVE data and merge
-            live_data = await service.get_live_briefing_data(current_user.id)
+            try:
+                live_data = await service.get_live_briefing_data(current_user.id)
+            except Exception as e:
+                logger.error("Live data fetch failed, using pre-generated only: %s", e)
+                live_data = {}
             content = {
                 **pre_generated,
-                "calendar": live_data["calendar"],
-                "email_summary": live_data["email_summary"],
-                "signals": live_data["signals"],
-                "tasks": live_data["tasks"],
-                "leads": live_data["leads"],
+                "calendar": live_data.get("calendar", {}),
+                "email_summary": live_data.get("email_summary", {}),
+                "signals": live_data.get("signals", {}),
+                "tasks": live_data.get("tasks", {}),
+                "leads": live_data.get("leads", {}),
             }
 
             # Update delivery status on the newly generated briefing
@@ -1192,14 +1220,18 @@ async def deliver_briefing(
             pre_generated = await service.generate_briefing(current_user.id)
 
         # Get LIVE data and merge
-        live_data = await service.get_live_briefing_data(current_user.id)
+        try:
+            live_data = await service.get_live_briefing_data(current_user.id)
+        except Exception as e:
+            logger.error("Live data fetch failed, using pre-generated only: %s", e)
+            live_data = {}
         content = {
             **pre_generated,
-            "calendar": live_data["calendar"],
-            "email_summary": live_data["email_summary"],
-            "signals": live_data["signals"],
-            "tasks": live_data["tasks"],
-            "leads": live_data["leads"],
+            "calendar": live_data.get("calendar", {}),
+            "email_summary": live_data.get("email_summary", {}),
+            "signals": live_data.get("signals", {}),
+            "tasks": live_data.get("tasks", {}),
+            "leads": live_data.get("leads", {}),
             # Keep pre-generated fields:
             "summary": pre_generated.get("summary", ""),
             "suggestions": pre_generated.get("suggestions", []),
@@ -1307,14 +1339,18 @@ async def deliver_briefing(
             )
 
             # Get LIVE data and merge
-            live_data = await service.get_live_briefing_data(current_user.id)
+            try:
+                live_data = await service.get_live_briefing_data(current_user.id)
+            except Exception as e:
+                logger.error("Live data fetch failed, using pre-generated only: %s", e)
+                live_data = {}
             fallback_content = {
                 **pre_generated,
-                "calendar": live_data["calendar"],
-                "email_summary": live_data["email_summary"],
-                "signals": live_data["signals"],
-                "tasks": live_data["tasks"],
-                "leads": live_data["leads"],
+                "calendar": live_data.get("calendar", {}),
+                "email_summary": live_data.get("email_summary", {}),
+                "signals": live_data.get("signals", {}),
+                "tasks": live_data.get("tasks", {}),
+                "leads": live_data.get("leads", {}),
                 # Keep pre-generated fields:
                 "summary": pre_generated.get("summary", ""),
                 "suggestions": pre_generated.get("suggestions", []),
