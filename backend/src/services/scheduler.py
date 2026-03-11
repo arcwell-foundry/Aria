@@ -1354,7 +1354,7 @@ async def _run_pulse_sweep() -> None:
                 .select("id, user_id, task, description, priority")
                 .eq("status", "active")
                 .is_("completed_at", "null")
-                .lte("trigger_at", now)
+                .lte("due_date", now)
                 .limit(20)
                 .execute()
             )
@@ -2165,12 +2165,12 @@ async def _run_jarvis_insight_delivery() -> None:
         pending = (
             db.table("jarvis_insights")
             .select("id, user_id, title, content, combined_score, urgency, "
-                    "classification, insight_type, trigger_event, priority_label, "
+                    "classification, insight_type, priority_label, "
                     "recommended_actions")
             .is_("delivered_at", "null")
-            .in_("status", ["new", "engaged"])
+            .eq("status", "active")
             .order("combined_score", desc=True)
-            .limit(50)
+            .limit(20)
             .execute()
         )
 
@@ -2185,7 +2185,7 @@ async def _run_jarvis_insight_delivery() -> None:
             try:
                 user_id = insight["user_id"]
                 score = float(insight.get("combined_score") or 0)
-                title = insight.get("title") or insight.get("trigger_event") or "Intelligence Update"
+                title = insight.get("title") or "Intelligence Update"
                 content = (insight.get("content") or "")[:500]
                 insight_id = insight["id"]
 
