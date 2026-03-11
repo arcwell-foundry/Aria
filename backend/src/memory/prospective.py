@@ -183,7 +183,7 @@ class ProspectiveMemory:
                 "description": task.description,
                 "trigger_type": task.trigger_type.value,
                 "trigger_config": task.trigger_config,
-                "status": task.status.value,
+                "status": task.status.value if hasattr(task.status, "value") else task.status,
                 "priority": task.priority.value,
                 "related_goal_id": task.related_goal_id,
                 "related_lead_id": task.related_lead_id,
@@ -286,7 +286,7 @@ class ProspectiveMemory:
                 "description": task.description,
                 "trigger_type": task.trigger_type.value,
                 "trigger_config": task.trigger_config,
-                "status": task.status.value,
+                "status": task.status.value if hasattr(task.status, "value") else task.status,
                 "priority": task.priority.value,
                 "related_goal_id": task.related_goal_id,
                 "related_lead_id": task.related_lead_id,
@@ -309,7 +309,7 @@ class ProspectiveMemory:
                 extra={
                     "task_id": task.id,
                     "user_id": task.user_id,
-                    "status": task.status.value,
+                    "status": task.status.value if hasattr(task.status, "value") else task.status,
                 },
             )
 

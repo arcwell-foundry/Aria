@@ -1332,6 +1332,8 @@ class DeepSyncService:
         """
         from src.integrations.domain import IntegrationType
 
+        client = self.supabase.get_client()
+
         processed = 0
         succeeded = 0
         failed = 0
@@ -1412,7 +1414,7 @@ class DeepSyncService:
                         }
                         if event.external_id:
                             existing = (
-                                self.db.table("calendar_events")
+                                client.table("calendar_events")
                                 .select("id")
                                 .eq("user_id", user_id)
                                 .eq("external_id", event.external_id)
@@ -1421,13 +1423,13 @@ class DeepSyncService:
                             )
                             if existing.data:
                                 # Update existing event (times/attendees may change)
-                                self.db.table("calendar_events").update(cal_row).eq(
+                                client.table("calendar_events").update(cal_row).eq(
                                     "id", existing.data[0]["id"]
                                 ).execute()
                             else:
-                                self.db.table("calendar_events").insert(cal_row).execute()
+                                client.table("calendar_events").insert(cal_row).execute()
                         else:
-                            self.db.table("calendar_events").insert(cal_row).execute()
+                            client.table("calendar_events").insert(cal_row).execute()
                     except Exception as cal_err:
                         logger.error(
                             "Failed to persist calendar event %s: %s",
