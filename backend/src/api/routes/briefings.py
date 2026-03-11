@@ -288,6 +288,10 @@ async def stream_briefing(
     Generates or retrieves the cached briefing, transforms it into a
     Claude narrative, and streams it through C1 for interactive rendering.
     Falls back to markdown if C1 is unavailable.
+
+    The pre-generated summary narrative is kept (it's expensive to regenerate).
+    All structured data sections (calendar, emails, signals, tasks, leads) are
+    queried LIVE at delivery time.
     """
 
     async def event_stream():  # noqa: C901
@@ -303,7 +307,23 @@ async def stream_briefing(
         try:
             # Get briefing data (cached, 1hr TTL)
             service = BriefingService()
-            content = await service.get_or_generate_briefing(current_user.id)
+            pre_generated = await service.get_or_generate_briefing(current_user.id)
+
+            # Get LIVE data and merge
+            live_data = await service.get_live_briefing_data(current_user.id)
+            content = {
+                **pre_generated,
+                "calendar": live_data["calendar"],
+                "email_summary": live_data["email_summary"],
+                "signals": live_data["signals"],
+                "tasks": live_data["tasks"],
+                "leads": live_data["leads"],
+                # Keep pre-generated fields:
+                "summary": pre_generated.get("summary", ""),
+                "suggestions": pre_generated.get("suggestions", []),
+                "upcoming_conferences": pre_generated.get("upcoming_conferences", []),
+                "queued_insights": pre_generated.get("queued_insights", []),
+            }
         except Exception:
             logger.exception(
                 "BriefingService failed during streaming",
@@ -399,18 +419,47 @@ async def get_today_briefing(
     If no briefing exists yet and regenerate is not requested,
     returns a not_generated status so the dashboard can show
     an empty state.
+
+    The pre-generated summary narrative is kept (it's expensive to regenerate).
+    All structured data sections (calendar, emails, signals, tasks, leads) are
+    queried LIVE at delivery time.
     """
     service = BriefingService()
 
     if regenerate:
         content = await service.generate_briefing(current_user.id)
-        return {"briefing": content, "status": "ready"}
+        # Merge with live data
+        live_data = await service.get_live_briefing_data(current_user.id)
+        merged = {
+            **content,
+            "calendar": live_data["calendar"],
+            "email_summary": live_data["email_summary"],
+            "signals": live_data["signals"],
+            "tasks": live_data["tasks"],
+            "leads": live_data["leads"],
+        }
+        return {"briefing": merged, "status": "ready"}
 
     existing = await service.get_briefing(current_user.id)
     if existing:
-        content = existing.get("content")
-        if isinstance(content, dict):
-            return {"briefing": content, "status": "ready"}
+        pre_generated = existing.get("content")
+        if isinstance(pre_generated, dict):
+            # Get LIVE data and merge with pre-generated summary
+            live_data = await service.get_live_briefing_data(current_user.id)
+            merged = {
+                **pre_generated,
+                "calendar": live_data["calendar"],
+                "email_summary": live_data["email_summary"],
+                "signals": live_data["signals"],
+                "tasks": live_data["tasks"],
+                "leads": live_data["leads"],
+                # Keep pre-generated fields:
+                "summary": pre_generated.get("summary", ""),
+                "suggestions": pre_generated.get("suggestions", []),
+                "upcoming_conferences": pre_generated.get("upcoming_conferences", []),
+                "queued_insights": pre_generated.get("queued_insights", []),
+            }
+            return {"briefing": merged, "status": "ready"}
 
     # No briefing yet — return empty default instead of generating
     logger.info(
@@ -431,6 +480,10 @@ async def get_latest_briefing(
     Returns the most recent briefing regardless of date, or generates
     one if requested and missing.
 
+    The pre-generated summary narrative is kept (it's expensive to regenerate).
+    All structured data sections (calendar, emails, signals, tasks, leads) are
+    queried LIVE at delivery time.
+
     Args:
         generate_if_missing: If True, generates a new briefing if none exists.
 
@@ -440,6 +493,7 @@ async def get_latest_briefing(
     from src.db.supabase import SupabaseClient
 
     db = SupabaseClient.get_client()
+    service = BriefingService()
 
     # Get the most recent briefing for this user
     result = (
@@ -454,10 +508,26 @@ async def get_latest_briefing(
     if result.data:
         row = result.data[0]
         raw_content = row.get("content")
-        content = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
+        pre_generated = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
+
+        # Get LIVE data and merge with pre-generated summary
+        live_data = await service.get_live_briefing_data(current_user.id)
+        merged = {
+            **pre_generated,
+            "calendar": live_data["calendar"],
+            "email_summary": live_data["email_summary"],
+            "signals": live_data["signals"],
+            "tasks": live_data["tasks"],
+            "leads": live_data["leads"],
+            # Keep pre-generated fields:
+            "summary": pre_generated.get("summary", ""),
+            "suggestions": pre_generated.get("suggestions", []),
+            "upcoming_conferences": pre_generated.get("upcoming_conferences", []),
+            "queued_insights": pre_generated.get("queued_insights", []),
+        }
 
         return {
-            "briefing": content,
+            "briefing": merged,
             "briefing_id": row.get("id"),
             "briefing_date": row.get("briefing_date"),
             "delivery_method": row.get("delivery_method"),
@@ -467,17 +537,27 @@ async def get_latest_briefing(
 
     # No briefing exists
     if generate_if_missing:
-        service = BriefingService()
         content = await service.generate_briefing(current_user.id)
+
+        # Merge with live data
+        live_data = await service.get_live_briefing_data(current_user.id)
+        merged = {
+            **content,
+            "calendar": live_data["calendar"],
+            "email_summary": live_data["email_summary"],
+            "signals": live_data["signals"],
+            "tasks": live_data["tasks"],
+            "leads": live_data["leads"],
+        }
 
         # Deliver it immediately
         delivery_result = await service.deliver_briefing(
             user_id=current_user.id,
-            content=content,
+            content=merged,
         )
 
         return {
-            "briefing": content,
+            "briefing": merged,
             "delivery_method": delivery_result.get("delivery_method"),
             "delivered_at": delivery_result.get("delivered_at"),
             "status": "generated",
@@ -645,25 +725,40 @@ async def get_briefing_status(
             if open_tasks_count > 0:
                 topics.append(f"{open_tasks_count} open task{'s' if open_tasks_count != 1 else ''}")
 
-            # Leads (from cached briefing content - this is less time-sensitive)
-            leads_data = briefing_content.get("leads", {})
-            if isinstance(leads_data, dict):
-                hot_count = len(leads_data.get("hot_leads", []))
-                attention_count = len(leads_data.get("needs_attention", []))
-                if hot_count > 0:
-                    topics.append(f"{hot_count} hot lead{'s' if hot_count != 1 else ''}")
-                if attention_count > 0:
-                    topics.append(f"{attention_count} need{'s' if attention_count == 1 else ''} attention")
+            # Leads (LIVE query)
+            leads_result = (
+                db.table("leads")
+                .select("id, lifecycle_stage")
+                .eq("user_id", current_user.id)
+                .limit(50)
+                .execute()
+            )
+            leads_data = leads_result.data or []
+            hot_count = len([l for l in leads_data if isinstance(l, dict) and l.get("lifecycle_stage") in ("hot", "qualified", "proposal")])
+            attention_count = len([l for l in leads_data if isinstance(l, dict) and l.get("lifecycle_stage") in ("needs_attention", "stale")])
+            if hot_count > 0:
+                topics.append(f"{hot_count} hot lead{'s' if hot_count != 1 else ''}")
+            if attention_count > 0:
+                topics.append(f"{attention_count} need{'s' if attention_count == 1 else ''} attention")
 
-            # Signals (from cached briefing content - this is less time-sensitive)
-            signals_data = briefing_content.get("signals", {})
-            if isinstance(signals_data, dict):
-                signal_total = sum(
-                    len(signals_data.get(k, []))
-                    for k in ("company_news", "market_trends", "competitive_intel")
-                )
-                if signal_total > 0:
-                    topics.append(f"{signal_total} market signal{'s' if signal_total != 1 else ''}")
+            # Signals (LIVE query - filter out internal events)
+            signals_result = (
+                db.table("market_signals")
+                .select("id, signal_type, headline, source_url")
+                .eq("user_id", current_user.id)
+                .order("detected_at", desc=True)
+                .limit(20)
+                .execute()
+            )
+            # Filter out internal pulse_engine events
+            def is_internal_signal(s: dict) -> bool:
+                headline = (s.get("headline") or "").lower()
+                source = (s.get("source_url") or "").lower()
+                return "goal completed" in headline or "pulse_engine" in source
+            real_signals = [s for s in (signals_result.data or []) if isinstance(s, dict) and not is_internal_signal(s)]
+            signal_total = len(real_signals)
+            if signal_total > 0:
+                topics.append(f"{signal_total} market signal{'s' if signal_total != 1 else ''}")
 
             if not topics:
                 topics.append("Your daily briefing")
@@ -956,9 +1051,26 @@ async def deliver_briefing(
                 briefing = result.data[0]
                 briefing_id = briefing.get("id")
                 raw_content = briefing.get("content")
-                fallback_content = (
+                pre_generated = (
                     json.loads(raw_content) if isinstance(raw_content, str) else raw_content
                 )
+
+                # Get LIVE data and merge with pre-generated summary
+                service = BriefingService()
+                live_data = await service.get_live_briefing_data(current_user.id)
+                fallback_content = {
+                    **pre_generated,
+                    "calendar": live_data["calendar"],
+                    "email_summary": live_data["email_summary"],
+                    "signals": live_data["signals"],
+                    "tasks": live_data["tasks"],
+                    "leads": live_data["leads"],
+                    # Keep pre-generated fields:
+                    "summary": pre_generated.get("summary", ""),
+                    "suggestions": pre_generated.get("suggestions", []),
+                    "upcoming_conferences": pre_generated.get("upcoming_conferences", []),
+                    "queued_insights": pre_generated.get("queued_insights", []),
+                }
 
                 # Update delivery status in DB
                 now = datetime.now(UTC).isoformat()
@@ -1002,7 +1114,18 @@ async def deliver_briefing(
             service = BriefingService()
             # 15 second timeout for generation when Tavus is unconfigured
             async with asyncio.timeout(15):
-                content = await service.generate_briefing(current_user.id)
+                pre_generated = await service.generate_briefing(current_user.id)
+
+            # Get LIVE data and merge
+            live_data = await service.get_live_briefing_data(current_user.id)
+            content = {
+                **pre_generated,
+                "calendar": live_data["calendar"],
+                "email_summary": live_data["email_summary"],
+                "signals": live_data["signals"],
+                "tasks": live_data["tasks"],
+                "leads": live_data["leads"],
+            }
 
             # Update delivery status on the newly generated briefing
             try:
@@ -1057,6 +1180,8 @@ async def deliver_briefing(
     # Tavus IS configured - proceed with video mode path
     content: dict[str, Any] | None = None
 
+    live_data: dict[str, Any] | None = None
+
     # GUARANTEED FALLBACK PATTERN: Try video/Tavus path, but always return text_only on any failure
     try:
         import asyncio as _asyncio
@@ -1064,7 +1189,23 @@ async def deliver_briefing(
         service = BriefingService()
         # 30 second timeout for generation — prevents indefinite hangs
         async with _asyncio.timeout(30):
-            content = await service.generate_briefing(current_user.id)
+            pre_generated = await service.generate_briefing(current_user.id)
+
+        # Get LIVE data and merge
+        live_data = await service.get_live_briefing_data(current_user.id)
+        content = {
+            **pre_generated,
+            "calendar": live_data["calendar"],
+            "email_summary": live_data["email_summary"],
+            "signals": live_data["signals"],
+            "tasks": live_data["tasks"],
+            "leads": live_data["leads"],
+            # Keep pre-generated fields:
+            "summary": pre_generated.get("summary", ""),
+            "suggestions": pre_generated.get("suggestions", []),
+            "upcoming_conferences": pre_generated.get("upcoming_conferences", []),
+            "queued_insights": pre_generated.get("queued_insights", []),
+        }
 
         # Tavus configured - try WebSocket delivery
         try:
@@ -1144,6 +1285,7 @@ async def deliver_briefing(
         from src.db.supabase import SupabaseClient
 
         db = SupabaseClient.get_client()
+        service = BriefingService()
         today_str = date.today().isoformat()
 
         result = (
@@ -1160,9 +1302,25 @@ async def deliver_briefing(
             briefing = result.data[0]
             fallback_briefing_id = briefing.get("id")
             raw_content = briefing.get("content")
-            fallback_content = (
+            pre_generated = (
                 json.loads(raw_content) if isinstance(raw_content, str) else raw_content
             )
+
+            # Get LIVE data and merge
+            live_data = await service.get_live_briefing_data(current_user.id)
+            fallback_content = {
+                **pre_generated,
+                "calendar": live_data["calendar"],
+                "email_summary": live_data["email_summary"],
+                "signals": live_data["signals"],
+                "tasks": live_data["tasks"],
+                "leads": live_data["leads"],
+                # Keep pre-generated fields:
+                "summary": pre_generated.get("summary", ""),
+                "suggestions": pre_generated.get("suggestions", []),
+                "upcoming_conferences": pre_generated.get("upcoming_conferences", []),
+                "queued_insights": pre_generated.get("queued_insights", []),
+            }
 
             # Update delivery status in DB
             now = datetime.now(UTC).isoformat()

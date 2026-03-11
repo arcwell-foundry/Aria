@@ -39,6 +39,64 @@ def _sanitize_text(text: str) -> str:
     return text.replace("\u2014", " - ").replace("\u2013", "-")
 
 
+def format_due_date(due_at_str: str | None, user_tz: ZoneInfo | None = None) -> str:
+    """Convert ISO timestamp to human-readable relative date.
+
+    Args:
+        due_at_str: ISO timestamp string (e.g., '2026-03-02T22:16:43+00:00').
+        user_tz: Optional user timezone for formatting. Defaults to America/New_York.
+
+    Returns:
+        Human-readable string like "Overdue 8 days", "Due today at 5:16 PM", or "Due tomorrow".
+    """
+    if not due_at_str:
+        return ""
+
+    try:
+        # Parse the ISO timestamp
+        cleaned = due_at_str.replace("Z", "+00:00")
+        due = datetime.fromisoformat(cleaned)
+
+        # Ensure timezone-aware
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=UTC)
+
+        now = datetime.now(UTC)
+        delta = now - due
+
+        if delta.total_seconds() > 0:
+            # Overdue
+            days = delta.days
+            if days == 0:
+                hours = int(delta.total_seconds() // 3600)
+                if hours == 0:
+                    return "Due earlier"
+                elif hours == 1:
+                    return "Overdue 1 hour"
+                else:
+                    return f"Overdue {hours} hours"
+            elif days == 1:
+                return "Overdue 1 day"
+            else:
+                return f"Overdue {days} days"
+        else:
+            # Not yet due
+            delta_future = due - now
+            days_until = delta_future.days
+            if days_until == 0:
+                # Due today - show time
+                tz = user_tz or ZoneInfo("America/New_York")
+                local_due = due.astimezone(tz)
+                return f"Due today at {local_due.strftime('%-I:%M %p')}"
+            elif days_until == 1:
+                return "Due tomorrow"
+            else:
+                return f"Due in {days_until} days"
+    except Exception:
+        # Return original string if parsing fails
+        return due_at_str
+
+
 class NeedsAttentionItem(BaseModel):
     """A single email that needs attention with draft details."""
 
@@ -703,6 +761,227 @@ class BriefingService:
         data = result.data
         return [b for b in data if isinstance(b, dict)]
 
+    async def get_live_briefing_data(self, user_id: str) -> dict[str, Any]:
+        """Assemble briefing data from LIVE database queries.
+
+        This is called at delivery time, not generation time.
+        Works for any user — no hardcoded IDs or data.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            Dict with live calendar, email_summary, signals, tasks, and leads data.
+        """
+        # Get user's timezone for proper date filtering
+        user_tz_str = await self._get_user_timezone(user_id)
+        user_tz = ZoneInfo(user_tz_str)
+        now_local = datetime.now(user_tz)
+        now_utc = now_local.astimezone(UTC)
+
+        # Calculate today's date range in user's timezone
+        today_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end_local = today_start_local + timedelta(days=1)
+        tomorrow_end_local = today_start_local + timedelta(days=2)
+
+        # Convert to UTC for database queries
+        today_start_utc = today_start_local.astimezone(UTC)
+        today_end_utc = today_end_local.astimezone(UTC)
+        tomorrow_end_utc = tomorrow_end_local.astimezone(UTC)
+
+        # --- CALENDAR (LIVE) ---
+        today_meetings = (
+            self._db.table("calendar_events")
+            .select("id, title, start_time, end_time, attendees, location")
+            .eq("user_id", user_id)
+            .gte("start_time", today_start_utc.isoformat())
+            .lt("start_time", today_end_utc.isoformat())
+            .order("start_time")
+            .execute()
+        )
+
+        tomorrow_meetings = (
+            self._db.table("calendar_events")
+            .select("id, title, start_time, end_time, attendees")
+            .eq("user_id", user_id)
+            .gte("start_time", today_end_utc.isoformat())
+            .lt("start_time", tomorrow_end_utc.isoformat())
+            .order("start_time")
+            .execute()
+        )
+
+        # Filter out buffer events
+        def is_buffer(title: str | None) -> bool:
+            if not title:
+                return False
+            t = title.lower()
+            return "[buffer" in t or "buffer]" in t
+
+        today_meetings_data = [
+            m for m in (today_meetings.data or []) if not is_buffer(m.get("title") if isinstance(m, dict) else None)
+        ]
+        tomorrow_meetings_data = [
+            m for m in (tomorrow_meetings.data or []) if not is_buffer(m.get("title") if isinstance(m, dict) else None)
+        ]
+
+        # Format meeting times to user-friendly strings
+        for m in today_meetings_data + tomorrow_meetings_data:
+            if isinstance(m, dict) and m.get("start_time"):
+                try:
+                    dt = datetime.fromisoformat(m["start_time"].replace("Z", "+00:00"))
+                    local_dt = dt.astimezone(user_tz)
+                    m["start_time_formatted"] = local_dt.strftime("%-I:%M %p")
+                    m["date_formatted"] = local_dt.strftime("%B %d")
+                except Exception:
+                    m["start_time_formatted"] = m.get("start_time", "")
+
+        calendar = {
+            "key_meetings": today_meetings_data,
+            "meeting_count": len(today_meetings_data),
+            "tomorrow_count": len(tomorrow_meetings_data),
+            "tomorrow_meetings": tomorrow_meetings_data,
+            "tomorrow_first_time": (
+                tomorrow_meetings_data[0].get("start_time_formatted") if tomorrow_meetings_data else None
+            ),
+            "tomorrow_first_title": (
+                tomorrow_meetings_data[0].get("title") if tomorrow_meetings_data else None
+            ),
+        }
+
+        # --- EMAIL DRAFTS (LIVE) ---
+        drafts = (
+            self._db.table("email_drafts")
+            .select("id, recipient_name, subject, status, created_at")
+            .eq("user_id", user_id)
+            .in_("status", ["draft", "pending_review"])
+            .order("created_at", desc=True)
+            .execute()
+        )
+
+        drafts_data = drafts.data or []
+        high_confidence = [d for d in drafts_data if isinstance(d, dict) and d.get("status") == "pending_review"]
+
+        email_summary = {
+            "drafts_waiting": len(drafts_data),
+            "drafts_high_confidence": len(high_confidence),
+            "drafts_need_review": len([d for d in drafts_data if isinstance(d, dict) and d.get("status") == "draft"]),
+            "needs_attention": drafts_data[:5],  # Top 5 most recent
+            "total_received": 0,  # Not tracked live
+            "fyi_count": 0,
+            "fyi_highlights": [],
+            "filtered_count": 0,
+            "filtered_reason": None,
+            "strategic_patterns": [],
+            "connections": [],
+        }
+
+        # --- MARKET SIGNALS (LIVE) ---
+        signals = (
+            self._db.table("market_signals")
+            .select("id, company_name, headline, summary, signal_type, relevance_score, source_url, detected_at")
+            .eq("user_id", user_id)
+            .order("detected_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+
+        signals_data = signals.data or []
+        # Filter out internal pulse_engine events that are not real market signals
+        def is_internal_signal(s: dict) -> bool:
+            headline = (s.get("headline") or "").lower()
+            source = (s.get("source_url") or "").lower()
+            return "goal completed" in headline or "pulse_engine" in source
+
+        real_signals = [s for s in signals_data if isinstance(s, dict) and not is_internal_signal(s)]
+
+        signals_section = {
+            "company_news": [
+                s
+                for s in real_signals
+                if s.get("signal_type") in ("partnership", "expansion", "acquisition", "product_launch", None)
+            ],
+            "competitive_intel": [
+                s for s in real_signals if s.get("signal_type") in ("competitive", "pricing", "market_share")
+            ],
+            "market_trends": [
+                s
+                for s in real_signals
+                if s.get("signal_type") in ("regulatory", "funding", "market_trend", "industry")
+            ],
+        }
+
+        # --- TASKS / GOALS (LIVE) ---
+        goals = (
+            self._db.table("goals")
+            .select("id, title, status, description, created_at")
+            .eq("user_id", user_id)
+            .in_("status", ["draft", "active", "plan_ready", "in_progress"])
+            .order("created_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+
+        # Overdue goals (use same logic as _get_task_data)
+        now_for_overdue = datetime.now(UTC)
+        overdue_goals = (
+            self._db.table("goals")
+            .select("id, title, status, target_date")
+            .eq("user_id", user_id)
+            .not_.in_("status", ["complete", "cancelled", "failed"])
+            .lt("target_date", now_for_overdue.isoformat())
+            .limit(10)
+            .execute()
+        )
+
+        tasks_section = {
+            "open_tasks": goals.data or [],
+            "open_tasks_count": len(goals.data or []),
+            "due_today": [],
+            "overdue": [
+                {
+                    "id": g.get("id"),
+                    "task": _sanitize_text(g.get("title", "")),
+                    "due_at": g.get("target_date"),
+                    "priority": "normal",
+                }
+                for g in (overdue_goals.data or [])
+                if isinstance(g, dict)
+            ],
+            "meetings_without_debriefs": 0,  # Computed separately
+        }
+
+        # --- LEADS (LIVE) ---
+        leads_section: dict[str, Any] = {
+            "hot_leads": [],
+            "needs_attention": [],
+            "recently_active": [],
+        }
+        try:
+            leads = (
+                self._db.table("leads")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .limit(10)
+                .execute()
+            )
+            if leads.data:
+                leads_section["recently_active"] = leads.data[:5]
+        except Exception:
+            pass
+
+        # --- BATTLE CARDS ---
+        battle_cards = self._db.table("battle_cards").select("competitor_name").limit(10).execute()
+
+        return {
+            "calendar": calendar,
+            "email_summary": email_summary,
+            "signals": signals_section,
+            "tasks": tasks_section,
+            "leads": leads_section,
+            "battle_card_count": len(battle_cards.data or []),
+        }
+
     async def deliver_briefing(
         self,
         user_id: str,
@@ -1202,13 +1481,19 @@ class BriefingService:
 
         # Alert cards from overdue tasks
         for task in tasks.get("overdue", [])[:2]:
+            due_at_str = task.get("due_at")
+            formatted_due = format_due_date(due_at_str)
+            summary_text = f"Priority: {task.get('priority', 'normal')}"
+            if formatted_due:
+                summary_text += f". {formatted_due}"
+
             rich_content.append(
                 {
                     "type": "alert_card",
                     "data": {
                         "id": task.get("id"),
                         "headline": f"Overdue: {_sanitize_text(task.get('task', 'Unknown task'))}",
-                        "summary": f"Priority: {task.get('priority', 'normal')}. Due: {task.get('due_at', 'unknown')}",
+                        "summary": summary_text,
                         "severity": "high",
                     },
                 }

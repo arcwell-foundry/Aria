@@ -55,6 +55,43 @@ def test_get_today_briefing_returns_briefing(test_client: TestClient) -> None:
         mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
             data=[existing_briefing]
         )
+
+        # Mock timezone query for get_live_briefing_data (returns empty/defaults)
+        # user_profiles table query
+        mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[{"timezone": "America/New_York"}]
+        )
+
+        # Mock calendar_events table query for get_live_briefing_data
+        mock_db.table.return_value.select.return_value.eq.return_value.gte.return_value.lt.return_value.order.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+
+        # Mock goals table query for get_live_briefing_data
+        mock_db.table.return_value.select.return_value.eq.return_value.in_.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+
+        # Mock market_signals table query for get_live_briefing_data
+        mock_db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+
+        # Mock email_drafts table query for get_live_briefing_data
+        mock_db.table.return_value.select.return_value.eq.return_value.in_.return_value.order.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+
+        # Mock leads table query for get_live_briefing_data
+        mock_db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+
+        # Mock battle_cards table query for get_live_briefing_data
+        mock_db.table.return_value.select.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+
         mock_db_class.get_client.return_value = mock_db
 
         response = test_client.get("/api/v1/briefings/today")
@@ -76,6 +113,42 @@ def test_get_today_briefing_regenerates_when_flag_true(test_client: TestClient) 
         mock_db.table.return_value.upsert.return_value.execute.return_value = MagicMock(
             data=[{"id": "briefing-123"}]
         )
+
+        # Mock timezone query for get_live_briefing_data
+        mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[{"timezone": "America/New_York"}]
+        )
+
+        # Mock calendar_events table query for get_live_briefing_data
+        mock_db.table.return_value.select.return_value.eq.return_value.gte.return_value.lt.return_value.order.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+
+        # Mock goals table query for get_live_briefing_data
+        mock_db.table.return_value.select.return_value.eq.return_value.in_.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+
+        # Mock market_signals table query for get_live_briefing_data
+        mock_db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+
+        # Mock email_drafts table query for get_live_briefing_data
+        mock_db.table.return_value.select.return_value.eq.return_value.in_.return_value.order.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+
+        # Mock leads table query for get_live_briefing_data
+        mock_db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+
+        # Mock battle_cards table query for get_live_briefing_data
+        mock_db.table.return_value.select.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[]
+        )
+
         mock_db_class.get_client.return_value = mock_db
 
         # Setup LLM mock

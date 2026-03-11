@@ -637,7 +637,21 @@ class ARIAPersonaManager:
             Formatted briefing context or None on error.
         """
         try:
-            briefing = await self.briefing_service.get_or_generate_briefing(user_id, date.today())
+            # Get pre-generated briefing (for summary narrative)
+            pre_generated = await self.briefing_service.get_or_generate_briefing(user_id, date.today())
+
+            # Get LIVE data for time-sensitive sections
+            live_data = await self.briefing_service.get_live_briefing_data(user_id)
+
+            # Merge: use live data for time-sensitive sections, pre-generated for narrative
+            briefing = {
+                **pre_generated,
+                "calendar": live_data["calendar"],
+                "email_summary": live_data["email_summary"],
+                "leads": live_data["leads"],
+                "signals": live_data["signals"],
+                "tasks": live_data["tasks"],
+            }
 
             parts = []
 
@@ -646,13 +660,13 @@ class ARIAPersonaManager:
             if summary:
                 parts.append(f"Summary: {summary}")
 
-            # Calendar
+            # Calendar (LIVE)
             calendar = briefing.get("calendar", {})
             meeting_count = calendar.get("meeting_count", 0)
             if meeting_count > 0:
                 parts.append(f"Meetings today: {meeting_count}")
                 for meeting in calendar.get("key_meetings", [])[:3]:
-                    time = meeting.get("time", "")
+                    time = meeting.get("start_time_formatted", meeting.get("time", ""))
                     title = meeting.get("title", "Meeting")
                     parts.append(f"  - {time}: {title}")
 
