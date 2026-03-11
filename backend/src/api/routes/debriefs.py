@@ -437,8 +437,8 @@ class DebriefListItem(BaseModel):
     """Response model for debrief list items."""
 
     id: str
-    meeting_id: str
-    meeting_title: str | None
+    meeting_id: str | None = None
+    meeting_title: str | None = None
     meeting_time: str | None
     outcome: str | None
     action_items_count: int
@@ -462,9 +462,9 @@ class DebriefResponse(BaseModel):
 
     id: str
     user_id: str
-    meeting_id: str
-    meeting_title: str | None
-    meeting_time: str | None
+    meeting_id: str | None = None
+    meeting_title: str | None = None
+    meeting_time: str | None = None
     raw_notes: str | None
     summary: str | None
     outcome: str | None
