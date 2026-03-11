@@ -22,7 +22,8 @@ interface BriefingTranscriptViewProps {
 }
 
 /** Strip em dashes, en dashes, and other typographic artifacts from text */
-function cleanText(text: string): string {
+function cleanText(text: string | undefined | null): string {
+  if (!text) return '';
   return text.replace(/\u2014/g, ' - ').replace(/\u2013/g, '-');
 }
 
