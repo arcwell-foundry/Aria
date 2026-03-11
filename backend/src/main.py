@@ -190,6 +190,58 @@ async def lifespan(_app: FastAPI) -> Any:
             logger.warning("EXA_API_KEY configured but %s", message)
     else:
         logger.warning("EXA_API_KEY not configured - web enrichment DISABLED")
+    # Backfill integration_sync_state for active integrations that are missing records.
+    # This ensures the SyncScheduler has rows to query on its very first tick.
+    try:
+        from datetime import UTC, datetime
+
+        from src.db.supabase import SupabaseClient
+
+        _syncable_types = {"salesforce", "hubspot", "google_calendar", "outlook"}
+        _db = SupabaseClient.get_client()
+
+        _active = (
+            _db.table("user_integrations")
+            .select("user_id, integration_type")
+            .eq("status", "active")
+            .execute()
+        )
+
+        for _integ in _active.data or []:
+            _uid = _integ["user_id"]
+            _itype = _integ["integration_type"]
+            if _itype not in _syncable_types:
+                continue
+
+            _existing = (
+                _db.table("integration_sync_state")
+                .select("id")
+                .eq("user_id", _uid)
+                .eq("integration_type", _itype)
+                .limit(1)
+                .execute()
+            )
+
+            if not _existing.data:
+                _now = datetime.now(UTC).isoformat()
+                _db.table("integration_sync_state").insert(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "user_id": _uid,
+                        "integration_type": _itype,
+                        "last_sync_status": "success",
+                        "sync_count": 0,
+                        "next_sync_at": _now,
+                        "created_at": _now,
+                        "updated_at": _now,
+                    }
+                ).execute()
+                logger.info("Backfilled sync state for user=%s type=%s", _uid, _itype)
+
+        logger.info("Sync state backfill complete")
+    except Exception:
+        logger.exception("Failed to backfill integration_sync_state (non-fatal)")
+
     # US-942: Start the sync scheduler
     scheduler = get_sync_scheduler()
     await scheduler.start()

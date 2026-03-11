@@ -1,6 +1,7 @@
 """Service layer for managing user integrations."""
 
 import logging
+import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -14,6 +15,49 @@ from src.integrations.domain import (
 from src.integrations.oauth import get_oauth_client
 
 logger = logging.getLogger(__name__)
+
+# Integration types that have recurring sync (calendar/CRM) via SyncScheduler
+_SYNCABLE_TYPES = {
+    IntegrationType.SALESFORCE,
+    IntegrationType.HUBSPOT,
+    IntegrationType.GOOGLE_CALENDAR,
+    IntegrationType.OUTLOOK,
+}
+
+
+def _ensure_sync_state(user_id: str, integration_type: IntegrationType) -> None:
+    """Upsert integration_sync_state so the SyncScheduler picks up this integration.
+
+    Only creates a record for syncable types (CRM/calendar). Non-fatal on error.
+    """
+    if integration_type not in _SYNCABLE_TYPES:
+        return
+    try:
+        client = SupabaseClient.get_client()
+        now = datetime.now(UTC).isoformat()
+        client.table("integration_sync_state").upsert(
+            {
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "integration_type": integration_type.value,
+                "last_sync_status": "success",
+                "sync_count": 0,
+                "next_sync_at": now,
+                "created_at": now,
+                "updated_at": now,
+            },
+            on_conflict="user_id,integration_type",
+        ).execute()
+        logger.info(
+            "Ensured sync state for user=%s type=%s",
+            user_id,
+            integration_type.value,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to ensure sync state (non-fatal)",
+            exc_info=True,
+        )
 
 
 class IntegrationService:
@@ -151,6 +195,8 @@ class IntegrationService:
             response = client.table("user_integrations").insert(data).execute()
 
             if response.data and len(response.data) > 0:
+                # Ensure SyncScheduler will pick up this integration
+                _ensure_sync_state(user_id, integration_type)
                 return cast(dict[str, Any], response.data[0])
 
             raise Exception("Failed to create integration")

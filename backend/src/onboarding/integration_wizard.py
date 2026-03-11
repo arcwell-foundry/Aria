@@ -227,6 +227,37 @@ class IntegrationWizardService:
                             on_conflict="user_id,integration_type",
                         ).execute()
 
+                        # Ensure SyncScheduler will pick up syncable integrations
+                        _syncable = {"salesforce", "hubspot", "google_calendar", "outlook"}
+                        if integration_type in _syncable:
+                            try:
+                                import uuid as _uuid
+
+                                now = datetime.now(UTC).isoformat()
+                                self._db.table("integration_sync_state").upsert(
+                                    {
+                                        "id": str(_uuid.uuid4()),
+                                        "user_id": user_id,
+                                        "integration_type": integration_type,
+                                        "last_sync_status": "success",
+                                        "sync_count": 0,
+                                        "next_sync_at": now,
+                                        "created_at": now,
+                                        "updated_at": now,
+                                    },
+                                    on_conflict="user_id,integration_type",
+                                ).execute()
+                                logger.info(
+                                    "Ensured sync state from wizard for user=%s type=%s",
+                                    user_id,
+                                    integration_type,
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "Failed to ensure sync state from wizard (non-fatal)",
+                                    exc_info=True,
+                                )
+
                         # Update the dict for immediate use
                         connected_integrations[integration_type] = {
                             "connected_at": datetime.now(UTC).isoformat(),
