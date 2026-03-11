@@ -75,6 +75,7 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
     router = ProactiveRouter()
     all_user_ids = get_active_user_ids()
     processed_user_ids: list[str] = []  # Track users we actually processed
+    scanned_entities_by_user: dict[str, list[str]] = {}  # Track entity names per user for last_checked_at
 
     logger.info("Scout signal scan: processing %d users", len(all_user_ids))
 
@@ -91,7 +92,7 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
             # Look up company_id for dynamic alias resolution
             company_id: str | None = None
             try:
-                profile = db.table("user_profiles").select("company_id").eq("user_id", user_id).limit(1).execute()
+                profile = db.table("user_profiles").select("company_id").eq("id", user_id).limit(1).execute()
                 if profile.data:
                     company_id = profile.data[0].get("company_id")
             except Exception:
@@ -101,6 +102,8 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
             entities = await _get_scan_entities(db, user_id)
             if not entities:
                 continue
+
+            scanned_entities_by_user[user_id] = entities
 
             # Run Scout agent
             try:
@@ -299,12 +302,12 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
             )
             stats["errors"] += 1
 
-    # FIX 1A: Update monitored_entities.last_checked_at for all processed users
-    for user_id in processed_user_ids:
+    # FIX 1A: Update monitored_entities.last_checked_at for scanned entities
+    for user_id, entity_names in scanned_entities_by_user.items():
         try:
             db.table("monitored_entities").update(
                 {"last_checked_at": datetime.now(UTC).isoformat()}
-            ).eq("user_id", user_id).eq("is_active", True).execute()
+            ).eq("user_id", user_id).in_("entity_name", entity_names).execute()
             stats["monitored_entities_updated"] += 1
         except Exception:
             logger.debug("Failed to update last_checked_at for user %s", user_id)

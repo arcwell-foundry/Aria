@@ -5242,18 +5242,35 @@ class GoalExecutionService:
             # Per-task completion messages removed — results are collected
             # silently and a single summary is sent when the goal completes.
 
-            # Update matching goal_milestone to 'complete'
+            # Update matching goal_milestone to 'complete' via Python-level matching
             task_title = task.get("title", "")
-            try:
-                self._db.table("goal_milestones").update({
-                    "status": "complete",
-                    "completed_at": datetime.now(UTC).isoformat(),
-                    "updated_at": datetime.now(UTC).isoformat(),
-                }).eq("goal_id", goal_id).ilike(
-                    "title", f"%{task_title[:50]}%"
-                ).eq("status", "pending").execute()
-            except Exception:
-                logger.debug("Failed to update milestone to complete for %s", task_title)
+            if task_title and goal_id:
+                try:
+                    milestones = self._db.table("goal_milestones").select(
+                        "id, title"
+                    ).eq("goal_id", goal_id).eq("status", "pending").execute()
+                    task_lower = task_title.lower()
+                    for ms in (milestones.data or []):
+                        ms_title = (ms.get("title") or "").lower()
+                        if not ms_title:
+                            continue
+                        # Fuzzy match: first 30 chars of either title contained in the other
+                        if (
+                            ms_title[:30] in task_lower
+                            or task_lower[:30] in ms_title
+                        ):
+                            self._db.table("goal_milestones").update({
+                                "status": "complete",
+                                "completed_at": datetime.now(UTC).isoformat(),
+                                "updated_at": datetime.now(UTC).isoformat(),
+                            }).eq("id", ms["id"]).execute()
+                            logger.info(
+                                "Milestone marked complete: '%s'",
+                                ms.get("title", "")[:40],
+                            )
+                            break
+                except Exception as e:
+                    logger.debug("Milestone update failed for '%s': %s", task_title[:40], e)
 
             return {
                 "task_title": task_title,
@@ -5283,17 +5300,33 @@ class GoalExecutionService:
                 )
             )
 
-            # Update matching goal_milestone to 'failed'
+            # Update matching goal_milestone to 'failed' via Python-level matching
             task_title = task.get("title", "")
-            try:
-                self._db.table("goal_milestones").update({
-                    "status": "failed",
-                    "updated_at": datetime.now(UTC).isoformat(),
-                }).eq("goal_id", goal_id).ilike(
-                    "title", f"%{task_title[:50]}%"
-                ).eq("status", "pending").execute()
-            except Exception:
-                pass
+            if task_title and goal_id:
+                try:
+                    milestones = self._db.table("goal_milestones").select(
+                        "id, title"
+                    ).eq("goal_id", goal_id).eq("status", "pending").execute()
+                    task_lower = task_title.lower()
+                    for ms in (milestones.data or []):
+                        ms_title = (ms.get("title") or "").lower()
+                        if not ms_title:
+                            continue
+                        if (
+                            ms_title[:30] in task_lower
+                            or task_lower[:30] in ms_title
+                        ):
+                            self._db.table("goal_milestones").update({
+                                "status": "failed",
+                                "updated_at": datetime.now(UTC).isoformat(),
+                            }).eq("id", ms["id"]).execute()
+                            logger.info(
+                                "Milestone marked failed: '%s'",
+                                ms.get("title", "")[:40],
+                            )
+                            break
+                except Exception:
+                    pass
 
             # Emit step-completed WS event (failure)
             try:

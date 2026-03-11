@@ -394,6 +394,7 @@ function TaskListView({ data }: { data: ExecutionPlanData }) {
 export function ExecutionPlanCard({ data }: ExecutionPlanCardProps) {
   const [isApproved, setIsApproved] = useState(() => data.status === 'approved');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const addMessage = useConversationStore((s) => s.addMessage);
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
 
@@ -401,11 +402,12 @@ export function ExecutionPlanCard({ data }: ExecutionPlanCardProps) {
 
   const handleApprove = useCallback(async () => {
     setIsLoading(true);
+    setError(null);
     try {
       await apiClient.post(`/goals/${data.goal_id}/approve`);
       setIsApproved(true);
     } catch {
-      // Error surfaced in conversation
+      setError('Approval failed — try again');
     } finally {
       setIsLoading(false);
     }
@@ -442,36 +444,46 @@ export function ExecutionPlanCard({ data }: ExecutionPlanCardProps) {
   }, [data.title, addMessage, activeConversationId]);
 
   const approvalButtons = !isApproved ? (
-    <div className="border-t border-[var(--border)] px-4 py-3 flex items-center gap-2">
-      <button
-        onClick={handleApprove}
-        disabled={isLoading}
-        className="px-3 py-1.5 rounded-md text-xs font-medium text-white transition-colors disabled:opacity-50"
-        style={{ backgroundColor: 'var(--accent)' }}
-      >
-        {isLoading ? (
-          <span className="inline-flex items-center gap-1">
-            <Loader2 className="w-3 h-3 animate-spin" />
-            Starting...
-          </span>
-        ) : (
-          'Approve Plan'
-        )}
-      </button>
-      <button
-        onClick={handleModify}
-        className="px-3 py-1.5 rounded-md text-xs font-medium border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-      >
-        Modify
-      </button>
-      <button
-        onClick={handleDiscuss}
-        className="px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-      >
-        Discuss
-      </button>
+    <div className="border-t border-[var(--border)] px-4 py-3">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleApprove}
+          disabled={isLoading}
+          className="px-3 py-1.5 rounded-md text-xs font-medium text-white transition-colors disabled:opacity-50"
+          style={{ backgroundColor: 'var(--accent)' }}
+        >
+          {isLoading ? (
+            <span className="inline-flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Starting...
+            </span>
+          ) : (
+            'Approve Plan'
+          )}
+        </button>
+        <button
+          onClick={handleModify}
+          className="px-3 py-1.5 rounded-md text-xs font-medium border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+        >
+          Modify
+        </button>
+        <button
+          onClick={handleDiscuss}
+          className="px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+        >
+          Discuss
+        </button>
+      </div>
+      {error && (
+        <p className="mt-2 text-xs" style={{ color: 'var(--critical)' }}>{error}</p>
+      )}
     </div>
-  ) : null;
+  ) : (
+    <div className="border-t border-[var(--border)] px-4 py-3 flex items-center gap-2 text-emerald-400">
+      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+      <span className="text-xs font-medium">Executing...</span>
+    </div>
+  );
 
   return (
     <div

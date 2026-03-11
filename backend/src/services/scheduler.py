@@ -886,17 +886,13 @@ async def _run_signal_radar_scan() -> None:
 
     Runs every 30 minutes, offset 15 minutes from scout_signal_scan.
     """
+    logger.info("SignalRadar scan starting")
     try:
         from src.agents.capabilities.signal_radar import run_signal_radar_cron
 
-        result = await run_signal_radar_cron()
+        await run_signal_radar_cron()
 
-        if result and result.get("users_scanned", 0) > 0:
-            logger.info(
-                "SignalRadar scan complete: %d users scanned, %d signals detected",
-                result.get("users_scanned", 0),
-                result.get("signals_detected", 0),
-            )
+        logger.info("SignalRadar scan complete")
     except Exception:
         logger.exception("SignalRadar scan scheduler run failed")
 
