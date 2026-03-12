@@ -167,8 +167,16 @@ async def create_deck_from_context(
     }
 
     try:
-        db.table("decks").insert(deck_record).execute()
-        logger.info("Created deck record: deck_id=%s", deck_id)
+        insert_result = db.table("decks").insert(deck_record).execute()
+        if not insert_result.data:
+            logger.error(
+                "Deck insert returned empty data: deck_id=%s user_id=%s response=%s",
+                deck_id,
+                user_id,
+                getattr(insert_result, '__dict__', 'no attrs'),
+            )
+        else:
+            logger.info("Created deck record: deck_id=%s", deck_id)
     except Exception:
         logger.exception("Failed to create deck record: deck_id=%s user_id=%s", deck_id, user_id)
 
@@ -270,8 +278,16 @@ async def create_adhoc_deck(
     }
 
     try:
-        db.table("decks").insert(deck_record).execute()
-        logger.info("Created deck record: deck_id=%s", deck_id)
+        insert_result = db.table("decks").insert(deck_record).execute()
+        if not insert_result.data:
+            logger.error(
+                "Deck insert returned empty data: deck_id=%s user_id=%s response=%s",
+                deck_id,
+                user_id,
+                getattr(insert_result, '__dict__', 'no attrs'),
+            )
+        else:
+            logger.info("Created deck record: deck_id=%s", deck_id)
     except Exception:
         logger.exception("Failed to create deck record: deck_id=%s user_id=%s", deck_id, user_id)
 
