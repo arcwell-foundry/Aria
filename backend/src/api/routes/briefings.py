@@ -1440,7 +1440,11 @@ async def generate_briefing_video(
 async def start_briefing_conversation(
     current_user: CurrentUser,
 ) -> dict[str, Any]:
-    """Create or return a live Tavus CVI session for today's briefing."""
+    """Create a fresh Tavus CVI session for today's briefing.
+
+    Always creates a new conversation — Tavus sessions expire and stored
+    URLs become stale ("meeting does not exist"). Never reuse.
+    """
     from src.db.supabase import SupabaseClient
 
     today_str = date.today().isoformat()
@@ -1459,18 +1463,7 @@ async def start_briefing_conversation(
 
     briefing = result.data[0]
 
-    # Reuse existing live session
-    if briefing.get("tavus_conversation_url"):
-        conv_url = briefing["tavus_conversation_url"]
-        # Ensure prejoin=false to skip Daily.co join screen
-        if "prejoin=false" not in conv_url:
-            conv_url += "&prejoin=false" if "?" in conv_url else "?prejoin=false"
-        return {
-            "status": "existing",
-            "conversation_url": conv_url,
-            "conversation_id": briefing.get("tavus_conversation_id"),
-        }
-
+    # ALWAYS create a new conversation — Tavus sessions expire and cannot be reused
     try:
         from src.services.tavus_client import TavusClient
 
@@ -1480,9 +1473,10 @@ async def start_briefing_conversation(
             user_name="Dhruv",
         )
 
-        conv_url = data.get("conversation_url")
-        conv_id = data.get("conversation_id")
+        conv_url = data.get("conversation_url", "")
+        conv_id = data.get("conversation_id", "")
 
+        # Store fresh values (overwrite any stale ones)
         db.table("daily_briefings").update(
             {
                 "tavus_conversation_id": conv_id,
