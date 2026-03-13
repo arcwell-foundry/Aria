@@ -79,6 +79,7 @@ class TavusClient:
                     "enable_vision": True,
                 },
             },
+            "enable_closed_captions": False,
         }
 
         headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}

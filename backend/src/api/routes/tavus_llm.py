@@ -6,6 +6,10 @@ OpenAI-format messages and expects a streaming SSE response in OpenAI
 chat.completion.chunk format.
 
 This endpoint IS ARIA — full memory, full context, full intelligence.
+
+Performance: Uses Haiku directly via Anthropic SDK (no LiteLLM routing)
+and caches persona context per conversation to eliminate DB round-trips
+on turns 2+.
 """
 
 import json
@@ -14,12 +18,11 @@ import re
 import time
 import uuid
 
+import anthropic
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from src.core.config import settings
-from src.core.llm import LLMClient
-from src.core.task_types import TaskType
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,10 @@ router = APIRouter(prefix="/tavus", tags=["tavus-llm"])
 
 # Pre-compile pattern for extracting user_id from system message
 _USER_ID_PATTERN = re.compile(r"user_id:([0-9a-f\-]{36})")
+
+# --- Context cache: cache_key → (system_prompt, monotonic_timestamp) ---
+_context_cache: dict[str, tuple[str, float]] = {}
+_CACHE_TTL_SECONDS = 7200  # 2 hours
 
 # Spoken-mode system prompt injected alongside ARIA persona context
 SPOKEN_MODE_RULES = """
@@ -40,6 +47,22 @@ CRITICAL SPEECH RULES — you are being spoken aloud by a realistic avatar:
 - If you don't know something, say "Don't have that right now" in one sentence.
 - Speak like Jarvis: calm, precise, already knows everything.
 """
+
+
+def _get_cached_context(cache_key: str) -> str | None:
+    """Return cached system prompt if still within TTL, else None."""
+    entry = _context_cache.get(cache_key)
+    if entry is not None:
+        prompt, ts = entry
+        if time.monotonic() - ts < _CACHE_TTL_SECONDS:
+            return prompt
+        del _context_cache[cache_key]
+    return None
+
+
+def _set_cached_context(cache_key: str, prompt: str) -> None:
+    """Store system prompt in cache with current timestamp."""
+    _context_cache[cache_key] = (prompt, time.monotonic())
 
 
 def _extract_user_id(messages: list[dict]) -> str | None:
@@ -61,6 +84,17 @@ def _extract_user_id(messages: list[dict]) -> str | None:
             match = _USER_ID_PATTERN.search(content)
             if match:
                 return match.group(1)
+    return None
+
+
+def _extract_conversation_id(request: Request, body: dict) -> str | None:
+    """Extract conversation_id from Tavus request headers or body."""
+    conv_id = request.headers.get("x-tavus-conversation-id")
+    if conv_id:
+        return conv_id
+    conv_id = body.get("conversation_id")
+    if conv_id:
+        return str(conv_id)
     return None
 
 
@@ -101,11 +135,12 @@ def _validate_api_key(request: Request) -> None:
 async def tavus_chat_completions(request: Request) -> StreamingResponse:
     """OpenAI-compatible streaming chat endpoint for Tavus CVI.
 
-    Tavus sends standard OpenAI chat completion requests here.  We validate
-    the shared API key, identify the user from the system message, build
-    ARIA's full persona context, and stream back OpenAI-format SSE chunks
-    powered by Claude Sonnet via LiteLLM.
+    Uses Haiku directly via Anthropic SDK for minimal latency.
+    Caches persona context per conversation to eliminate DB round-trips
+    on turns 2+.
     """
+    t0 = time.monotonic()
+
     _validate_api_key(request)
 
     body = await request.json()
@@ -126,9 +161,18 @@ async def tavus_chat_completions(request: Request) -> StreamingResponse:
             detail="user_id not found in system message",
         )
 
+    # --- Extract conversation_id for caching ---
+    conversation_id = _extract_conversation_id(request, body)
+    cache_key = conversation_id or user_id
+
     logger.info(
         "Tavus LLM request received",
-        extra={"user_id": user_id, "message_count": len(messages)},
+        extra={
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "cache_key": cache_key,
+            "message_count": len(messages),
+        },
     )
 
     # --- Extract latest user message ---
@@ -144,30 +188,33 @@ async def tavus_chat_completions(request: Request) -> StreamingResponse:
             detail="No user message found",
         )
 
-    # --- Build full ARIA persona context ---
-    # Reuse the integration TavusClient's context pipeline which calls
-    # PersonaBuilder with all 8 layers + capability context + spoken mode.
-    try:
-        from src.integrations.tavus import get_tavus_client
+    # --- Build or retrieve cached persona context ---
+    system_prompt = _get_cached_context(cache_key)
+    if system_prompt:
+        logger.info("Tavus LLM: using cached context for %s", cache_key)
+    else:
+        try:
+            from src.integrations.tavus import get_tavus_client
 
-        tavus_client = get_tavus_client()
-        system_prompt = await tavus_client._build_full_persona_context(user_id)
-    except Exception as e:
-        logger.warning(
-            "Tavus LLM: persona context build failed, using fallback: %s", e
-        )
-        # Minimal fallback so the conversation still works
-        system_prompt = (
-            "You are ARIA, an autonomous AI colleague for life sciences "
-            "commercial teams. You are speaking via live video avatar."
-        )
+            tavus_client = get_tavus_client()
+            system_prompt = await tavus_client._build_full_persona_context(user_id)
+        except Exception as e:
+            logger.warning(
+                "Tavus LLM: persona context build failed, using fallback: %s", e
+            )
+            system_prompt = (
+                "You are ARIA, an autonomous AI colleague for life sciences "
+                "commercial teams. You are speaking via live video avatar."
+            )
 
-    # Append the strict spoken-mode rules
-    system_prompt += SPOKEN_MODE_RULES
+        # Append the strict spoken-mode rules
+        system_prompt += SPOKEN_MODE_RULES
+        _set_cached_context(cache_key, system_prompt)
+        logger.info("Tavus LLM: built and cached context for %s", cache_key)
+
+    t1 = time.monotonic()
 
     # --- Build conversation history for LLM ---
-    # Pass prior messages (excluding the system message and latest user message)
-    # as conversation context so ARIA has multi-turn awareness.
     conversation_history: list[dict[str, str]] = []
     for msg in messages:
         role = msg.get("role", "")
@@ -176,10 +223,13 @@ async def tavus_chat_completions(request: Request) -> StreamingResponse:
             continue  # We build our own system prompt
         conversation_history.append({"role": role, "content": content})
 
-    # --- Stream response in OpenAI format ---
-    llm_client = LLMClient()
+    # --- Stream response via Anthropic SDK (Haiku, direct, no LiteLLM) ---
+    client = anthropic.AsyncAnthropic(
+        api_key=settings.ANTHROPIC_API_KEY.get_secret_value(),
+    )
 
     async def generate():
+        t_llm_start = time.monotonic()
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         created = int(time.time())
 
@@ -200,35 +250,43 @@ async def tavus_chat_completions(request: Request) -> StreamingResponse:
         yield f"data: {json.dumps(opening)}\n\n"
 
         try:
-            async for token in llm_client.stream_response(
+            first_token_logged = False
+            async with client.messages.stream(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=300,
+                temperature=0.3,
+                system=system_prompt,
                 messages=conversation_history,
-                system_prompt=system_prompt,
-                user_id=user_id,
-                task=TaskType.TAVUS_CVI_STREAM,
-                agent_id="tavus_cvi",
-                temperature=0.7,
-                max_tokens=300,  # Keep responses short for spoken output
-            ):
-                chunk = {
-                    "id": chunk_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": "aria-1",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {"content": token},
-                            "finish_reason": None,
-                        }
-                    ],
-                }
-                yield f"data: {json.dumps(chunk)}\n\n"
+            ) as stream:
+                async for text in stream.text_stream:
+                    if not first_token_logged:
+                        t_first = time.monotonic()
+                        logger.info(
+                            "Tavus LLM: context=%.2fs, ttft=%.2fs",
+                            t1 - t0,
+                            t_first - t0,
+                        )
+                        first_token_logged = True
+
+                    chunk = {
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": "aria-1",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": text},
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n"
         except Exception:
             logger.exception(
                 "Tavus LLM streaming failed",
                 extra={"user_id": user_id},
             )
-            # Send error as final content chunk so Tavus can read it
             error_chunk = {
                 "id": chunk_id,
                 "object": "chat.completion.chunk",
@@ -243,6 +301,14 @@ async def tavus_chat_completions(request: Request) -> StreamingResponse:
                 ],
             }
             yield f"data: {json.dumps(error_chunk)}\n\n"
+
+        t2 = time.monotonic()
+        logger.info(
+            "Tavus LLM: context=%.2fs, llm=%.2fs, total=%.2fs",
+            t1 - t0,
+            t2 - t_llm_start,
+            t2 - t0,
+        )
 
         # Done chunk
         done_chunk = {
