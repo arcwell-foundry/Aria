@@ -15,9 +15,11 @@ import ariaAvatarSrc from '@/assets/aria-avatar.png';
 
 interface AvatarContainerProps {
   audioOnly?: boolean;
+  isConnecting?: boolean;
+  onPlay?: () => void;
 }
 
-export function AvatarContainer({ audioOnly = false }: AvatarContainerProps) {
+export function AvatarContainer({ audioOnly = false, isConnecting = false, onPlay }: AvatarContainerProps) {
   const tavusSession = useModalityStore((s) => s.tavusSession);
   const hasActiveSession = !audioOnly && tavusSession.status === 'active' && tavusSession.roomUrl;
 
@@ -39,24 +41,48 @@ export function AvatarContainer({ audioOnly = false }: AvatarContainerProps) {
       {/* Avatar frame */}
       <div className="relative z-10 flex flex-col items-center gap-6">
         <div
-          className="w-[280px] h-[280px] rounded-full overflow-hidden border-2 border-[#2E66FF]"
+          className={`w-[280px] h-[280px] rounded-full overflow-hidden border-2 border-[#2E66FF] relative ${
+            isConnecting ? 'animate-pulse' : ''
+          }`}
           style={{
-            boxShadow: '0 0 40px rgba(46,102,255,0.15), 0 0 80px rgba(46,102,255,0.05)',
+            boxShadow: isConnecting
+              ? '0 0 40px rgba(46,102,255,0.3), 0 0 80px rgba(46,102,255,0.15)'
+              : '0 0 40px rgba(46,102,255,0.15), 0 0 80px rgba(46,102,255,0.05)',
           }}
         >
           {hasActiveSession ? (
             <iframe
               src={tavusSession.roomUrl!}
-              className="w-full h-full border-0"
+              className="absolute inset-0 w-full h-full border-0"
+              style={{ borderRadius: '50%' }}
               allow="camera; microphone; autoplay; display-capture"
-              title="ARIA Avatar"
+              title="ARIA Live Conversation"
             />
+          ) : isConnecting ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0D1117]">
+              <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs text-blue-400 mt-2">Connecting...</span>
+            </div>
           ) : (
-            <img
-              src={ariaAvatarSrc}
-              alt="ARIA"
-              className="w-full h-full object-cover"
-            />
+            <div
+              className="absolute inset-0 cursor-pointer group"
+              onClick={onPlay}
+              style={{ borderRadius: '50%' }}
+            >
+              <img
+                src={ariaAvatarSrc}
+                alt="ARIA"
+                className="w-full h-full object-cover"
+              />
+              <div
+                className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity"
+                style={{ borderRadius: '50%' }}
+              >
+                <svg width="48" height="48" viewBox="0 0 48 48" fill="white">
+                  <polygon points="16,12 40,24 16,36" />
+                </svg>
+              </div>
+            </div>
           )}
         </div>
 
@@ -64,10 +90,10 @@ export function AvatarContainer({ audioOnly = false }: AvatarContainerProps) {
         <WaveformBars />
 
         {/* Connection status */}
-        {tavusSession.status === 'connecting' && (
+        {(isConnecting || tavusSession.status === 'connecting') && (
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <span className="font-mono text-[11px] text-[#8B8FA3]">CONNECTING...</span>
+            <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+            <span className="font-mono text-[11px] text-blue-400">CONNECTING...</span>
           </div>
         )}
       </div>
