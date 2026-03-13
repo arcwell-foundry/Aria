@@ -126,7 +126,7 @@ class ApolloEnrichmentProvider(BaseEnrichmentProvider):
         try:
             async with httpx.AsyncClient() as http:
                 response = await http.post(
-                    f"{APOLLO_BASE_URL}/mixed_people/search",
+                    f"{APOLLO_BASE_URL}/mixed_people/api_search",
                     headers={
                         "x-api-key": api_key,
                         "Content-Type": "application/json",

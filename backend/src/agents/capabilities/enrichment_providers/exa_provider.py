@@ -605,6 +605,8 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
         *,
         include_domains: list[str] | None = None,
         exclude_domains: list[str] | None = None,
+        start_published_date: str | None = None,
+        category: str | None = None,
     ) -> list[ExaSearchResult]:
         """Fast search (<350ms) for interactive workflows.
 
@@ -613,6 +615,8 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
             num_results: Number of results to request.
             include_domains: Only return results from these domains.
             exclude_domains: Exclude results from these domains.
+            start_published_date: Only return results published after this date (YYYY-MM-DD).
+            category: Exa category filter (e.g. "company", "news").
 
         Returns:
             List of ExaSearchResult objects.
@@ -640,6 +644,10 @@ class ExaEnrichmentProvider(BaseEnrichmentProvider):
                 payload["includeDomains"] = include_domains
             if exclude_domains:
                 payload["excludeDomains"] = exclude_domains
+            if start_published_date:
+                payload["startPublishedDate"] = start_published_date
+            if category:
+                payload["category"] = category
 
             async with httpx.AsyncClient(
                 timeout=10.0,

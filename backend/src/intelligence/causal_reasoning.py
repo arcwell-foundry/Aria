@@ -165,10 +165,10 @@ class SalesCausalReasoningEngine:
             cutoff = (datetime.now(UTC) - timedelta(hours=hours_back)).isoformat()
             result = (
                 self._db.table("market_signals")
-                .select("id, signal_type, content, source, created_at")
+                .select("id, signal_type, headline, summary, source_name, detected_at")
                 .eq("user_id", user_id)
-                .gte("created_at", cutoff)
-                .order("created_at", desc=True)
+                .gte("detected_at", cutoff)
+                .order("detected_at", desc=True)
                 .limit(limit)
                 .execute()
             )
@@ -181,7 +181,7 @@ class SalesCausalReasoningEngine:
                 )
 
             for signal in signals:
-                signal_text = signal.get("content", "")
+                signal_text = signal.get("summary") or signal.get("headline", "")
                 if not signal_text:
                     continue
 

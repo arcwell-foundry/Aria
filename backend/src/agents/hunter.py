@@ -76,6 +76,46 @@ _CONSULTING_BLOCKLIST = {
 
 _CONSULTING_KEYWORDS = {"consulting", "advisory", "advisors", "consultants"}
 
+# Life sciences domain expertise injected into Hunter prompts
+HUNTER_DOMAIN_CONTEXT = """\
+You are the lead discovery engine for a life sciences commercial team.
+You have 25 years of industry experience across all modalities.
+
+When evaluating a potential lead, you consider:
+
+BUYING SIGNALS (ranked by intent strength):
+1. Facility expansion / new manufacturing site — Strongest. New facility = \
+12-24 months of equipment and service purchasing ahead.
+2. Hiring surge in manufacturing/bioprocessing roles — Company is scaling \
+operations. Need equipment, consumables, services.
+3. FDA approval / BLA filing — Drug moving to commercial manufacturing = \
+massive scale-up from clinical to GMP commercial.
+4. Funding round (Series B+) — Capital enables manufacturing investment. \
+Series A is too early for equipment purchases.
+5. Clinical trial advancing to Phase 3 — Manufacturing planning starts \
+~18 months before commercial launch.
+6. Technology platform change — Switching from batch to continuous, \
+stainless to single-use = new equipment across the facility.
+7. M&A / partnership — Integration means equipment standardization, \
+new capacity planning.
+
+DISQUALIFYING SIGNALS:
+- Company in early R&D only (no manufacturing)
+- Company already has long-term contracts with competitors
+- Company is downsizing or in financial trouble
+- Company is outside the user's territory
+
+MODALITY-SPECIFIC KNOWLEDGE:
+- CDMOs: Watch for capacity utilization announcements. A CDMO at 90%+ \
+utilization WILL expand. This is the best possible signal.
+- Cell & Gene Therapy: GMP suite construction = 18-month equipment \
+purchasing cycle. Watch for IND filings.
+- mAbs: Upstream titer improvements or downstream bottlenecks = \
+specific equipment opportunities.
+- mRNA: LNP manufacturing at scale is the bottleneck. Companies \
+investing here are actively purchasing.
+"""
+
 
 def _is_consulting_or_advisory(name: str) -> bool:
     """Check if a company name indicates a consulting/advisory firm.
@@ -253,20 +293,29 @@ class HunterAgent(SkillAwareAgent):
             self._sub_industry_context = None
 
         # 2. Load active ICP from lead_icp_profiles
+        #    Table schema: id, user_id, icp_data (JSONB), version, created_at, updated_at
         try:
             result = (
                 db.table("lead_icp_profiles")
-                .select("id, name, criteria, is_active")
+                .select("id, icp_data, version")
                 .eq("user_id", self.user_id)
-                .eq("is_active", True)
+                .order("version", desc=True)
                 .limit(1)
                 .execute()
             )
             if result.data:
-                self._active_icp = result.data[0]
+                row = result.data[0]
+                icp_data = row.get("icp_data") or {}
+                # Normalize: expose icp_data fields at top level for downstream use
+                self._active_icp = {
+                    "id": row.get("id"),
+                    "criteria": icp_data,  # downstream expects .criteria dict
+                    **icp_data,  # also spread for direct access to industry, geography etc.
+                }
                 logger.info(
-                    "[HUNTER] Loaded active ICP: %s",
-                    self._active_icp.get("name", "unnamed"),
+                    "[HUNTER] Loaded active ICP v%s: %s",
+                    row.get("version", "?"),
+                    list(icp_data.keys())[:5],
                 )
             else:
                 self._active_icp = None
@@ -366,6 +415,202 @@ class HunterAgent(SkillAwareAgent):
                 return True
 
         return False
+
+    async def _parse_goal_intent(self, goal_title: str) -> dict[str, Any]:
+        """Use LLM to extract structured search intent from a goal title.
+
+        Parses natural language goal titles like "Find me 3 CDMOs in Boston"
+        into structured fields for building targeted search queries.
+
+        Args:
+            goal_title: The user's goal title.
+
+        Returns:
+            Dict with company_type, location, count, modality, criteria.
+        """
+        if not goal_title:
+            return {}
+
+        prompt = (
+            f'Parse this lead generation goal title into structured fields.\n\n'
+            f'Goal: "{goal_title}"\n\n'
+            f'Extract these fields as JSON:\n'
+            f'- "company_type": type of company (e.g. CDMO, CRO, biotech, pharma, '
+            f'equipment supplier, consumables, lab equipment, cell therapy, gene therapy)\n'
+            f'- "location": geographic location if mentioned (city, state, region)\n'
+            f'- "count": number of leads requested (integer, default 5)\n'
+            f'- "modality": therapeutic/manufacturing modality if mentioned '
+            f'(biologics, small molecule, cell therapy, gene therapy, mRNA, mAbs, '
+            f'biosimilars, ADCs)\n'
+            f'- "criteria": any special criteria mentioned (e.g. "expanding", '
+            f'"hiring", "recently funded")\n'
+            f'- "industry_segment": specific industry segment '
+            f'(e.g. bioprocessing, diagnostics, medical devices)\n\n'
+            f'Return ONLY a JSON object. Omit fields that are not mentioned.'
+        )
+
+        try:
+            response = await self.llm.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt=(
+                    "You are a life sciences industry expert. Parse goal titles "
+                    "into structured search intent. Return only valid JSON."
+                ),
+                temperature=0.1,
+                max_tokens=300,
+                user_id=self.user_id,
+                task=TaskType.HUNTER_ENRICH,
+                agent_id="hunter",
+            )
+            parsed = _extract_json_from_text(response)
+            if isinstance(parsed, dict):
+                logger.info("[HUNTER] Parsed goal intent: %s", parsed)
+                return parsed
+        except Exception as e:
+            logger.warning("[HUNTER] Failed to parse goal intent: %s", e)
+
+        return {}
+
+    async def _build_search_queries(
+        self,
+        goal_title: str,
+        user_icp: dict[str, Any],
+    ) -> list[str]:
+        """Build intelligent Exa search queries from goal context.
+
+        A top sales rep doesn't search generically. They search with intent,
+        combining company type, location, modality, and signal context.
+
+        Args:
+            goal_title: The user's goal title.
+            user_icp: Active ICP data dict.
+
+        Returns:
+            List of targeted search query strings.
+        """
+        parsed = await self._parse_goal_intent(goal_title)
+        if not parsed:
+            # Fallback to generic query from ICP
+            industry = user_icp.get("industry", "life sciences")
+            return [f"{industry} companies manufacturing"]
+
+        company_type = parsed.get("company_type", "")
+        location = parsed.get("location", "")
+        modality = parsed.get("modality", "") or user_icp.get("modality", "")
+        criteria = parsed.get("criteria", "")
+        segment = parsed.get("industry_segment", "")
+
+        queries: list[str] = []
+
+        # Primary: specific to what user asked
+        primary_parts = [company_type]
+        if modality:
+            primary_parts.append(modality)
+        if segment:
+            primary_parts.append(segment)
+        else:
+            primary_parts.append("manufacturing")
+        if location:
+            primary_parts.append(location)
+        if criteria:
+            primary_parts.append(criteria)
+        primary_parts.append("2025 2026")
+        queries.append(" ".join(p for p in primary_parts if p))
+
+        # Signal-enriched: find companies with recent activity
+        signal_parts = [company_type]
+        if location:
+            signal_parts.append(location)
+        signal_parts.append("expansion OR hiring OR FDA approval OR funding 2025 2026")
+        queries.append(" ".join(p for p in signal_parts if p))
+
+        # Modality-specific: use ICP context for deeper search
+        if modality:
+            mod_parts = [modality, "manufacturing facility"]
+            if location:
+                mod_parts.append(location)
+            mod_parts.append("announcement OR expansion OR new site")
+            queries.append(" ".join(mod_parts))
+
+        logger.info(
+            "[HUNTER] Built %d search queries from goal: %s",
+            len(queries),
+            [q[:80] for q in queries],
+        )
+        return queries
+
+    async def _get_signal_enriched_companies(
+        self,
+        user_icp: dict[str, Any],
+        parsed_intent: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query market_signals for companies with recent activity.
+
+        Companies with recent signals matching the user's request are
+        HIGH PRIORITY leads. This is how a top rep works: they read
+        the news, then reach out.
+
+        Args:
+            user_icp: Active ICP data dict.
+            parsed_intent: Parsed goal intent from _parse_goal_intent.
+
+        Returns:
+            List of company dicts from signal data.
+        """
+        try:
+            from src.db.supabase import SupabaseClient
+            from datetime import timedelta
+
+            db = SupabaseClient.get_client()
+            cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+
+            # Build query for recent high-value signals
+            query = (
+                db.table("market_signals")
+                .select("company_name, signal_type, headline, summary, detected_at, relevance_score")
+                .eq("user_id", self.user_id)
+                .gte("detected_at", cutoff)
+                .order("detected_at", desc=True)
+                .limit(20)
+            )
+
+            result = query.execute()
+            if not result.data:
+                return []
+
+            # Deduplicate by company name and build company dicts
+            seen: set[str] = set()
+            companies: list[dict[str, Any]] = []
+            for sig in result.data:
+                name = sig.get("company_name", "")
+                if not name or name.lower() in seen:
+                    continue
+                seen.add(name.lower())
+
+                # Check location match if parsed intent has location
+                companies.append({
+                    "name": name,
+                    "domain": "",
+                    "description": sig.get("summary") or sig.get("headline", ""),
+                    "industry": "Life Sciences",
+                    "size": "",
+                    "geography": "",
+                    "website": "",
+                    "signal_type": sig.get("signal_type", ""),
+                    "signal_date": sig.get("detected_at", ""),
+                    "relevance_score": sig.get("relevance_score", 0.5),
+                    "_source": "market_signals",
+                })
+
+            logger.info(
+                "[HUNTER] Found %d companies with recent signals",
+                len(companies),
+            )
+            return companies
+
+        except Exception as e:
+            logger.warning("[HUNTER] Failed to query market_signals for leads: %s", e)
+            return []
 
     def validate_input(self, task: dict[str, Any]) -> bool:
         """Validate Hunter agent task input.
@@ -472,32 +717,61 @@ class HunterAgent(SkillAwareAgent):
         icp = task["icp"]
         target_count = task["target_count"]
         exclusions = task.get("exclusions", [])
+        goal_title = task.get("goal_title", "")
 
-        # Step 1: Build search query using search vocabulary + ICP industry
-        industry = icp.get("industry", "")
-        industry_str = industry if isinstance(industry, str) else industry[0] if industry else ""
+        # Step 1: Build intelligent search queries from goal title + ICP
+        # A top sales rep doesn't search "life sciences manufacturing companies"
+        # They search with intent based on what the user actually asked for.
+        user_icp = {}
+        if self._active_icp and self._active_icp.get("criteria"):
+            user_icp = self._active_icp["criteria"] if isinstance(self._active_icp["criteria"], dict) else {}
+        user_icp = {**icp, **user_icp}  # merge task ICP with stored ICP
 
-        # Prefer domain-specific search terms from memory_semantic over generic industry
-        search_vocab = getattr(self, "_search_vocabulary", "")
-        if search_vocab:
-            # Extract quoted terms from the search vocabulary fact
-            import re
-            quoted_terms = re.findall(r'"([^"]+)"', search_vocab)
-            if quoted_terms:
-                # Use the first 3 most specific terms for the search query
-                search_query = " OR ".join(quoted_terms[:3])
-                logger.warning(
-                    "[HUNTER] Using domain-specific search query from memory_semantic: %s",
-                    search_query[:100],
-                )
-            else:
-                search_query = industry_str
+        if goal_title:
+            search_queries = await self._build_search_queries(goal_title, user_icp)
         else:
-            search_query = industry_str
+            # Fallback: use search vocabulary or industry
+            industry = icp.get("industry", "")
+            industry_str = industry if isinstance(industry, str) else industry[0] if industry else ""
+            search_vocab = getattr(self, "_search_vocabulary", "")
+            if search_vocab:
+                quoted_terms = re.findall(r'"([^"]+)"', search_vocab)
+                if quoted_terms:
+                    search_queries = [" OR ".join(quoted_terms[:3])]
+                else:
+                    search_queries = [industry_str] if industry_str else ["life sciences manufacturing"]
+            else:
+                search_queries = [industry_str] if industry_str else ["life sciences manufacturing"]
 
-        # Step 2: Search for companies (limit = target_count * 3 to have pool)
+        # Step 1b: Get signal-enriched companies from market_signals
+        signal_companies = await self._get_signal_enriched_companies(user_icp)
+
+        # Step 2: Search for companies using each query, merge and dedup
         search_limit = target_count * 3
-        companies = await self._search_companies(query=search_query, limit=search_limit)
+        all_companies: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
+
+        # Signal companies go first (highest priority)
+        for sc in signal_companies:
+            name_lower = sc.get("name", "").lower()
+            if name_lower and name_lower not in seen_names:
+                seen_names.add(name_lower)
+                all_companies.append(sc)
+
+        # Search with each query and merge results
+        for query in search_queries:
+            try:
+                results = await self._search_companies(query=query, limit=search_limit)
+                for company in results:
+                    name_lower = company.get("name", "").lower()
+                    if name_lower and name_lower not in seen_names:
+                        seen_names.add(name_lower)
+                        all_companies.append(company)
+            except Exception as e:
+                logger.warning("[HUNTER] Search query failed: %s - %s", query[:60], e)
+                continue
+
+        companies = all_companies
 
         # Step 3: Filter out excluded companies
         if exclusions:
@@ -620,6 +894,8 @@ class HunterAgent(SkillAwareAgent):
         results = await exa.search_fast(
             query=exa_query,
             num_results=limit * 2,
+            start_published_date="2025-01-01",
+            category="company",
         )
 
         if not results:
@@ -678,8 +954,8 @@ class HunterAgent(SkillAwareAgent):
             messages=[{"role": "user", "content": prompt}],
             system_prompt=(
                 get_security_context()
-                + "\nYou are a life sciences market intelligence analyst. "
-                "Extract real company names and details from search results. "
+                + "\n" + HUNTER_DOMAIN_CONTEXT
+                + "\nExtract real company names and details from search results. "
                 "Return only valid JSON arrays. No markdown fences, no explanation."
             ),
             temperature=0.2,
@@ -2079,21 +2355,28 @@ class HunterAgent(SkillAwareAgent):
             return "champion"
         return "user"
 
-    def _infer_influence_level(self, seniority: str) -> str:
+    def _infer_influence_level(self, seniority: str) -> int:
         """Infer influence level from seniority label.
+
+        The lead_memory_stakeholders.influence_level column is INT (1-10).
+        Maps seniority to a numeric score.
 
         Args:
             seniority: Seniority string (e.g., "C-Level", "VP-Level").
 
         Returns:
-            Influence level: high, medium, or low.
+            Influence level as integer 1-10.
         """
         seniority_lower = seniority.lower()
-        if "c-level" in seniority_lower or "executive" in seniority_lower:
-            return "high"
-        if "vp" in seniority_lower or "director" in seniority_lower:
-            return "medium"
-        return "low"
+        if "c-level" in seniority_lower or "executive" in seniority_lower or "c_suite" in seniority_lower:
+            return 9
+        if "vp" in seniority_lower or "vice president" in seniority_lower:
+            return 7
+        if "director" in seniority_lower:
+            return 6
+        if "manager" in seniority_lower or "senior" in seniority_lower:
+            return 4
+        return 3
 
     async def _score_fit(
         self,

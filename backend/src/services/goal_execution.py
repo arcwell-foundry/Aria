@@ -1159,6 +1159,7 @@ class GoalExecutionService:
                 explicit_count = self._parse_requested_lead_count(goal.get("title", ""))
             task = {
                 "goal_id": goal.get("id", ""),
+                "goal_title": goal.get("title", ""),
                 "icp": {
                     "industry": config.get("industry", "Life Sciences"),
                     "size": config.get("company_size", ""),
