@@ -10,6 +10,10 @@ This endpoint IS ARIA — full memory, full context, full intelligence.
 Performance: Uses Haiku directly via Anthropic SDK (no LiteLLM routing)
 and caches persona context per conversation to eliminate DB round-trips
 on turns 2+.
+
+Multi-tenancy: Every DB query is scoped to user_id. Cache keys use
+conversation_id (globally unique per-user per-session GUIDs from Tavus).
+No hardcoded user IDs anywhere.
 """
 
 import json
@@ -17,6 +21,7 @@ import logging
 import re
 import time
 import uuid
+from datetime import date
 
 import anthropic
 from fastapi import APIRouter, HTTPException, Request, status
@@ -131,6 +136,57 @@ def _validate_api_key(request: Request) -> None:
         )
 
 
+async def _build_tavus_system_prompt(user_id: str) -> str:
+    """Build ARIA's system prompt for a CVI session.
+
+    Uses today's pre-generated briefing script as the factual grounding.
+    Fully scoped to user_id — no cross-tenant data leakage possible.
+
+    Args:
+        user_id: The authenticated user's UUID.
+
+    Returns:
+        Complete system prompt string with briefing context and speech rules.
+    """
+    context_section = "No briefing has been generated for today yet."
+
+    try:
+        from src.db.supabase import SupabaseClient
+
+        db = SupabaseClient.get_client()
+        today_str = date.today().isoformat()
+
+        result = (
+            db.table("daily_briefings")
+            .select("tavus_script, content")
+            .eq("user_id", user_id)
+            .eq("briefing_date", today_str)
+            .execute()
+        )
+
+        if result.data:
+            row = result.data[0]
+            # tavus_script is the top-level column; fall back to content JSON
+            script = (row.get("tavus_script") or "").strip()
+            if not script:
+                script = ((row.get("content") or {}).get("tavus_script") or "").strip()
+
+            if script:
+                context_section = f"TODAY'S BRIEFING CONTEXT:\n{script}"
+    except Exception as e:
+        logger.warning("Tavus LLM: briefing query failed for user %s: %s", user_id, e)
+
+    return f"""You are ARIA, an autonomous AI colleague for life sciences commercial teams.
+Speak in 1-2 sentences maximum. No markdown, no bullets, no asterisks.
+Be precise and direct. Answer from the briefing context below.
+Use specific names, times, and companies when they exist in context.
+If something is not in the context, say "that's not in today's briefing."
+Never say you don't have access — you have everything you need below.
+
+{context_section}
+{SPOKEN_MODE_RULES}"""
+
+
 @router.post("/v1/chat/completions")
 async def tavus_chat_completions(request: Request) -> StreamingResponse:
     """OpenAI-compatible streaming chat endpoint for Tavus CVI.
@@ -193,22 +249,7 @@ async def tavus_chat_completions(request: Request) -> StreamingResponse:
     if system_prompt:
         logger.info("Tavus LLM: using cached context for %s", cache_key)
     else:
-        try:
-            from src.integrations.tavus import get_tavus_client
-
-            tavus_client = get_tavus_client()
-            system_prompt = await tavus_client._build_full_persona_context(user_id)
-        except Exception as e:
-            logger.warning(
-                "Tavus LLM: persona context build failed, using fallback: %s", e
-            )
-            system_prompt = (
-                "You are ARIA, an autonomous AI colleague for life sciences "
-                "commercial teams. You are speaking via live video avatar."
-            )
-
-        # Append the strict spoken-mode rules
-        system_prompt += SPOKEN_MODE_RULES
+        system_prompt = await _build_tavus_system_prompt(user_id)
         _set_cached_context(cache_key, system_prompt)
         logger.info("Tavus LLM: built and cached context for %s", cache_key)
 

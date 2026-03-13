@@ -14,6 +14,29 @@ from src.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _build_json_patch(payload: dict) -> list[dict]:
+    """Convert a persona payload dict into JSON Patch (RFC 6902) operations.
+
+    Uses ``add`` instead of ``replace`` so the operation succeeds regardless of
+    whether the field already exists on the persona. For nested dicts inside
+    ``layers``, each sub-layer (llm, perception, vqa, etc.) is replaced as a
+    whole object to avoid partial-path issues.
+    """
+    ops: list[dict] = []
+    for key, value in payload.items():
+        if key == "layers" and isinstance(value, dict):
+            # Replace each sub-layer as a whole object
+            for layer_name, layer_config in value.items():
+                ops.append({
+                    "op": "add",
+                    "path": f"/layers/{layer_name}",
+                    "value": layer_config,
+                })
+        else:
+            ops.append({"op": "add", "path": f"/{key}", "value": value})
+    return ops
+
+
 class TavusClient:
     """Client for Tavus video generation and briefing CVI conversations."""
 
@@ -79,8 +102,8 @@ class TavusClient:
                     "enable_vision": True,
                 },
             },
-            "enable_closed_captions": False,
         }
+        # NOTE: enable_closed_captions is set per-conversation, not on persona
 
         headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
 
@@ -88,14 +111,15 @@ class TavusClient:
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             if existing_persona_id:
-                # Update existing persona
+                # Update existing persona — Tavus PATCH requires JSON Patch (RFC 6902)
+                patch_ops = _build_json_patch(payload)
                 resp = await client.patch(
                     f"{self.BASE_URL}/v2/personas/{existing_persona_id}",
-                    json=payload,
+                    json=patch_ops,
                     headers=headers,
                 )
             else:
-                # Create new persona
+                # Create new persona — POST accepts flat JSON payload
                 resp = await client.post(
                     f"{self.BASE_URL}/v2/personas",
                     json=payload,
@@ -228,6 +252,7 @@ class TavusClient:
                 "participant_left_timeout": 120,  # end if user gone 2 min
                 "enable_recording": False,
                 "apply_greenscreen": False,
+                "enable_closed_captions": False,
             },
         }
 
