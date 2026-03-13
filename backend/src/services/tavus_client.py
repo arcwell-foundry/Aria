@@ -67,40 +67,25 @@ class TavusClient:
         Returns:
             The persona_id string.
         """
+        # Echo mode: Tavus routes all LLM calls to our base_url.
+        # system_prompt and context must be empty — our LLM endpoint
+        # builds the full prompt per-conversation using the user_id
+        # from conversational_context.
         payload = {
             "persona_name": "ARIA - LuminOne",
-            "pipeline_mode": "full",
-            "system_prompt": (
-                "You are ARIA, an AI colleague for life sciences commercial teams. "
-                "Speak in short sentences. Maximum 2 sentences then stop. "
-                "Never use bullet points or markdown. "
-                "Never ask permission to continue. Never say 'shall I continue'. "
-                "You know life sciences: bioprocessing, CDMOs, biologics, regulatory, commercial ops. "
-                "Market signals means commercial intelligence, not financial trading. "
-                "Speak like Jarvis: calm, precise, already knows everything."
-            ),
-            "context": (
-                "ARIA serves life sciences commercial teams. "
-                "She knows every deal, meeting, signal, and task for her user."
-            ),
+            "pipeline_mode": "echo",
+            "system_prompt": "",
+            "context": "",
             "default_replica_id": self.replica_id,
             "layers": {
                 "llm": {
-                    "model": "aria-1",
+                    "model": "claude-haiku-4-5-20251001",
                     "base_url": f"{backend_url}/api/tavus",
                     "api_key": llm_secret,
                     "speculative_inference": True,
                     "extra_body": {
                         "temperature": 0.3,
                     },
-                },
-                "perception": {
-                    "perception_model": "raven-1",
-                    "enable_emotion_detection": True,
-                    "enable_face_detection": True,
-                },
-                "vqa": {
-                    "enable_vision": True,
                 },
             },
         }
