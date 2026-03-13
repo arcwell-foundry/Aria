@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -417,65 +418,37 @@ async def get_today_briefing(
     current_user: CurrentUser,
     regenerate: bool = Query(False, description="Force regenerate briefing"),
 ) -> dict[str, Any]:
-    """Get today's briefing, generating if needed.
+    """Get today's briefing — pure read from daily_briefings table.
 
-    Returns the daily briefing content for the current user.
-    If no briefing exists yet and regenerate is not requested,
-    returns a not_generated status so the dashboard can show
-    an empty state.
+    Returns the pre-generated daily briefing content for the current user.
+    If no briefing exists yet, returns not_generated status.
 
-    The pre-generated summary narrative is kept (it's expensive to regenerate).
-    All structured data sections (calendar, emails, signals, tasks, leads) are
-    queried LIVE at delivery time.
+    Live data (calendar, signals, etc.) is NOT fetched here — it's merged
+    during briefing delivery (deliver_briefing / Tavus narration), not on
+    every dashboard page load.
     """
+    start = time.time()
     service = BriefingService()
 
     if regenerate:
         content = await service.generate_briefing(current_user.id)
-        # Merge with live data
-        try:
-            live_data = await service.get_live_briefing_data(current_user.id)
-        except Exception as e:
-            logger.error("Live data fetch failed, using pre-generated only: %s", e)
-            live_data = {}
-        merged = {
-            **content,
-            "calendar": live_data.get("calendar", {}),
-            "email_summary": live_data.get("email_summary", {}),
-            "signals": live_data.get("signals", {}),
-            "tasks": live_data.get("tasks", {}),
-            "leads": live_data.get("leads", {}),
-        }
-        return {"briefing": merged, "status": "ready"}
+        elapsed_ms = (time.time() - start) * 1000
+        logger.info("[BRIEFING-TODAY] regenerated in %.0fms", elapsed_ms)
+        return {"briefing": content, "status": "ready"}
 
     existing = await service.get_briefing(current_user.id)
     if existing:
         pre_generated = existing.get("content")
         if isinstance(pre_generated, dict):
-            # Get LIVE data and merge with pre-generated summary
-            try:
-                live_data = await service.get_live_briefing_data(current_user.id)
-            except Exception as e:
-                logger.error("Live data fetch failed, using pre-generated only: %s", e)
-                live_data = {}
-            merged = {
-                **pre_generated,
-                "calendar": live_data.get("calendar", {}),
-                "email_summary": live_data.get("email_summary", {}),
-                "signals": live_data.get("signals", {}),
-                "tasks": live_data.get("tasks", {}),
-                "leads": live_data.get("leads", {}),
-                # Keep pre-generated fields:
-                "summary": pre_generated.get("summary", ""),
-                "suggestions": pre_generated.get("suggestions", []),
-                "upcoming_conferences": pre_generated.get("upcoming_conferences", []),
-                "queued_insights": pre_generated.get("queued_insights", []),
-            }
-            return {"briefing": merged, "status": "ready"}
+            elapsed_ms = (time.time() - start) * 1000
+            logger.info("[BRIEFING-TODAY] responded in %.0fms", elapsed_ms)
+            return {"briefing": pre_generated, "status": "ready"}
 
     # No briefing yet — return empty default instead of generating
+    elapsed_ms = (time.time() - start) * 1000
     logger.info(
-        "No briefing available for user",
+        "[BRIEFING-TODAY] no briefing, responded in %.0fms",
+        elapsed_ms,
         extra={"user_id": current_user.id},
     )
     return {"briefing": None, "status": "not_generated"}
@@ -486,22 +459,15 @@ async def get_latest_briefing(
     current_user: CurrentUser,
     generate_if_missing: bool = Query(False, description="Generate briefing if none exists"),
 ) -> dict[str, Any]:
-    """Get the most recent briefing for on-demand access.
+    """Get the most recent briefing — pure read from daily_briefings table.
 
     Powers "ARIA, give me my briefing" voice/chat commands.
     Returns the most recent briefing regardless of date, or generates
     one if requested and missing.
 
-    The pre-generated summary narrative is kept (it's expensive to regenerate).
-    All structured data sections (calendar, emails, signals, tasks, leads) are
-    queried LIVE at delivery time.
-
-    Args:
-        generate_if_missing: If True, generates a new briefing if none exists.
-
-    Returns:
-        The latest briefing content with metadata.
+    Live data merging happens during delivery (deliver_briefing), not here.
     """
+    start = time.time()
     from src.db.supabase import SupabaseClient
 
     db = SupabaseClient.get_client()
@@ -522,28 +488,10 @@ async def get_latest_briefing(
         raw_content = row.get("content")
         pre_generated = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
 
-        # Get LIVE data and merge with pre-generated summary
-        try:
-            live_data = await service.get_live_briefing_data(current_user.id)
-        except Exception as e:
-            logger.error("Live data fetch failed, using pre-generated only: %s", e)
-            live_data = {}
-        merged = {
-            **pre_generated,
-            "calendar": live_data.get("calendar", {}),
-            "email_summary": live_data.get("email_summary", {}),
-            "signals": live_data.get("signals", {}),
-            "tasks": live_data.get("tasks", {}),
-            "leads": live_data.get("leads", {}),
-            # Keep pre-generated fields:
-            "summary": pre_generated.get("summary", ""),
-            "suggestions": pre_generated.get("suggestions", []),
-            "upcoming_conferences": pre_generated.get("upcoming_conferences", []),
-            "queued_insights": pre_generated.get("queued_insights", []),
-        }
-
+        elapsed_ms = (time.time() - start) * 1000
+        logger.info("[BRIEFING-LATEST] responded in %.0fms", elapsed_ms)
         return {
-            "briefing": merged,
+            "briefing": pre_generated,
             "briefing_id": row.get("id"),
             "briefing_date": row.get("briefing_date"),
             "delivery_method": row.get("delivery_method"),
@@ -555,34 +503,23 @@ async def get_latest_briefing(
     if generate_if_missing:
         content = await service.generate_briefing(current_user.id)
 
-        # Merge with live data
-        try:
-            live_data = await service.get_live_briefing_data(current_user.id)
-        except Exception as e:
-            logger.error("Live data fetch failed, using pre-generated only: %s", e)
-            live_data = {}
-        merged = {
-            **content,
-            "calendar": live_data.get("calendar", {}),
-            "email_summary": live_data.get("email_summary", {}),
-            "signals": live_data.get("signals", {}),
-            "tasks": live_data.get("tasks", {}),
-            "leads": live_data.get("leads", {}),
-        }
-
         # Deliver it immediately
         delivery_result = await service.deliver_briefing(
             user_id=current_user.id,
-            content=merged,
+            content=content,
         )
 
+        elapsed_ms = (time.time() - start) * 1000
+        logger.info("[BRIEFING-LATEST] generated in %.0fms", elapsed_ms)
         return {
-            "briefing": merged,
+            "briefing": content,
             "delivery_method": delivery_result.get("delivery_method"),
             "delivered_at": delivery_result.get("delivered_at"),
             "status": "generated",
         }
 
+    elapsed_ms = (time.time() - start) * 1000
+    logger.info("[BRIEFING-LATEST] no briefing, responded in %.0fms", elapsed_ms)
     return {"briefing": None, "status": "not_generated"}
 
 
