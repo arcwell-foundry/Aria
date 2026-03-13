@@ -6,7 +6,7 @@
  * ARIA's video track in a plain <video> element.
  *
  * - audioSource: true → must join with audio so Tavus detects a participant
- *   (muted immediately after join — briefing is one-way delivery)
+ *   (muted via updateParticipant after join — briefing is one-way delivery)
  * - videoSource: false → never request camera permission
  */
 
@@ -134,10 +134,17 @@ const TavusAvatar = forwardRef<TavusAvatarHandle, TavusAvatarProps>(
           });
 
           await call.join({ url: conversationUrl });
-          // Mute local mic immediately — we joined with audio so Tavus
-          // detects a participant, but briefing is one-way delivery.
-          call.setLocalAudio(false);
-          console.log('[TavusAvatar] Joined Daily room successfully (local audio muted)');
+          console.log('[TavusAvatar] Joined Daily room successfully');
+
+          // Mute local audio without disrupting WebRTC negotiation.
+          // setLocalAudio(false) blocks remote track delivery, so use
+          // updateParticipant instead which mutes at the track level.
+          try {
+            call.updateParticipant('local', { setAudio: false });
+            console.log('[TavusAvatar] Local audio muted via updateParticipant');
+          } catch (muteErr) {
+            console.warn('[TavusAvatar] Could not mute local audio:', muteErr);
+          }
 
           // Post-join fallback: check if remote participants already have tracks
           // (handles case where avatar was streaming before we joined)
