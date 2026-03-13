@@ -183,6 +183,11 @@ Use specific names, times, and companies when they exist in context.
 If something is not in the context, say "that's not in today's briefing."
 Never say you don't have access — you have everything you need below.
 
+IMPORTANT: If this is the start of the conversation, proactively open with
+the morning briefing. Do not wait for the user to speak. Start with:
+"Good morning, Dhruv. I have your daily briefing ready..." then deliver
+the key points from the briefing context below.
+
 {context_section}
 {SPOKEN_MODE_RULES}"""
 
@@ -238,11 +243,9 @@ async def tavus_chat_completions(request: Request) -> StreamingResponse:
             user_message = msg.get("content", "")
             break
 
-    if not user_message:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No user message found",
-        )
+    # First turn: Tavus may send only the system message with no user content.
+    # Inject a synthetic prompt so ARIA proactively opens with the briefing.
+    is_first_turn = not user_message
 
     # --- Build or retrieve cached persona context ---
     system_prompt = _get_cached_context(cache_key)
@@ -263,6 +266,13 @@ async def tavus_chat_completions(request: Request) -> StreamingResponse:
         if role == "system":
             continue  # We build our own system prompt
         conversation_history.append({"role": role, "content": content})
+
+    # First turn with no user message: inject synthetic prompt to trigger
+    # ARIA's proactive briefing greeting.
+    if is_first_turn or not conversation_history:
+        conversation_history = [
+            {"role": "user", "content": "Begin the morning briefing."}
+        ]
 
     # --- Stream response via Anthropic SDK (Haiku, direct, no LiteLLM) ---
     client = anthropic.AsyncAnthropic(

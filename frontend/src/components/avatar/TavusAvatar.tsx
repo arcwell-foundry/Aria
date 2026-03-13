@@ -5,7 +5,8 @@
  * (participant labels, mute buttons, permission prompts). Renders only
  * ARIA's video track in a plain <video> element.
  *
- * - audioSource: false → briefing is one-way delivery, no mic needed
+ * - audioSource: true → must join with audio so Tavus detects a participant
+ *   (muted immediately after join — briefing is one-way delivery)
  * - videoSource: false → never request camera permission
  */
 
@@ -28,6 +29,7 @@ const TavusAvatar = forwardRef<TavusAvatarHandle, TavusAvatarProps>(
   ({ conversationUrl, onConnected, onDisconnected, onError }, ref) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const callRef = useRef<DailyCall | null>(null);
+    const audioElRef = useRef<HTMLAudioElement | null>(null);
     const [connecting, setConnecting] = useState(true);
     const setTavusVideoTrack = useModalityStore((s) => s.setTavusVideoTrack);
 
@@ -45,6 +47,8 @@ const TavusAvatar = forwardRef<TavusAvatarHandle, TavusAvatarProps>(
         if (videoRef.current) {
           videoRef.current.srcObject = null;
         }
+        audioElRef.current?.remove();
+        audioElRef.current = null;
         setTavusVideoTrack(null);
         onDisconnected?.();
       },
@@ -70,7 +74,7 @@ const TavusAvatar = forwardRef<TavusAvatarHandle, TavusAvatarProps>(
         try {
           const Daily = (await import('@daily-co/daily-js')).default;
           call = Daily.createCallObject({
-            audioSource: false,
+            audioSource: true,
             videoSource: false,
           });
           callRef.current = call;
@@ -86,13 +90,17 @@ const TavusAvatar = forwardRef<TavusAvatarHandle, TavusAvatarProps>(
             }
           });
 
-          // Also attach remote audio tracks so we hear ARIA
+          // Attach remote audio track to a DOM element so the browser plays it
           call.on('track-started', (event) => {
             if (cancelled) return;
             if (!event.participant?.local && event.type === 'audio') {
-              const audio = new Audio();
-              audio.srcObject = new MediaStream([event.track]);
-              audio.play().catch(console.error);
+              console.log('[TavusAvatar] Attaching remote audio track');
+              const audioEl = document.createElement('audio');
+              audioEl.autoplay = true;
+              audioEl.srcObject = new MediaStream([event.track]);
+              audioEl.style.display = 'none';
+              document.body.appendChild(audioEl);
+              audioElRef.current = audioEl;
             }
           });
 
@@ -126,7 +134,10 @@ const TavusAvatar = forwardRef<TavusAvatarHandle, TavusAvatarProps>(
           });
 
           await call.join({ url: conversationUrl });
-          console.log('[TavusAvatar] Joined Daily room successfully');
+          // Mute local mic immediately — we joined with audio so Tavus
+          // detects a participant, but briefing is one-way delivery.
+          call.setLocalAudio(false);
+          console.log('[TavusAvatar] Joined Daily room successfully (local audio muted)');
 
           // Post-join fallback: check if remote participants already have tracks
           // (handles case where avatar was streaming before we joined)
@@ -156,6 +167,8 @@ const TavusAvatar = forwardRef<TavusAvatarHandle, TavusAvatarProps>(
       return () => {
         cancelled = true;
         setTavusVideoTrack(null);
+        audioElRef.current?.remove();
+        audioElRef.current = null;
         if (call) {
           call.leave().catch(console.error);
           call.destroy();
