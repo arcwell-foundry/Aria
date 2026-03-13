@@ -82,6 +82,7 @@ class PreMeetingContextService:
         self,
         user_id: str,
         hours_ahead: int = 24,
+        user_email: str | None = None,
     ) -> list[dict[str, Any]]:
         """Find meetings in the next N hours and enrich with email context.
 
@@ -97,6 +98,7 @@ class PreMeetingContextService:
         Args:
             user_id: The user's UUID.
             hours_ahead: How many hours ahead to look for meetings.
+            user_email: The authenticated user's email (from auth token).
 
         Returns:
             List of enriched meeting dicts with email context.
@@ -107,8 +109,15 @@ class PreMeetingContextService:
         if not events:
             return []
 
-        # Get user's email to exclude from attendee matching
-        user_emails = await self._get_user_emails(user_id)
+        # Build set of user's emails to exclude from attendee matching.
+        # Primary source: the auth token email passed from the route handler.
+        # Supplementary: any connected integration emails.
+        user_emails = await self._get_user_emails(user_id, user_email)
+        logger.info(
+            "[MEETING-CONTEXT] user_id=%s, user_emails_to_exclude=%s",
+            user_id,
+            user_emails,
+        )
 
         # Step 2-4: Enrich each event with email context
         enriched: list[dict[str, Any]] = []
@@ -119,30 +128,30 @@ class PreMeetingContextService:
 
         return enriched
 
-    async def _get_user_emails(self, user_id: str) -> set[str]:
+    async def _get_user_emails(
+        self,
+        user_id: str,
+        user_email: str | None = None,
+    ) -> set[str]:
         """Get the authenticated user's email addresses to exclude from attendee matching.
+
+        Primary source is the auth token email passed from the route handler.
+        Supplementary source is connected integration emails.
 
         Args:
             user_id: The user's UUID.
+            user_email: The user's email from the auth token (most reliable).
 
         Returns:
             Set of lowercase email addresses belonging to the user.
         """
         emails: set[str] = set()
-        try:
-            result = (
-                self._db.table("user_profiles")
-                .select("email")
-                .eq("id", user_id)
-                .limit(1)
-                .execute()
-            )
-            if result.data and result.data[0].get("email"):
-                emails.add(result.data[0]["email"].lower().strip())
-        except Exception:
-            logger.debug("Failed to get user email for attendee filtering", exc_info=True)
 
-        # Also check user_integrations for connected email accounts
+        # Primary: use the email from the auth token (always available)
+        if user_email:
+            emails.add(user_email.lower().strip())
+
+        # Supplementary: check user_integrations for connected email accounts
         try:
             integrations = (
                 self._db.table("user_integrations")
@@ -235,10 +244,10 @@ class PreMeetingContextService:
         # Exclude the user's own email(s) from attendee matching.
         # This prevents the user's email from dominating the email context
         # (since it matches ALL meetings and has the most email history).
-        external_emails = [
-            e for e in attendee_emails
-            if not user_emails or e not in user_emails
-        ]
+        if user_emails:
+            external_emails = [e for e in attendee_emails if e not in user_emails]
+        else:
+            external_emails = list(attendee_emails)
 
         # Parse meeting time
         start_time_str = event.get("start_time", "")
@@ -266,6 +275,18 @@ class PreMeetingContextService:
                     > best_email_context.get("total_emails", 0)
                 ):
                     best_email_context = email_ctx
+
+        meeting_title = event.get("title") or "Meeting"
+        best_contact = best_email_context.get("contact_email") if best_email_context else None
+        best_count = best_email_context.get("total_emails", 0) if best_email_context else 0
+        logger.info(
+            "[MEETING-CONTEXT] Meeting '%s': attendees=%s, external_attendees=%s, best_contact=%s, email_count=%d",
+            meeting_title,
+            attendee_emails,
+            external_emails,
+            best_contact,
+            best_count,
+        )
 
         # Only return meetings where we have email context for external attendees
         if best_email_context is None:

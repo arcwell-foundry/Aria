@@ -440,6 +440,7 @@ async def get_upcoming_meetings_with_context(
         meetings = await service.get_upcoming_meetings_with_context(
             user_id=user_id,
             hours_ahead=hours_ahead,
+            user_email=getattr(current_user, "email", None),
         )
 
         logger.info(
