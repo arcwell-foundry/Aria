@@ -301,22 +301,38 @@ class DraftService:
 
             now = datetime.now(UTC)
 
+            # Pre-fetch sender contexts concurrently for all unique recipients
+            unique_emails = list({
+                d.get("recipient_email", "").lower()
+                for d in drafts
+                if d.get("recipient_email")
+            })
+            sender_ctx_map: dict[str, SenderContext | None] = {}
+
+            async def _fetch_sender_ctx(email: str) -> tuple[str, SenderContext | None]:
+                try:
+                    ctx = await get_sender_context(
+                        client, user_id, email, cache=sender_cache
+                    )
+                    return (email, ctx)
+                except Exception:
+                    return (email, None)
+
+            ctx_results = await asyncio.gather(
+                *[_fetch_sender_ctx(e) for e in unique_emails]
+            )
+            sender_ctx_map = dict(ctx_results)
+
             for draft in drafts:
                 score = 0
 
-                # a. Sender relationship scoring
-                recipient_email = draft.get("recipient_email", "")
-                if recipient_email:
-                    try:
-                        ctx = await get_sender_context(
-                            client, user_id, recipient_email, cache=sender_cache
-                        )
-                        if ctx:
-                            score += self._RELATIONSHIP_SCORES.get(
-                                ctx.relationship_type, 0
-                            )
-                    except Exception:
-                        pass  # Non-critical, skip
+                # a. Sender relationship scoring (from pre-fetched cache)
+                recipient_email = draft.get("recipient_email", "").lower()
+                ctx = sender_ctx_map.get(recipient_email)
+                if ctx:
+                    score += self._RELATIONSHIP_SCORES.get(
+                        ctx.relationship_type, 0
+                    )
 
                 # b. Urgency from original email
                 original_eid = draft.get("original_email_id")
@@ -394,7 +410,15 @@ class DraftService:
             # We fetch 3x the limit to ensure we have enough after grouping
             fetch_limit = min(limit * 3, 300)
 
-            query = client.table("email_drafts").select("*").eq("user_id", user_id)
+            # Select only columns needed for list view (avoid large JSONB context)
+            _LIST_COLUMNS = (
+                "id, recipient_email, recipient_name, subject, body, "
+                "purpose, tone, status, style_match_score, confidence_tier, "
+                "created_at, draft_type, aria_notes, thread_id, "
+                "original_email_id"
+            )
+
+            query = client.table("email_drafts").select(_LIST_COLUMNS).eq("user_id", user_id)
 
             if status:
                 query = query.eq("status", status)

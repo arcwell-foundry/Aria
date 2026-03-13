@@ -199,13 +199,24 @@ async def list_drafts(
     service = get_draft_service()
     drafts = await service.list_drafts(current_user.id, limit, status, include_dismissed)
 
-    # Enrich drafts with pipeline context
+    # Enrich drafts with pipeline context (concurrent, non-blocking)
     try:
+        import asyncio
+
         db = SupabaseClient.get_client()
         recipient_emails = list({d.get("recipient_email", "").lower() for d in drafts if d.get("recipient_email")})
-        pipeline_cache: dict[str, dict[str, Any] | None] = {}
-        for email in recipient_emails:
-            pipeline_cache[email] = await get_pipeline_context_for_email(db, current_user.id, email)
+
+        async def _safe_pipeline_lookup(email: str) -> tuple[str, dict[str, Any] | None]:
+            try:
+                ctx = await get_pipeline_context_for_email(db, current_user.id, email)
+                return (email, ctx)
+            except Exception:
+                return (email, None)
+
+        pipeline_results = await asyncio.gather(
+            *[_safe_pipeline_lookup(e) for e in recipient_emails]
+        )
+        pipeline_cache = dict(pipeline_results)
         for draft in drafts:
             email = draft.get("recipient_email", "").lower()
             draft["pipeline_context"] = pipeline_cache.get(email)

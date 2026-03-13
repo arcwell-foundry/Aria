@@ -208,22 +208,53 @@ async def check_exa() -> ServiceCheck:
         )
 
 
-CORE_SERVICES = {"supabase", "claude"}
-OPTIONAL_SERVICES = {"tavus", "exa", "composio"}
+CORE_SERVICES = {"supabase"}
+OPTIONAL_SERVICES = {"tavus", "exa", "composio", "claude"}
 
 
 async def run_health_checks() -> dict[str, Any]:
-    """Run all dependency health checks and compute overall status.
+    """Run fast health checks (DB only) for the main health endpoint.
+
+    Only checks Supabase DB connectivity. External API checks (Claude, Exa,
+    Tavus) are moved to run_external_service_checks() to prevent blocking
+    the async event loop on every health poll.
 
     Returns:
-        Dict with overall status, per-service results, and uptime.
-        Render uses the HTTP status code from the calling endpoint:
-        - 200 for healthy/degraded (instance keeps running)
-        - 503 for unhealthy (Render auto-restarts)
+        Dict with overall status and per-service results.
+        - 200 for healthy (DB reachable)
+        - 503 for unhealthy (DB unreachable)
+    """
+    check = await check_supabase()
 
-    Status logic:
-        - UNHEALTHY: Any core service (supabase, claude) is DOWN
-        - HEALTHY: All core services are up (optional services don't affect this)
+    services: dict[str, dict[str, Any]] = {}
+    services[check.name] = {
+        "status": check.status.value,
+        "latency_ms": check.latency_ms,
+    }
+    if check.message:
+        services[check.name]["message"] = check.message
+
+    overall = (
+        OverallStatus.UNHEALTHY
+        if check.status == ServiceStatus.DOWN
+        else OverallStatus.HEALTHY
+    )
+
+    return {
+        "status": overall.value,
+        "services": services,
+    }
+
+
+async def run_external_service_checks() -> dict[str, Any]:
+    """Run health checks for all external services (on-demand only).
+
+    Checks Claude API, Exa API, Tavus API, and Supabase DB.
+    This is NOT called on the main health endpoint — only from
+    /health/services for diagnostics.
+
+    Returns:
+        Dict with overall status and per-service results.
     """
     import asyncio
 
@@ -236,29 +267,24 @@ async def run_health_checks() -> dict[str, Any]:
     )
 
     services: dict[str, dict[str, Any]] = {}
-    core_down = False
+    db_down = False
 
     for result in checks:
         if isinstance(result, Exception):
-            # Gather returned an exception for this check
             logger.error("Health check raised exception: %s", result)
             continue
-        check: ServiceCheck = result
-        services[check.name] = {
-            "status": check.status.value,
-            "latency_ms": check.latency_ms,
+        svc_check: ServiceCheck = result
+        services[svc_check.name] = {
+            "status": svc_check.status.value,
+            "latency_ms": svc_check.latency_ms,
         }
-        if check.message:
-            services[check.name]["message"] = check.message
-        # Only core services affect overall health
-        if check.critical and check.status == ServiceStatus.DOWN:
-            core_down = True
+        if svc_check.message:
+            services[svc_check.name]["message"] = svc_check.message
+        # Only DB down means truly unhealthy
+        if svc_check.name == "supabase" and svc_check.status == ServiceStatus.DOWN:
+            db_down = True
 
-    # Determine overall status based ONLY on core services
-    if core_down:
-        overall = OverallStatus.UNHEALTHY
-    else:
-        overall = OverallStatus.HEALTHY
+    overall = OverallStatus.UNHEALTHY if db_down else OverallStatus.HEALTHY
 
     return {
         "status": overall.value,

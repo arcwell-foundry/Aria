@@ -32,9 +32,10 @@ _VERSION = "1.0.0"
 
 @cached(ttl=30, key_func=lambda: "health_check")
 async def _get_cached_health_check() -> dict[str, Any]:
-    """Cached health check that tests actual dependencies.
+    """Cached fast health check (DB only, no external APIs).
 
-    Separated from endpoint to allow caching without affecting route signature.
+    Only checks Supabase DB connectivity. External service checks
+    (Claude, Exa, Tavus) are available via /health/services on demand.
     """
     from src.core.monitoring import OverallStatus, run_health_checks
 
@@ -55,14 +56,16 @@ async def _get_cached_health_check() -> dict[str, Any]:
 
 @router.get("", status_code=status.HTTP_200_OK)
 async def health_check(response: Response) -> dict[str, Any]:
-    """Overall health check with dependency probes.
+    """Fast health check — DB connectivity only, no external API calls.
 
     Returns status, per-service health, uptime, and version.
-    No authentication required.
+    No authentication required. Responds in <500ms.
 
     Render uses this to determine instance health:
-    - 200 → healthy or degraded (keep running)
+    - 200 → healthy (DB reachable)
     - 503 → unhealthy / DB down (auto-restart)
+
+    For external service diagnostics, use GET /health/services.
     """
     from src.core.monitoring import OverallStatus
 
@@ -74,6 +77,24 @@ async def health_check(response: Response) -> dict[str, Any]:
     # Don't leak internal enum to response
     data = {k: v for k, v in result.items() if not k.startswith("_")}
     return data
+
+
+@router.get("/services", status_code=status.HTTP_200_OK)
+async def health_check_services() -> dict[str, Any]:
+    """On-demand external service health check.
+
+    Checks all external APIs (Claude, Exa, Tavus) plus Supabase DB.
+    NOT called automatically — use from Settings page or diagnostics.
+    No authentication required (same as main health).
+
+    May take 5-15 seconds if external APIs are slow.
+    """
+    from src.core.monitoring import run_external_service_checks
+
+    result = await run_external_service_checks()
+    result["uptime_seconds"] = round(time.monotonic() - _start_time, 1)
+    result["version"] = _VERSION
+    return result
 
 
 @router.get("/ping", status_code=status.HTTP_200_OK)
@@ -104,7 +125,7 @@ async def health_check_detailed(
     tracker = ErrorTracker.get_instance()
     error_summary = tracker.get_error_summary(period_seconds=3600)
 
-    # Run full dependency checks
+    # Run fast DB-only checks (external services available via /health/services)
     dep_checks = await run_health_checks()
 
     # Process memory info

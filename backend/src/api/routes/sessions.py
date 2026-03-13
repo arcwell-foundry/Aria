@@ -343,34 +343,37 @@ async def update_session(
     session_id: str,
     request: UpdateSessionRequest,
 ) -> SessionResponse:
-    """Update session state.
+    """Update session state (lightweight heartbeat-safe).
 
-    Only provided fields are updated. Always enforces user_id ownership guard.
+    Builds a partial session_data update and writes it directly.
+    The UPDATE's user_id guard serves as the ownership check — no
+    pre-SELECT needed. This keeps the PATCH fast for heartbeat calls.
     """
     db = get_supabase_client()
 
-    # Verify ownership and get current session
-    try:
-        current = _select_by_pk(db, session_id, current_user.id)
-    except Exception:
-        logger.exception(
-            "Session SELECT failed",
-            extra={"user_id": current_user.id, "session_id": session_id},
-        )
-        raise HTTPException(status_code=500, detail="Failed to read session") from None
+    # Build session_data patch from provided fields only.
+    # For metadata merging we need the current data, but for simple
+    # field updates we can build a fresh session_data dict.
+    # To avoid the extra SELECT, we only do a read if metadata merge is needed.
+    needs_current_data = request.metadata is not None
 
-    if not current or not current.data:
-        raise HTTPException(status_code=404, detail="Session not found")
+    current_data: dict[str, Any] = {}
+    if needs_current_data:
+        try:
+            current = _select_by_pk(db, session_id, current_user.id)
+            if current and current.data:
+                row_data = current.data[0] if isinstance(current.data, list) else current.data
+                cd = row_data.get("session_data") or {}
+                if isinstance(cd, str):
+                    import json
+                    cd = json.loads(cd)
+                current_data = cd
+        except Exception:
+            logger.debug("Session pre-read for metadata merge failed; using empty base")
 
-    # Build update payload
-    current_data = current.data.get("session_data") if isinstance(current.data, dict) else None
-    if current_data is None:
-        current_data = {}
-    if isinstance(current_data, str):
-        import json
-        current_data = json.loads(current_data)
-
-    new_session_data = dict(current_data)
+    new_session_data: dict[str, Any] = {}
+    if needs_current_data:
+        new_session_data = dict(current_data)
 
     if request.current_route is not None:
         new_session_data["current_route"] = request.current_route
@@ -389,7 +392,7 @@ async def update_session(
     if request.is_active is not None:
         update_payload["is_active"] = request.is_active
 
-    # Perform update with user_id guard
+    # Perform update with user_id guard (serves as ownership check)
     try:
         result = _update_by_pk(db, session_id, current_user.id, update_payload)
     except Exception:
@@ -400,15 +403,7 @@ async def update_session(
         raise HTTPException(status_code=500, detail="Failed to update session") from None
 
     if not result or not result.data:
-        logger.error(
-            "Session UPDATE returned no data",
-            extra={
-                "user_id": current_user.id,
-                "session_id": session_id,
-                "pk_col": _SESSION_PK_COL,
-            },
-        )
-        raise HTTPException(status_code=500, detail="Failed to update session")
+        raise HTTPException(status_code=404, detail="Session not found")
 
     # Normalize: result.data may be a list or a dict depending on the query path
     row = result.data[0] if isinstance(result.data, list) else result.data
