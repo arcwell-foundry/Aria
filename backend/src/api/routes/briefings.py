@@ -1366,6 +1366,29 @@ async def deliver_briefing(
     }
 
 
+# ── POST /briefings/bootstrap-persona ──────────────────────────────────────
+@router.post("/bootstrap-persona")
+async def bootstrap_aria_persona(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Create or update the ARIA persona on Tavus with custom LLM wiring.
+
+    One-time management endpoint. Returns the persona_id which should be
+    saved as TAVUS_PERSONA_ID in .env.
+    """
+    from src.services.tavus_client import TavusClient
+
+    client = TavusClient()
+    persona_id = await client.create_or_update_aria_persona(
+        backend_url=settings.BACKEND_URL,
+        llm_secret=settings.TAVUS_LLM_SECRET,
+    )
+    return {
+        "persona_id": persona_id,
+        "message": f"Add to .env as TAVUS_PERSONA_ID={persona_id}",
+    }
+
+
 # ── POST /briefings/generate-video ────────────────────────────────────────
 @router.post("/generate-video")
 async def generate_briefing_video(

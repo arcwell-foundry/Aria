@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     APP_SECRET_KEY: SecretStr = SecretStr("")
     APP_ENV: Literal["development", "staging", "production"] = "development"
     APP_URL: str = "http://localhost:3000"  # Base URL for webhook callbacks
+    BACKEND_URL: str = "http://localhost:8000"  # Backend API base URL (for Tavus LLM endpoint)
 
     # Stripe Configuration (US-928)
     STRIPE_SECRET_KEY: SecretStr = SecretStr("")

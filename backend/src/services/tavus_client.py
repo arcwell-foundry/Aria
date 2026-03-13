@@ -24,6 +24,101 @@ class TavusClient:
         if not settings.TAVUS_API_KEY:
             raise ValueError("TAVUS_API_KEY not set in environment")
         self.api_key = settings.TAVUS_API_KEY.get_secret_value()
+        self.replica_id = self.REPLICA_ID
+
+    async def create_or_update_aria_persona(
+        self, backend_url: str, llm_secret: str
+    ) -> str:
+        """Create or update the ARIA persona on Tavus with custom LLM wiring.
+
+        Configures:
+        - ARIA's own FastAPI endpoint as the LLM brain
+        - Raven-1 perception model (emotion + face detection)
+        - Speculative inference for low-latency responses
+
+        Args:
+            backend_url: The backend's public URL (e.g. https://app.onrender.com).
+            llm_secret: The shared secret for Tavus→ARIA LLM auth.
+
+        Returns:
+            The persona_id string.
+        """
+        payload = {
+            "persona_name": "ARIA - LuminOne",
+            "pipeline_mode": "full",
+            "system_prompt": (
+                "You are ARIA, an AI colleague for life sciences commercial teams. "
+                "Speak in short sentences. Maximum 2 sentences then stop. "
+                "Never use bullet points or markdown. "
+                "Never ask permission to continue. Never say 'shall I continue'. "
+                "You know life sciences: bioprocessing, CDMOs, biologics, regulatory, commercial ops. "
+                "Market signals means commercial intelligence, not financial trading. "
+                "Speak like Jarvis: calm, precise, already knows everything."
+            ),
+            "context": (
+                "ARIA serves life sciences commercial teams. "
+                "She knows every deal, meeting, signal, and task for her user."
+            ),
+            "default_replica_id": self.replica_id,
+            "layers": {
+                "llm": {
+                    "model": "aria-1",
+                    "base_url": f"{backend_url}/api/tavus",
+                    "api_key": llm_secret,
+                    "speculative_inference": True,
+                    "extra_body": {
+                        "temperature": 0.3,
+                    },
+                },
+                "perception": {
+                    "perception_model": "raven-1",
+                    "enable_emotion_detection": True,
+                    "enable_face_detection": True,
+                },
+                "vqa": {
+                    "enable_vision": True,
+                },
+            },
+        }
+
+        headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
+
+        existing_persona_id = settings.TAVUS_PERSONA_ID or None
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if existing_persona_id:
+                # Update existing persona
+                resp = await client.patch(
+                    f"{self.BASE_URL}/v2/personas/{existing_persona_id}",
+                    json=payload,
+                    headers=headers,
+                )
+            else:
+                # Create new persona
+                resp = await client.post(
+                    f"{self.BASE_URL}/v2/personas",
+                    json=payload,
+                    headers=headers,
+                )
+
+            if not resp.is_success:
+                logger.error(
+                    "Tavus persona create/update error %s: %s",
+                    resp.status_code,
+                    resp.text,
+                )
+                resp.raise_for_status()
+
+            data = resp.json()
+            persona_id = data.get("persona_id") or existing_persona_id
+
+        logger.info(
+            "ARIA Persona ID: %s — add TAVUS_PERSONA_ID=%s to .env",
+            persona_id,
+            persona_id,
+        )
+
+        return persona_id
 
     async def create_video_briefing(self, script: str, briefing_date: str) -> dict:
         """Call Tavus /v2/videos to generate a one-way video from script.
@@ -59,30 +154,42 @@ class TavusClient:
     ) -> dict:
         """Create a live Tavus CVI conversation pre-loaded with briefing context.
 
+        When a persona_id is configured (TAVUS_PERSONA_ID), the persona's custom
+        LLM endpoint handles all intelligence.  The conversational_context here
+        provides session-specific data the LLM needs.
+
         Args:
             briefing_content: The briefing content dict with calendar, tasks, signals.
             user_name: The user's first name for personalization.
-            user_id: The user's UUID — injected into system prompt for custom LLM auth.
+            user_id: The user's UUID — injected into context for custom LLM auth.
 
         Returns:
             Dict with conversation_url, conversation_id from Tavus.
         """
+        # --- Build one-liner summaries for conversational_context ---
         meetings = briefing_content.get("calendar", {}).get("key_meetings", [])[:3]
         tasks = briefing_content.get("tasks", {}).get("overdue", [])[:3]
         signals = briefing_content.get("signals", {})
 
-        meetings_text = (
+        meetings_one_liner = (
             "; ".join(
                 f"{m.get('time', '?')} {m.get('title', '?')}" for m in meetings
             )
             or "no meetings today"
         )
 
-        top_tasks = (
+        actions_one_liner = (
             "; ".join(
                 (t.get("task") or t.get("title", "?"))[:60] for t in tasks[:2]
             )
             or "none"
+        )
+
+        email_drafts = briefing_content.get("email_summary", {})
+        email_one_liner = (
+            f"{email_drafts.get('drafts_waiting', 0)} drafts waiting"
+            if email_drafts.get("drafts_waiting")
+            else "no pending drafts"
         )
 
         comp_signals = (
@@ -93,47 +200,38 @@ class TavusClient:
             or "none this week"
         )
 
-        # Get the pre-generated tavus_script if available for richer context
-        existing_script = briefing_content.get("tavus_script", "")
-        script_context = (
-            f"\n\nHere is your pre-generated briefing script to refer to:\n{existing_script[:800]}"
-            if existing_script
-            else ""
+        briefing_date = briefing_content.get("generated_at", "today")[:10]
+
+        # Conversational context — the custom LLM endpoint receives this in the
+        # system message and uses it to identify the user + seed briefing data.
+        conversational_context = (
+            f"user_id:{user_id}\n"
+            f"User: {user_name}\n"
+            f"Today's briefing context:\n"
+            f"Meetings: {meetings_one_liner}\n"
+            f"Priority actions: {actions_one_liner}\n"
+            f"Email drafts: {email_one_liner}\n"
+            f"Top signals: {comp_signals}"
         )
 
-        # user_id tag allows the custom LLM endpoint to identify the user
-        user_id_tag = f"user_id:{user_id}\n" if user_id else ""
+        # --- Build payload ---
+        persona_id = settings.TAVUS_PERSONA_ID or None
 
-        system_prompt = (
-            f"{user_id_tag}"
-            f"You are ARIA, an autonomous AI colleague for {user_name} at LuminOne, "
-            f"a life sciences commercial AI company.\n"
-            f"You are conducting {user_name}'s morning briefing via live video call. "
-            f"You are warm, direct, and highly intelligent — like a brilliant EA who knows everything.\n\n"
-            f"TODAY'S CONTEXT:\n"
-            f"Meetings: {meetings_text}\n"
-            f"Priority actions: {top_tasks}\n"
-            f"Competitor signals: {comp_signals}{script_context}\n\n"
-            f"CONVERSATION RULES:\n"
-            f"- Address {user_name} by first name only\n"
-            f"- Spoken sentences only — no lists, no bullet points, no markdown\n"
-            f"- Keep responses under 60 words unless {user_name} asks for detail\n"
-            f"- When {user_name} interrupts or asks a question, answer directly then ask \"Shall I continue?\"\n"
-            f"- After answering, always offer a specific next action (draft an email, pull a brief, etc.)\n"
-            f"- You can see the full briefing data — reference specific names, companies, numbers\n"
-            f"- Start with: \"Good morning {user_name}. Ready for your briefing?\" then wait."
-        )
-
-        payload = {
+        payload: dict = {
             "replica_id": self.REPLICA_ID,
-            "conversational_context": system_prompt,
-            "custom_greeting": f"Good morning {user_name}. Ready for your briefing?",
+            "conversation_name": f"ARIA Briefing - {briefing_date}",
+            "conversational_context": conversational_context,
+            "custom_greeting": f"Good morning {user_name}.",
             "properties": {
-                "max_call_duration": 600,
-                "participant_left_timeout": 60,
+                "max_call_duration": 1800,       # 30 min max
+                "participant_left_timeout": 120,  # end if user gone 2 min
                 "enable_recording": False,
+                "apply_greenscreen": False,
             },
         }
+
+        if persona_id:
+            payload["persona_id"] = persona_id
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
