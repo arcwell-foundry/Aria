@@ -136,7 +136,17 @@ class TavusClient:
             if not resp.is_success:
                 logger.error("Tavus CVI error %s: %s", resp.status_code, resp.text)
                 resp.raise_for_status()
-            return resp.json()
+            response_data = resp.json()
+
+            # Append prejoin=false to skip Daily.co join screen
+            conversation_url = response_data.get("conversation_url", "")
+            if conversation_url and "?" not in conversation_url:
+                conversation_url += "?prejoin=false"
+            elif conversation_url and "prejoin=false" not in conversation_url:
+                conversation_url += "&prejoin=false"
+            response_data["conversation_url"] = conversation_url
+
+            return response_data
 
     async def get_video_status(self, video_id: str) -> dict:
         """Check status of a generated video.

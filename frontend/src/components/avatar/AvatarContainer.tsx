@@ -16,10 +16,9 @@ import ariaAvatarSrc from '@/assets/aria-avatar.png';
 interface AvatarContainerProps {
   audioOnly?: boolean;
   isConnecting?: boolean;
-  onPlay?: () => void;
 }
 
-export function AvatarContainer({ audioOnly = false, isConnecting = false, onPlay }: AvatarContainerProps) {
+export function AvatarContainer({ audioOnly = false, isConnecting = false }: AvatarContainerProps) {
   const tavusSession = useModalityStore((s) => s.tavusSession);
   const hasActiveSession = !audioOnly && tavusSession.status === 'active' && tavusSession.roomUrl;
 
@@ -55,8 +54,8 @@ export function AvatarContainer({ audioOnly = false, isConnecting = false, onPla
               src={tavusSession.roomUrl!}
               className="absolute inset-0 w-full h-full border-0"
               style={{ borderRadius: '50%' }}
-              allow="camera; microphone; autoplay; display-capture"
-              title="ARIA Live Conversation"
+              allow="microphone; autoplay"
+              title="ARIA"
             />
           ) : isConnecting ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0D1117]">
@@ -64,25 +63,11 @@ export function AvatarContainer({ audioOnly = false, isConnecting = false, onPla
               <span className="text-xs text-blue-400 mt-2">Connecting...</span>
             </div>
           ) : (
-            <div
-              className="absolute inset-0 cursor-pointer group"
-              onClick={onPlay}
-              style={{ borderRadius: '50%' }}
-            >
-              <img
-                src={ariaAvatarSrc}
-                alt="ARIA"
-                className="w-full h-full object-cover"
-              />
-              <div
-                className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity"
-                style={{ borderRadius: '50%' }}
-              >
-                <svg width="48" height="48" viewBox="0 0 48 48" fill="white">
-                  <polygon points="16,12 40,24 16,36" />
-                </svg>
-              </div>
-            </div>
+            <img
+              src={ariaAvatarSrc}
+              alt="ARIA"
+              className="absolute inset-0 w-full h-full object-cover"
+            />
           )}
         </div>
 

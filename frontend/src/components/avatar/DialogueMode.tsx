@@ -525,7 +525,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
           {viewMode === 'dialogue' && (
             <>
               <div className="flex-1 flex flex-col items-center justify-center relative">
-                <AvatarContainer isConnecting={isConnecting} onPlay={startCVISession} />
+                <AvatarContainer isConnecting={isConnecting} />
                 {/* Text-only mode indicator */}
                 {textOnlyMode && isBriefing && (
                   <div className="absolute top-8 px-3 py-1.5 rounded-full bg-[#1A1A2E] border border-[#2E66FF]/30">

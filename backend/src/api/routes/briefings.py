@@ -1461,9 +1461,13 @@ async def start_briefing_conversation(
 
     # Reuse existing live session
     if briefing.get("tavus_conversation_url"):
+        conv_url = briefing["tavus_conversation_url"]
+        # Ensure prejoin=false to skip Daily.co join screen
+        if "prejoin=false" not in conv_url:
+            conv_url += "&prejoin=false" if "?" in conv_url else "?prejoin=false"
         return {
             "status": "existing",
-            "conversation_url": briefing["tavus_conversation_url"],
+            "conversation_url": conv_url,
             "conversation_id": briefing.get("tavus_conversation_id"),
         }
 
