@@ -10,6 +10,7 @@ Tasks executed on each invocation:
   4. scout_signal_scan          — proactive Scout agent market signal detection
   5. stale_leads_check          — detect and alert on inactive leads
   6. meeting_end_check          — prompt debrief for meetings ended in last 10 min
+  7. apollo_credit_reconciliation — reconcile Apollo credit cache with credit log
 
 Uses the same config, DB, and services as the main API.
 Results are logged and recorded in aria_activity.
@@ -165,6 +166,14 @@ async def _meeting_end_check() -> dict[str, Any]:
     return await run_meeting_end_check()
 
 
+async def _apollo_credit_reconciliation() -> dict[str, Any]:
+    """Reconcile Apollo credit cache with credit log source of truth."""
+    from src.integrations.apollo_client import ApolloClient
+
+    client = ApolloClient()
+    return await client.reconcile_credits()
+
+
 async def _log_to_activity(task_name: str, result: dict[str, Any]) -> None:
     """Record cron execution in aria_activity for observability."""
     try:
@@ -200,6 +209,7 @@ async def run_all() -> None:
         ("scout_signal_scan", _scout_signal_scan),
         ("stale_leads_check", _stale_leads_check),
         ("meeting_end_check", _meeting_end_check),
+        ("apollo_credit_reconciliation", _apollo_credit_reconciliation),
     ]
 
     summary: dict[str, Any] = {}

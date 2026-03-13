@@ -487,3 +487,66 @@ class ApolloClient:
         except Exception as e:
             logger.error(f"Failed to reset Apollo monthly credits: {e}")
             return 0
+
+    async def reconcile_credits(self) -> dict[str, Any]:
+        """
+        Nightly reconciliation: compare credits_used_this_cycle cache with
+        SUM(credits_consumed) from apollo_credit_log. Update cache if they differ.
+
+        Returns:
+            Dict with accounts_checked, accounts_corrected, errors.
+        """
+        result: dict[str, Any] = {
+            "accounts_checked": 0,
+            "accounts_corrected": 0,
+            "errors": 0,
+        }
+
+        try:
+            # Get all active LuminOne-provided accounts
+            configs = (
+                self._db.table("apollo_config")
+                .select("company_id, credits_used_this_cycle, cycle_reset_date, monthly_credit_limit")
+                .eq("mode", "luminone_provided")
+                .eq("is_active", True)
+                .execute()
+            )
+
+            for config in configs.data or []:
+                company_id = config["company_id"]
+                cached_used = config.get("credits_used_this_cycle", 0)
+                result["accounts_checked"] += 1
+
+                try:
+                    actual_used = await self._sum_credits_from_log(
+                        company_id, config.get("cycle_reset_date")
+                    )
+
+                    if actual_used != cached_used:
+                        (
+                            self._db.table("apollo_config")
+                            .update({
+                                "credits_used_this_cycle": actual_used,
+                                "updated_at": datetime.utcnow().isoformat(),
+                            })
+                            .eq("company_id", company_id)
+                            .execute()
+                        )
+                        logger.info(
+                            "Apollo credit reconciliation: company=%s, cache=%d, actual=%d (corrected)",
+                            company_id, cached_used, actual_used,
+                        )
+                        result["accounts_corrected"] += 1
+
+                except Exception as e:
+                    logger.warning(
+                        "Apollo credit reconciliation failed for company %s: %s",
+                        company_id, e,
+                    )
+                    result["errors"] += 1
+
+        except Exception as e:
+            logger.exception("Apollo credit reconciliation job failed: %s", e)
+            result["errors"] += 1
+
+        return result
