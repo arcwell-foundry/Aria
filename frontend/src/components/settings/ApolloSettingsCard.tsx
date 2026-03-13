@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { Users, Check, AlertTriangle, Loader2, Settings, ExternalLink } from 'lucide-react';
+import { apiClient } from '@/api/client';
 
 type ApolloConfig = {
   is_configured: boolean;
@@ -20,13 +21,8 @@ type ApolloConfig = {
 };
 
 async function fetchApolloConfig(): Promise<ApolloConfig> {
-  const response = await fetch('/api/v1/apollo/config', {
-    credentials: 'include',
-  });
-  if (!response.ok) {
-    throw new Error('Failed to fetch Apollo config');
-  }
-  return response.json();
+  const { data } = await apiClient.get<ApolloConfig>('/apollo/config');
+  return data;
 }
 
 export function ApolloSettingsCard() {
