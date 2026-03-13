@@ -21,7 +21,8 @@ import logging
 import re
 import time
 import uuid
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import anthropic
 from fastapi import APIRouter, HTTPException, Request, status
@@ -148,6 +149,17 @@ async def _build_tavus_system_prompt(user_id: str) -> str:
     Returns:
         Complete system prompt string with briefing context and speech rules.
     """
+    # Time-aware greeting based on user's timezone
+    tz = ZoneInfo("America/New_York")
+    now = datetime.now(tz)
+    hour = now.hour
+    if hour < 12:
+        greeting = "Good morning"
+    elif hour < 17:
+        greeting = "Good afternoon"
+    else:
+        greeting = "Good evening"
+
     context_section = "No briefing has been generated for today yet."
 
     try:
@@ -173,6 +185,15 @@ async def _build_tavus_system_prompt(user_id: str) -> str:
 
             if script:
                 context_section = f"TODAY'S BRIEFING CONTEXT:\n{script}"
+                logger.info(
+                    "Tavus LLM: loaded briefing script for user %s (%d chars)",
+                    user_id,
+                    len(script),
+                )
+            else:
+                logger.warning("Tavus LLM: briefing row found but tavus_script empty for user %s", user_id)
+        else:
+            logger.warning("Tavus LLM: no briefing row for user %s on %s", user_id, today_str)
     except Exception as e:
         logger.warning("Tavus LLM: briefing query failed for user %s: %s", user_id, e)
 
@@ -184,8 +205,8 @@ If something is not in the context, say "that's not in today's briefing."
 Never say you don't have access — you have everything you need below.
 
 IMPORTANT: If this is the start of the conversation, proactively open with
-the morning briefing. Do not wait for the user to speak. Start with:
-"Good morning, Dhruv. I have your daily briefing ready..." then deliver
+the briefing. Do not wait for the user to speak. Start with:
+"{greeting}, Dhruv. Here's your briefing..." then deliver
 the key points from the briefing context below.
 
 {context_section}
@@ -202,9 +223,13 @@ async def tavus_chat_completions(request: Request) -> StreamingResponse:
     """
     t0 = time.monotonic()
 
+    # Log raw request body for debugging Tavus CVI request format
+    raw_body = await request.body()
+    logger.info("[TAVUS-LLM] Raw request body: %s", raw_body[:2000].decode(errors="replace"))
+
     _validate_api_key(request)
 
-    body = await request.json()
+    body = json.loads(raw_body)
     messages: list[dict] = body.get("messages", [])
 
     if not messages:
@@ -271,8 +296,9 @@ async def tavus_chat_completions(request: Request) -> StreamingResponse:
     # ARIA's proactive briefing greeting.
     if is_first_turn or not conversation_history:
         conversation_history = [
-            {"role": "user", "content": "Begin the morning briefing."}
+            {"role": "user", "content": "Begin the briefing."}
         ]
+        logger.info("[TAVUS-LLM] First turn — injected synthetic briefing prompt")
 
     # --- Stream response via Anthropic SDK (Haiku, direct, no LiteLLM) ---
     client = anthropic.AsyncAnthropic(
@@ -300,6 +326,7 @@ async def tavus_chat_completions(request: Request) -> StreamingResponse:
         }
         yield f"data: {json.dumps(opening)}\n\n"
 
+        full_response_parts: list[str] = []
         try:
             first_token_logged = False
             async with client.messages.stream(
@@ -319,6 +346,7 @@ async def tavus_chat_completions(request: Request) -> StreamingResponse:
                         )
                         first_token_logged = True
 
+                    full_response_parts.append(text)
                     chunk = {
                         "id": chunk_id,
                         "object": "chat.completion.chunk",
@@ -354,6 +382,12 @@ async def tavus_chat_completions(request: Request) -> StreamingResponse:
             yield f"data: {json.dumps(error_chunk)}\n\n"
 
         t2 = time.monotonic()
+        full_response = "".join(full_response_parts)
+        logger.info(
+            "[TAVUS-LLM] Response (%d chars): %s",
+            len(full_response),
+            full_response[:200],
+        )
         logger.info(
             "Tavus LLM: context=%.2fs, llm=%.2fs, total=%.2fs",
             t1 - t0,
