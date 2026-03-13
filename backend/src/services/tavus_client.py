@@ -7,6 +7,8 @@ for one-way video generation and briefing-specific CVI sessions.
 
 import json
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -49,6 +51,15 @@ class TavusClient:
             raise ValueError("TAVUS_API_KEY not set in environment")
         self.api_key = settings.TAVUS_API_KEY.get_secret_value()
         self.replica_id = self.REPLICA_ID
+
+    @staticmethod
+    def _time_greeting() -> str:
+        hour = datetime.now(ZoneInfo("America/New_York")).hour
+        if hour < 12:
+            return "Good morning"
+        elif hour < 17:
+            return "Good afternoon"
+        return "Good evening"
 
     async def create_or_update_aria_persona(
         self, backend_url: str, llm_secret: str
@@ -232,14 +243,13 @@ class TavusClient:
             "replica_id": self.REPLICA_ID,
             "conversation_name": f"ARIA Briefing - {briefing_date}",
             "conversational_context": conversational_context,
-            "custom_greeting": f"Good morning {user_name}.",
+            "custom_greeting": f"{self._time_greeting()}, {user_name}.",
             "properties": {
                 "max_call_duration": 1800,       # 30 min max
                 "participant_left_timeout": 120,  # end if user gone 2 min
                 "enable_recording": False,
                 "apply_greenscreen": False,
                 "enable_closed_captions": False,
-                "apply_conversation_config": True,
             },
         }
 
