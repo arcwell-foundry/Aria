@@ -29,7 +29,12 @@ export function TranscriptPanel({ onSend }: TranscriptPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Capture last 8 chat messages at mount time (snapshot for context display)
-  const chatContextRef = useRef(useConversationStore.getState().messages.slice(-8));
+  // Filter out briefing messages — those belong in the main transcript, not context
+  const chatContextRef = useRef(
+    useConversationStore.getState().messages
+      .filter((msg) => !msg.rich_content?.some((rc) => rc.type === 'briefing'))
+      .slice(-8),
+  );
   const chatContextMessages = chatContextRef.current;
 
   useEffect(() => {

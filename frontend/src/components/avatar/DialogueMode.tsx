@@ -54,8 +54,11 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
 
   const isBriefing = sessionType === 'briefing' || tavusSession.sessionType === 'briefing';
 
-  // Briefing playback state
-  const [isBriefingPlaying, setIsBriefingPlaying] = useState(true);
+  // View mode for dialogue/text toggle (Bug 2 fix)
+  const [viewMode, setViewMode] = useState<'dialogue' | 'text'>('dialogue');
+
+  // Briefing playback state — default to false so controls are hidden on load
+  const [isBriefingPlaying, setIsBriefingPlaying] = useState(false);
   const [briefingProgress, setBriefingProgress] = useState(0);
   const briefingProgressRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -67,6 +70,8 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   const [textOnlyMode, setTextOnlyMode] = useState(false);
   const [briefingFailed, setBriefingFailed] = useState(false);
 
+  const clearMessages = useConversationStore((s) => s.clearMessages);
+
   // Trigger briefing delivery when entering briefing mode.
   // Retries are handled by the axios interceptor (client.ts) which already
   // retries on 500/502/503/504 with exponential backoff. No need for a
@@ -77,6 +82,9 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   useEffect(() => {
     if (sessionType !== 'briefing') return;
     if (briefingFailed || textOnlyMode) return;
+
+    // Clear stale messages to prevent duplicate briefing content
+    clearMessages();
 
     let cancelled = false;
 
@@ -138,7 +146,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionType, isReplay]); // Intentionally exclude addMessage/setCurrentSuggestions to prevent re-renders
+  }, [sessionType, isReplay]); // Intentionally exclude addMessage/setCurrentSuggestions/clearMessages to prevent re-renders
 
   // Track briefing progress based on aria.speaking events
   useEffect(() => {
@@ -367,27 +375,16 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
 
   const handlePlayPause = useCallback(() => {
     setIsBriefingPlaying((prev) => {
-      const conversationId = ensureConversationId();
       if (prev) {
-        // Pausing: stop progress and send interrupt to Tavus via WS
+        // Pausing: stop progress tracking
         if (briefingProgressRef.current) {
           clearInterval(briefingProgressRef.current);
           briefingProgressRef.current = null;
         }
-        wsManager.send(WS_EVENTS.USER_MESSAGE, {
-          message: '/briefing pause',
-          conversation_id: conversationId,
-        });
-      } else {
-        // Resuming: send resume to Tavus via WS
-        wsManager.send(WS_EVENTS.USER_MESSAGE, {
-          message: '/briefing resume',
-          conversation_id: conversationId,
-        });
       }
       return !prev;
     });
-  }, [ensureConversationId]);
+  }, []);
 
   const handleRewind = useCallback(() => {
     // Cannot truly seek in a live Tavus stream; ask ARIA to repeat last point
@@ -440,7 +437,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
       style={{ backgroundColor: '#0A0A0B' }}
       data-aria-id="dialogue-mode"
     >
-      <DialogueHeader textOnlyMode={textOnlyMode} />
+      <DialogueHeader viewMode={viewMode} onViewModeChange={setViewMode} />
 
       {isAudioOnly ? (
         /* Audio-only layout: single column */
@@ -466,39 +463,43 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
           />
         </div>
       ) : (
-        /* Video layout: split screen */
+        /* Video layout: split screen (dialogue) or full-width transcript (text) */
         <div className="flex-1 flex overflow-hidden">
-          {/* Left: Avatar */}
-          <div className="flex-1 flex flex-col items-center justify-center relative">
-            <AvatarContainer />
-            {/* Text-only mode indicator */}
-            {textOnlyMode && isBriefing && (
-              <div className="absolute top-8 px-3 py-1.5 rounded-full bg-[#1A1A2E] border border-[#2E66FF]/30">
-                <span className="text-xs text-[#8B8FA3]">Text briefing mode</span>
-              </div>
-            )}
-            <VideoToastStack
-              toasts={toasts}
-              onDismiss={handleToastDismiss}
-              onToastClick={handleToastClick}
-            />
-            {isBriefing && (
-              <div className="absolute bottom-8 z-10">
-                <BriefingControls
-                  progress={briefingProgress}
-                  isPlaying={isBriefingPlaying}
-                  onPlayPause={handlePlayPause}
-                  onRewind={handleRewind}
-                  onForward={handleForward}
+          {/* Left: Avatar — hidden in text mode */}
+          {viewMode === 'dialogue' && (
+            <>
+              <div className="flex-1 flex flex-col items-center justify-center relative">
+                <AvatarContainer />
+                {/* Text-only mode indicator */}
+                {textOnlyMode && isBriefing && (
+                  <div className="absolute top-8 px-3 py-1.5 rounded-full bg-[#1A1A2E] border border-[#2E66FF]/30">
+                    <span className="text-xs text-[#8B8FA3]">Text briefing mode</span>
+                  </div>
+                )}
+                <VideoToastStack
+                  toasts={toasts}
+                  onDismiss={handleToastDismiss}
+                  onToastClick={handleToastClick}
                 />
+                {isBriefing && isBriefingPlaying && (
+                  <div className="absolute bottom-8 z-10">
+                    <BriefingControls
+                      progress={briefingProgress}
+                      isPlaying={isBriefingPlaying}
+                      onPlayPause={handlePlayPause}
+                      onRewind={handleRewind}
+                      onForward={handleForward}
+                    />
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          {/* Divider */}
-          <div className="w-px bg-[#1A1A2E]" />
+              {/* Divider */}
+              <div className="w-px bg-[#1A1A2E]" />
+            </>
+          )}
 
-          {/* Right: Transcript */}
+          {/* Right: Transcript — expands to full width in text mode */}
           <TranscriptPanel onSend={handleSend} />
         </div>
       )}

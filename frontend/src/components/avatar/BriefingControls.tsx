@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Play, Pause, SkipBack, SkipForward } from 'lucide-react';
 import { useModalityStore } from '@/stores/modalityStore';
 
@@ -32,6 +32,16 @@ export function BriefingControls({
     setPlaybackSpeed(SPEED_OPTIONS[next]);
   };
 
+  // Pause/resume only controls browser speech synthesis — no backend calls
+  const handlePlayPause = useCallback(() => {
+    if (isPlaying) {
+      window.speechSynthesis?.pause();
+    } else {
+      window.speechSynthesis?.resume();
+    }
+    onPlayPause();
+  }, [isPlaying, onPlayPause]);
+
   return (
     <div className="w-full max-w-xs flex flex-col items-center gap-3">
       <div className="w-full h-1 rounded-full bg-[#1A1A2E] overflow-hidden">
@@ -51,7 +61,7 @@ export function BriefingControls({
         </button>
 
         <button
-          onClick={onPlayPause}
+          onClick={handlePlayPause}
           className="p-3 rounded-full bg-[#1A1A2E] text-white hover:bg-[#2E66FF] transition-colors"
           aria-label={isPlaying ? 'Pause' : 'Play'}
         >
@@ -83,12 +93,14 @@ export function BriefingControls({
         </button>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="w-1.5 h-1.5 rounded-full bg-[#2E66FF] animate-pulse" />
-        <span className="font-mono text-[11px] text-[#8B8FA3] tracking-wider">
-          BRIEFING IN PROGRESS
-        </span>
-      </div>
+      {isPlaying && (
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-[#2E66FF] animate-pulse" />
+          <span className="font-mono text-[11px] text-[#8B8FA3] tracking-wider">
+            BRIEFING IN PROGRESS
+          </span>
+        </div>
+      )}
     </div>
   );
 }
