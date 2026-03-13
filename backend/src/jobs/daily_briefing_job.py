@@ -268,8 +268,65 @@ async def run_daily_briefing_job() -> dict[str, Any]:
                 },
             )
 
+            # Enrich signals from market_signals table
+            try:
+                db = SupabaseClient.get_client()
+                enriched = _get_enriched_signals(db, user_id)
+                signals = content.get("signals", {})
+                if isinstance(signals, dict):
+                    signals["competitive_intel"] = enriched["competitor"]
+                    signals["company_news"] = enriched["lead_related"]
+                    signals["market_trends"] = enriched["market"]
+                    content["signals"] = signals
+                logger.info(
+                    "Enriched briefing signals",
+                    extra={
+                        "user_id": user_id,
+                        "competitor": len(enriched["competitor"]),
+                        "lead_related": len(enriched["lead_related"]),
+                        "market": len(enriched["market"]),
+                    },
+                )
+            except Exception as enrich_err:
+                logger.warning(
+                    "Failed to enrich signals: %s",
+                    enrich_err,
+                    extra={"user_id": user_id},
+                )
+
+            # Generate rich spoken briefing script via LLM
+            try:
+                first_name = (user.get("full_name") or "").split()[0] or "there"
+                tavus_script = await _generate_tavus_script(content, user_name=first_name)
+                content["tavus_script"] = tavus_script
+                logger.info(
+                    "Generated tavus_script",
+                    extra={"user_id": user_id, "script_chars": len(tavus_script)},
+                )
+
+                # Write script to dedicated column on daily_briefings
+                try:
+                    db = SupabaseClient.get_client()
+                    db.table("daily_briefings").update({
+                        "tavus_script": tavus_script,
+                        "tavus_status": "script_ready",
+                        "content": content,
+                    }).eq("user_id", user_id).eq("briefing_date", str(user_today)).execute()
+                except Exception as script_db_err:
+                    logger.warning(
+                        "Failed to persist tavus_script to DB: %s",
+                        script_db_err,
+                        extra={"user_id": user_id},
+                    )
+            except Exception as script_err:
+                logger.warning(
+                    "Failed to generate tavus_script: %s",
+                    script_err,
+                    extra={"user_id": user_id},
+                )
+
             # Write to memory_briefing_queue for delivery tracking
-            script_text = content.get("summary", "")
+            script_text = content.get("tavus_script", content.get("summary", ""))
             queue_row_id = None
             if script_text:
                 try:
@@ -426,6 +483,170 @@ async def _consume_briefing_queue(user_id: str) -> list[dict[str, Any]]:
             exc_info=True,
         )
         return []
+
+
+def _get_enriched_signals(db: Any, user_id: str, days_back: int = 7) -> dict[str, list[dict[str, Any]]]:
+    """Pull fresh signals from market_signals, categorised for briefing.
+
+    Args:
+        db: Supabase client instance.
+        user_id: The user's UUID.
+        days_back: Number of days to look back for signals.
+
+    Returns:
+        Dict with competitor, lead_related, market, and all_fresh signal lists.
+    """
+    from datetime import timedelta
+
+    cutoff = (datetime.utcnow() - timedelta(days=days_back)).isoformat()
+
+    rows = (
+        db.table("market_signals")
+        .select("signal_type, headline, company_name, relevance_score, source_url, summary, detected_at")
+        .eq("user_id", user_id)
+        .gte("detected_at", cutoff)
+        .is_("dismissed_at", "null")
+        .order("relevance_score", desc=True)
+        .limit(50)
+        .execute()
+        .data or []
+    )
+
+    # Known competitor companies
+    competitor_companies = {
+        "Repligen", "Sartorius", "Cytiva", "Pall Corporation",
+        "MilliporeSigma", "Thermo Fisher", "Parker Hannifin",
+        "Entegris", "Solaris Biotech", "Pierre Fabre",
+    }
+
+    competitor: list[dict[str, Any]] = []
+    lead_signals: list[dict[str, Any]] = []
+    market: list[dict[str, Any]] = []
+
+    for r in rows:
+        co = r.get("company_name", "")
+        if co in competitor_companies:
+            competitor.append(r)
+        elif co in ("Life Sciences Industry", "Industry", "", None):
+            market.append(r)
+        else:
+            lead_signals.append(r)
+
+    return {
+        "competitor": competitor[:5],
+        "lead_related": lead_signals[:5],
+        "market": market[:5],
+        "all_fresh": rows[:10],
+    }
+
+
+async def _generate_tavus_script(content: dict[str, Any], user_name: str = "Dhruv") -> str:
+    """Generate a rich 8-section spoken briefing script for Tavus.
+
+    Uses Claude to produce a natural, conversational script from assembled
+    briefing content. Target: 400-600 words (~3-4 minutes spoken).
+
+    Args:
+        content: The assembled briefing content dict.
+        user_name: The user's first name for personalisation.
+
+    Returns:
+        The spoken script text.
+    """
+    import os
+
+    import anthropic
+
+    client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+    # Build context from assembled content
+    meetings = content.get("calendar", {}).get("key_meetings", [])[:3]
+    tasks = content.get("tasks", {}).get("overdue", [])[:3]
+    emails = content.get("email_summary", {})
+    signals = content.get("signals", {})
+
+    def _format_attendee(a: Any) -> str:
+        if isinstance(a, dict):
+            return a.get("name") or a.get("email", "?").split("@")[0]
+        return str(a)
+
+    meetings_text = "\n".join([
+        f"- {m.get('time', '?')}: {m.get('title', '?')} with {', '.join(_format_attendee(a) for a in m.get('attendees', [])[:2])}"
+        for m in meetings
+    ]) or "No meetings today"
+
+    top_tasks = "\n".join([
+        f"- {t.get('title', '?')} (overdue {t.get('days_overdue', '?')} days)"
+        for t in tasks
+    ]) or "No overdue tasks"
+
+    email_count = emails.get("received_count", 0)
+    draft_count = emails.get("draft_count", 0)
+
+    competitor_signals = "\n".join([
+        f"- {s.get('company_name')}: {(s.get('headline') or '')[:100]}"
+        for s in signals.get("competitive_intel", [])[:3]
+    ]) or "No new competitor signals"
+
+    market_signals_text = "\n".join([
+        f"- {s.get('company_name', 'Industry')}: {(s.get('headline') or '')[:100]}"
+        for s in signals.get("market_trends", [])[:3]
+    ]) or "No new market signals"
+
+    lead_signals_text = "\n".join([
+        f"- {s.get('company_name')}: {(s.get('headline') or '')[:100]}"
+        for s in signals.get("company_news", [])[:3]
+    ]) or "No new lead signals"
+
+    # Compute today's date string for the greeting
+    today_str = datetime.utcnow().strftime("%A, %B %-d, %Y")
+
+    prompt = f"""You are ARIA, an AI colleague for life sciences commercial teams.
+Generate a spoken morning briefing script for {user_name}. This will be read aloud by a Tavus AI avatar.
+Today is {today_str}.
+
+Write in a natural, conversational spoken voice. No markdown. No bullet points. No headers.
+Use short sentences. Be specific and actionable. Sound like a smart colleague, not a robot.
+Target: 400-600 words total (about 3-4 minutes spoken).
+
+DATA FOR TODAY:
+
+MEETINGS ({len(meetings)} today):
+{meetings_text}
+
+TOP PRIORITY ACTIONS:
+{top_tasks}
+
+EMAILS: {email_count} received, {draft_count} drafts ready for approval
+
+COMPETITOR SIGNALS (last 7 days):
+{competitor_signals}
+
+LEAD SIGNALS (last 7 days):
+{lead_signals_text}
+
+MARKET/INDUSTRY SIGNALS (last 7 days):
+{market_signals_text}
+
+Write the script in this exact order:
+1. Greeting (5 sec): "Good morning {user_name}. Here's your briefing for [day, date]."
+2. Day at a glance (10 sec): meetings count, draft count, top signal count
+3. Meetings (45 sec): for each meeting, who's there and one specific prep note
+4. Priority actions (30 sec): top 2-3 overdue items, spoken urgently but calmly
+5. Emails (20 sec): drafts ready, most important one called out by name
+6. Lead signals (30 sec): any signals about companies you're pursuing
+7. Competitor intel (30 sec): what competitors did this week that matters
+8. Market/industry (20 sec): one regulatory or market development worth knowing
+9. Closing (10 sec): "What would you like to dig into?" followed by 2-3 specific options
+
+Output ONLY the spoken script. Nothing else."""
+
+    response = await client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.content[0].text.strip()
 
 
 async def _maybe_create_video_briefing(
