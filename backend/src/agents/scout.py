@@ -1050,8 +1050,12 @@ class ScoutAgent(SkillAwareAgent):
                     "- expansion: Geographic expansion, new markets, facility openings\n\n"
                     "Assign a relevance_score (0.0-1.0) based on how important this signal "
                     "is for a life sciences commercial team.\n\n"
+                    "IMPORTANT: For company_name, use the company that the article is ACTUALLY about, "
+                    "not the search entity. For example, if searching for 'AGC Biologics' returns "
+                    "an article about Agilent acquiring Biocare Medical, the company_name should be "
+                    "'Agilent' (the article subject), not 'AGC Biologics' (the search trigger).\n\n"
                     "Return ONLY a JSON array of signal objects with these fields:\n"
-                    '- "company_name": the entity name\n'
+                    '- "company_name": the company the article is actually about (may differ from search entity)\n'
                     '- "signal_type": one of the types listed above\n'
                     '- "headline": concise signal headline\n'
                     '- "summary": 1-2 sentence summary of the signal\n'

@@ -152,12 +152,6 @@ function PrioritySignalCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <span
-              className="text-sm font-medium"
-              style={{ color: "var(--text-primary)" }}
-            >
-              {signal.company_name}
-            </span>
-            <span
               className="px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide"
               style={{
                 backgroundColor: `${config.color}18`,
@@ -178,11 +172,19 @@ function PrioritySignalCard({
             </span>
           </div>
           <p
-            className="text-sm leading-relaxed"
-            style={{ color: "var(--text-secondary)" }}
+            className="text-sm font-medium leading-relaxed"
+            style={{ color: "var(--text-primary)" }}
           >
-            {sanitizeSignalText(signal.headline, 300)}
+            {sanitizeSignalText(signal.headline, 300) || `${signal.company_name} — new activity detected`}
           </p>
+          {signal.company_name && (
+            <span
+              className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium"
+              style={{ backgroundColor: "#F1F5F9", color: "#5B6E8A" }}
+            >
+              {signal.company_name}
+            </span>
+          )}
           {signal.linked_action_summary && (
             <div
               className="mt-2 flex items-start gap-1.5 text-xs"
@@ -258,14 +260,6 @@ function SignalCard({
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
-          {signal.company_name && (
-            <span
-              className="text-sm font-medium truncate"
-              style={{ color: "var(--text-primary)" }}
-            >
-              {signal.company_name}
-            </span>
-          )}
           <span
             className="px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide"
             style={{
@@ -312,13 +306,31 @@ function SignalCard({
           )}
         </div>
 
-        {/* Collapsed: 2-line clamp. Expanded: full content */}
+        {/* Headline as primary text */}
         <p
-          className={cn("text-sm leading-relaxed", !expanded && "line-clamp-2")}
-          style={{ color: "var(--text-secondary)" }}
+          className="text-sm font-medium leading-relaxed"
+          style={{ color: "var(--text-primary)" }}
         >
-          {sanitizeSignalText(signal.content, expanded ? 2000 : 300)}
+          {sanitizeSignalText(signal.headline || signal.content, 300) || `${signal.company_name} — new activity detected`}
         </p>
+        {signal.company_name && (
+          <span
+            className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium"
+            style={{ backgroundColor: "#F1F5F9", color: "#5B6E8A" }}
+          >
+            {signal.company_name}
+          </span>
+        )}
+
+        {/* Content body (collapsed: 2-line clamp) */}
+        {signal.content && signal.content !== signal.headline && (
+          <p
+            className={cn("text-sm leading-relaxed mt-1", !expanded && "line-clamp-2")}
+            style={{ color: "var(--text-secondary)" }}
+          >
+            {sanitizeSignalText(signal.content, expanded ? 2000 : 300)}
+          </p>
+        )}
 
         {/* Expanded details */}
         {expanded && (

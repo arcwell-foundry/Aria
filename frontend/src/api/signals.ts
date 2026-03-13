@@ -6,6 +6,7 @@ export interface Signal {
   user_id: string;
   signal_type: string;
   company_name: string | null;
+  headline?: string;
   content: string;
   summary?: string;
   source: string | null;

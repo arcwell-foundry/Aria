@@ -48,7 +48,7 @@ export function BuyingSignalsModule({ signals: propSignals }: BuyingSignalsModul
   if (isLoading && !propSignals) return <BuyingSignalsSkeleton />;
 
   const signals: Signal[] = propSignals ?? (apiSignals ?? []).map((s) => ({
-    message: s.content,
+    message: s.headline || s.content || `${s.company_name ?? 'Unknown'} — new activity detected`,
     strength: mapConfidenceToStrength(s.signal_type),
     source: s.source ?? s.company_name ?? 'ARIA',
   }));

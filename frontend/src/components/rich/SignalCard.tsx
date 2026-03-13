@@ -62,8 +62,13 @@ export function SignalCard({ data }: SignalCardProps) {
         )}
       </div>
       <p className="text-sm text-[var(--text-primary)] leading-relaxed">
-        {sanitizeSignalText(data.headline)}
+        {sanitizeSignalText(data.headline) || `${data.company_name} — new activity detected`}
       </p>
+      {data.company_name && (
+        <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-[var(--text-secondary)] bg-[var(--bg-subtle)] border border-[var(--border)]">
+          {data.company_name}
+        </span>
+      )}
       <div className="mt-2">
         <button
           onClick={handleDraftOutreach}

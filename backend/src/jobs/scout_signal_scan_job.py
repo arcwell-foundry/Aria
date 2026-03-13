@@ -134,8 +134,14 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                 if not headline:
                     continue
 
-                # Normalize company name before deduplication check
+                # Extract actual article company (may differ from search entity)
                 raw_company_name = signal.get("company_name", "Unknown")
+                search_trigger = raw_company_name
+                raw_company_name = _extract_article_company(
+                    headline=headline,
+                    summary=signal.get("summary", ""),
+                    search_company=raw_company_name,
+                )
                 canonical_company_name = normalize_company_name(
                     raw_company_name, company_id=company_id, supabase_client=db,
                 )
@@ -165,6 +171,7 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
                             "source_name": signal.get("source", "scout_agent"),
                             "source_url": signal.get("source_url"),
                             "relevance_score": relevance,
+                            "search_trigger_company": search_trigger,
                             "metadata": signal.get("metadata", {}),
                         }
                     ).execute()
@@ -505,10 +512,16 @@ async def _scan_industry_terms(db: Any, user_ids: list[str]) -> dict[str, Any]:
                         if not headline:
                             continue
 
-                        # Check if this signal already exists
-                        company_name = signal.get("company_name", "Industry")
-                        if company_name == "Unknown":
-                            company_name = "Industry"
+                        # Extract actual article company
+                        raw_industry_company = signal.get("company_name", "Industry")
+                        if raw_industry_company == "Unknown":
+                            raw_industry_company = "Industry"
+                        industry_search_trigger = raw_industry_company
+                        company_name = _extract_article_company(
+                            headline=headline,
+                            summary=signal.get("summary", ""),
+                            search_company=raw_industry_company,
+                        )
 
                         if await _signal_exists(db, user_id, headline, company_name):
                             continue
@@ -530,6 +543,7 @@ async def _scan_industry_terms(db: Any, user_ids: list[str]) -> dict[str, Any]:
                                     "source_name": signal.get("source", "industry_scan"),
                                     "source_url": signal.get("source_url"),
                                     "relevance_score": signal.get("relevance_score", 0.5),
+                                    "search_trigger_company": industry_search_trigger,
                                     "metadata": {
                                         **signal.get("metadata", {}),
                                         "scan_type": "industry_term",
@@ -550,6 +564,44 @@ async def _scan_industry_terms(db: Any, user_ids: list[str]) -> dict[str, Any]:
         logger.info("Industry term scan detected %d signals", stats["signals_detected"])
 
     return stats
+
+
+def _extract_article_company(headline: str, summary: str, search_company: str) -> str:
+    """Extract the actual company the article is about.
+
+    If the headline mentions a specific company other than the search trigger,
+    prefer that. Otherwise use the search trigger company.
+
+    Args:
+        headline: Article headline text.
+        summary: Article summary text.
+        search_company: The company name that triggered the Exa search.
+
+    Returns:
+        The extracted company name, or the search_company as fallback.
+    """
+    import re
+
+    if not headline:
+        return search_company
+
+    # If the search company IS mentioned prominently in the headline, keep it
+    if search_company.lower() in headline.lower()[:120]:
+        return search_company
+
+    # Article headline doesn't mention the search company —
+    # try to extract the actual subject from the headline
+    # Look for a capitalized company name before a verb phrase
+    match = re.match(
+        r'^([A-Z][A-Za-z0-9\s&\-\.]+?)(?:\s+(?:to|and|is|has|will|announces|launches|reports|acquires|partners|signs|receives|expands|closes|completes|enters|unveils|secures))',
+        headline,
+    )
+    if match:
+        extracted = match.group(1).strip()
+        if len(extracted) > 2 and extracted != search_company:
+            return extracted
+
+    return search_company
 
 
 async def _signal_exists(
