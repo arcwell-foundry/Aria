@@ -5,7 +5,7 @@
  * (participant labels, mute buttons, permission prompts). Renders only
  * ARIA's video track in a plain <video> element.
  *
- * - audioSource: true  → user's mic (for speaking to ARIA)
+ * - audioSource: false → briefing is one-way delivery, no mic needed
  * - videoSource: false → never request camera permission
  */
 
@@ -70,7 +70,7 @@ const TavusAvatar = forwardRef<TavusAvatarHandle, TavusAvatarProps>(
         try {
           const Daily = (await import('@daily-co/daily-js')).default;
           call = Daily.createCallObject({
-            audioSource: true,
+            audioSource: false,
             videoSource: false,
           });
           callRef.current = call;
@@ -108,13 +108,14 @@ const TavusAvatar = forwardRef<TavusAvatarHandle, TavusAvatarProps>(
             }
           });
 
-          call.on('left-meeting', () => {
+          call.on('left-meeting', (e) => {
+            console.log('[TavusAvatar] left-meeting:', e);
             if (!cancelled) onDisconnected?.();
           });
 
           call.on('error', (e) => {
             if (cancelled) return;
-            console.error('Daily call error:', e);
+            console.error('[TavusAvatar] Daily error:', e);
             const msg = e?.errorMsg || 'Connection error';
             if (msg.includes('mic') || msg.includes('audio') || msg.includes('NotAllowedError')) {
               onError?.('Microphone unavailable — you can listen but not speak');
@@ -164,9 +165,9 @@ const TavusAvatar = forwardRef<TavusAvatarHandle, TavusAvatarProps>(
     }, [conversationUrl]);
 
     return (
-      <div className="w-full h-full relative">
+      <div className="absolute inset-0 w-full h-full">
         {connecting && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0D1117] z-[1]">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0D1117] z-[2]">
             <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
             <span className="text-xs text-blue-400 mt-2">Connecting...</span>
           </div>
@@ -176,8 +177,7 @@ const TavusAvatar = forwardRef<TavusAvatarHandle, TavusAvatarProps>(
           autoPlay
           playsInline
           muted={false}
-          className="w-full h-full object-cover"
-          style={{ display: connecting ? 'none' : 'block' }}
+          className="absolute inset-0 w-full h-full object-cover z-[1]"
         />
       </div>
     );
