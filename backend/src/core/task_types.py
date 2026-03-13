@@ -31,4 +31,5 @@ class TaskType(str, Enum):
     CAUSAL_ENTITY_EXTRACT = "intelligence.causal_entity_extract"
     CAUSAL_INFER = "intelligence.causal_infer"
     CAUSAL_CLASSIFY = "intelligence.causal_classify"
+    TAVUS_CVI_STREAM = "tavus.cvi_stream"
     GENERAL = "general"

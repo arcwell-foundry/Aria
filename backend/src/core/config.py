@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     TAVUS_CALLBACK_URL: str = ""
     TAVUS_GUARDRAILS_ID: str = ""
     TAVUS_WEBHOOK_SECRET: str = ""  # Webhook signature verification secret
+    TAVUS_LLM_SECRET: str = ""  # API key for Tavus custom LLM endpoint auth
 
     # MeetingBaaS (bot dispatch for meeting recording)
     MEETINGBAAS_API_KEY: SecretStr | None = None

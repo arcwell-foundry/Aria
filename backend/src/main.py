@@ -81,6 +81,7 @@ from src.api.routes import (
     video,
     composio_webhooks,  # Composio event trigger webhooks
     websets,  # Phase 3: Websets integration
+    tavus_llm,  # Tavus CVI custom LLM endpoint (OpenAI-compatible)
     workflows,
 )
 from src.api.routes import (
@@ -487,6 +488,7 @@ app.include_router(tool_request.router, prefix="/api/v1")  # Phase 4D: User tool
 app.include_router(traces.router, prefix="/api/v1")  # Wave 2: Delegation traces
 app.include_router(trust.router, prefix="/api/v1")  # Wave 4: Trust dashboard
 app.include_router(usage.router, prefix="/api/v1")  # Wave 0: Cost Governor
+app.include_router(tavus_llm.router, prefix="/api")  # Tavus CVI custom LLM
 app.include_router(video.router, prefix="/api/v1")
 app.include_router(meetingbaas_webhook_router, prefix="/webhooks", tags=["webhooks"])
 app.include_router(composio_webhooks.router, prefix="/api/v1")

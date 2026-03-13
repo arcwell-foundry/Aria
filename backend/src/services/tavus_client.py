@@ -52,13 +52,17 @@ class TavusClient:
             return resp.json()
 
     async def create_cvi_conversation(
-        self, briefing_content: dict, user_name: str = "Dhruv"
+        self,
+        briefing_content: dict,
+        user_name: str = "Dhruv",
+        user_id: str = "",
     ) -> dict:
         """Create a live Tavus CVI conversation pre-loaded with briefing context.
 
         Args:
             briefing_content: The briefing content dict with calendar, tasks, signals.
             user_name: The user's first name for personalization.
+            user_id: The user's UUID — injected into system prompt for custom LLM auth.
 
         Returns:
             Dict with conversation_url, conversation_id from Tavus.
@@ -97,7 +101,11 @@ class TavusClient:
             else ""
         )
 
+        # user_id tag allows the custom LLM endpoint to identify the user
+        user_id_tag = f"user_id:{user_id}\n" if user_id else ""
+
         system_prompt = (
+            f"{user_id_tag}"
             f"You are ARIA, an autonomous AI colleague for {user_name} at LuminOne, "
             f"a life sciences commercial AI company.\n"
             f"You are conducting {user_name}'s morning briefing via live video call. "

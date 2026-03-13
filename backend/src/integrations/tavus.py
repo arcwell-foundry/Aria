@@ -1057,6 +1057,9 @@ class TavusClient:
         # Add spoken-mode adaptation (the ONLY difference from chat)
         parts.append(SPOKEN_MODE_ADAPTATION)
 
+        # Inject user_id tag so the custom LLM endpoint can identify the user
+        parts.insert(0, f"user_id:{user_id}")
+
         return "\n\n".join(parts)
 
     def _default_context(self) -> str:

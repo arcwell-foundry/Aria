@@ -1471,6 +1471,7 @@ async def start_briefing_conversation(
         data = await client.create_cvi_conversation(
             briefing_content=briefing.get("content") or {},
             user_name="Dhruv",
+            user_id=str(current_user.id),
         )
 
         conv_url = data.get("conversation_url", "")
