@@ -268,9 +268,11 @@ async def run_daily_briefing_job() -> dict[str, Any]:
                 },
             )
 
+            # Get DB client for signal enrichment and script generation
+            db = SupabaseClient.get_client()
+
             # Enrich signals from market_signals table
             try:
-                db = SupabaseClient.get_client()
                 enriched = _get_enriched_signals(db, user_id)
                 signals = content.get("signals", {})
                 if isinstance(signals, dict):
@@ -297,7 +299,7 @@ async def run_daily_briefing_job() -> dict[str, Any]:
             # Generate rich spoken briefing script via LLM
             try:
                 first_name = (user.get("full_name") or "").split()[0] or "there"
-                tavus_script = await _generate_tavus_script(content, user_name=first_name)
+                tavus_script = await _generate_tavus_script(content, user_name=first_name, db=db, user_id=user_id)
                 content["tavus_script"] = tavus_script
                 logger.info(
                     "Generated tavus_script",
@@ -540,7 +542,12 @@ def _get_enriched_signals(db: Any, user_id: str, days_back: int = 7) -> dict[str
     }
 
 
-async def _generate_tavus_script(content: dict[str, Any], user_name: str = "Dhruv") -> str:
+async def _generate_tavus_script(
+    content: dict[str, Any],
+    user_name: str = "Dhruv",
+    db: Any = None,
+    user_id: str | None = None,
+) -> str:
     """Generate a rich 8-section spoken briefing script for Tavus.
 
     Uses Claude to produce a natural, conversational script from assembled
@@ -549,6 +556,8 @@ async def _generate_tavus_script(content: dict[str, Any], user_name: str = "Dhru
     Args:
         content: The assembled briefing content dict.
         user_name: The user's first name for personalisation.
+        db: Supabase client instance for live DB queries.
+        user_id: The user's UUID for querying email_drafts.
 
     Returns:
         The spoken script text.
@@ -559,9 +568,45 @@ async def _generate_tavus_script(content: dict[str, Any], user_name: str = "Dhru
 
     client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
+    # Get live draft count from DB (content.email_summary may be stale)
+    actual_drafts: list[dict[str, Any]] = []
+    if db and user_id:
+        try:
+            draft_result = db.table("email_drafts")\
+                .select("recipient_name, subject, draft_type, status")\
+                .eq("user_id", user_id)\
+                .in_("status", ["draft", "pending_review"])\
+                .order("created_at", desc=True)\
+                .limit(5)\
+                .execute()
+            actual_drafts = draft_result.data or []
+        except Exception as e:
+            logger.warning("Failed to query email_drafts: %s", e)
+            actual_drafts = []
+
+    draft_count = len(actual_drafts) if actual_drafts else (content.get("email_summary", {}).get("draft_count", 0))
+    top_draft = actual_drafts[0] if actual_drafts else None
+    top_draft_text = (
+        f"Most urgent: reply to {top_draft['recipient_name']} — {top_draft['subject'][:60]}"
+        if top_draft
+        else "No specific drafts loaded"
+    )
+
+    # If we got live drafts, also query for total count (not just top 5)
+    if actual_drafts and db and user_id:
+        try:
+            count_result = db.table("email_drafts")\
+                .select("id", count="exact")\
+                .eq("user_id", user_id)\
+                .in_("status", ["draft", "pending_review"])\
+                .execute()
+            draft_count = count_result.count if count_result.count is not None else len(actual_drafts)
+        except Exception:
+            pass
+
     # Build context from assembled content
     meetings = content.get("calendar", {}).get("key_meetings", [])[:3]
-    tasks = content.get("tasks", {}).get("overdue", [])[:3]
+    tasks_overdue = content.get("tasks", {}).get("overdue", [])[:4]
     emails = content.get("email_summary", {})
     signals = content.get("signals", {})
 
@@ -575,13 +620,22 @@ async def _generate_tavus_script(content: dict[str, Any], user_name: str = "Dhru
         for m in meetings
     ]) or "No meetings today"
 
-    top_tasks = "\n".join([
-        f"- {t.get('title', '?')} (overdue {t.get('days_overdue', '?')} days)"
-        for t in tasks
-    ]) or "No overdue tasks"
+    task_lines: list[str] = []
+    for t in tasks_overdue:
+        task_name = t.get("task") or t.get("title", "Unknown task")
+        due = t.get("due_at") or t.get("due_date", "")
+        try:
+            due_dt = datetime.fromisoformat(due.replace("Z", "").split("+")[0])
+            days_overdue = (datetime.utcnow() - due_dt).days
+            overdue_str = f"overdue {days_overdue} days"
+        except Exception:
+            overdue_str = "overdue"
+        priority = t.get("priority", "medium")
+        task_lines.append(f"- [{priority.upper()}] {task_name} ({overdue_str})")
+
+    top_tasks = "\n".join(task_lines) or "No overdue tasks"
 
     email_count = emails.get("received_count", 0)
-    draft_count = emails.get("draft_count", 0)
 
     competitor_signals = "\n".join([
         f"- {s.get('company_name')}: {(s.get('headline') or '')[:100]}"
@@ -617,7 +671,8 @@ MEETINGS ({len(meetings)} today):
 TOP PRIORITY ACTIONS:
 {top_tasks}
 
-EMAILS: {email_count} received, {draft_count} drafts ready for approval
+EMAILS: {draft_count} drafts waiting for your approval
+{top_draft_text}
 
 COMPETITOR SIGNALS (last 7 days):
 {competitor_signals}
