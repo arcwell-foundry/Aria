@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link2, Check, ExternalLink, Loader2, AlertTriangle, X } from 'lucide-react';
 import { ComingSoonIndicator } from './ComingSoonIndicator';
+import { ApolloSettingsCard } from './ApolloSettingsCard';
 import {
   useAvailableIntegrations,
   useGetAuthUrl,
@@ -353,6 +354,9 @@ export function IntegrationsSection() {
               </div>
             );
           })}
+
+          {/* Apollo.io - B2B Contact Enrichment */}
+          <ApolloSettingsCard />
 
           {/* Coming Soon: Browser & OS Control */}
           <ComingSoonIndicator
