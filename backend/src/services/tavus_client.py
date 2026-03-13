@@ -5,6 +5,7 @@ persona-based CVI sessions. This client provides simple, direct API calls
 for one-way video generation and briefing-specific CVI sessions.
 """
 
+import json
 import logging
 
 import httpx
@@ -253,6 +254,7 @@ class TavusClient:
                 "enable_recording": False,
                 "apply_greenscreen": False,
                 "enable_closed_captions": False,
+                "apply_conversation_config": True,
             },
         }
 
@@ -260,9 +262,8 @@ class TavusClient:
             payload["persona_id"] = persona_id
 
         logger.info(
-            "Creating Tavus CVI conversation with persona_id=%s, replica_id=%s",
-            persona_id,
-            self.REPLICA_ID,
+            "[TAVUS] Creating conversation with body: %s",
+            json.dumps(payload, indent=2),
         )
 
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -275,6 +276,10 @@ class TavusClient:
                 logger.error("Tavus CVI error %s: %s", resp.status_code, resp.text)
                 resp.raise_for_status()
             response_data = resp.json()
+            logger.info(
+                "[TAVUS] Conversation created: %s",
+                json.dumps(response_data, indent=2)[:500],
+            )
 
             # Append prejoin=false to skip Daily.co join screen
             conversation_url = response_data.get("conversation_url", "")
