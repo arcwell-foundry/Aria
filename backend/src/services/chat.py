@@ -874,13 +874,13 @@ class ChatService:
          "lead_gen", "Find and qualify target companies"),
 
         # --- Lead gen: explicit numeric + entity patterns ---
-        (re.compile(r"\bfind\s+(?:me\s+)?\d+\s+(?:companies|leads|CDMOs|CROs|biotechs|pharma)", re.I),
+        (re.compile(r"\bfind\s+(?:me\s+)?\d+\s+(?:companies|leads|CDMOs?|CROs?|biotechs?|pharma)", re.I),
          "lead_gen", "Find and qualify target companies"),
         (re.compile(r"\bdiscover\s+\d*\s*(?:companies|leads|prospects)", re.I),
          "lead_gen", "Discover target companies"),
         (re.compile(r"\bbuild\s+(?:a\s+|my\s+)?pipeline\b", re.I),
          "lead_gen", "Build lead pipeline"),
-        (re.compile(r"\bsearch\s+for\s+(?:\d+\s+)?(?:companies|leads|CDMOs|CROs)", re.I),
+        (re.compile(r"\bsearch\s+for\s+(?:\d+\s+)?(?:companies|leads|CDMOs?|CROs?)", re.I),
          "lead_gen", "Search for target companies"),
         (re.compile(r"\bidentify\s+\d+\s+(?:companies|leads|targets)", re.I),
          "lead_gen", "Identify target companies"),
@@ -2285,6 +2285,11 @@ class ChatService:
         name = search_params.get("name", "")
         company = search_params.get("company", "")
         query = search_params.get("query", message)
+
+        # Lazy-init web grounding (may not be initialized if we arrived
+        # via _handle_direct_execute rather than the conversational path)
+        if self._web_grounding is None:
+            self._web_grounding = WebGroundingService()
 
         # Try web grounding
         results: list[str] = []

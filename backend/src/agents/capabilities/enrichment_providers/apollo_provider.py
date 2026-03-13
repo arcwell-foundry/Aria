@@ -84,7 +84,16 @@ class ApolloEnrichmentProvider(BaseEnrichmentProvider):
                 return settings.APOLLO_API_KEY.get_secret_value(), "luminone_provided"
             return None, "unconfigured"
 
-        return await self._client.resolve_api_key(self._company_id)
+        # Try company-specific config first (BYOK or luminone_provided with limits)
+        key, mode = await self._client.resolve_api_key(self._company_id)
+        if key:
+            return key, mode
+
+        # Fallback to master key if company has no apollo_config row
+        if mode == "unconfigured" and settings.APOLLO_API_KEY:
+            return settings.APOLLO_API_KEY.get_secret_value(), "luminone_provided"
+
+        return key, mode
 
     # ── People Search (FREE) ─────────────────────────────────────────────
 

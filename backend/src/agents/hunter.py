@@ -175,7 +175,7 @@ class HunterAgent(SkillAwareAgent):
 
         Args:
             company_id: Optional company UUID for credit metering.
-                       If not provided, uses user_id for basic tracking.
+                       If not provided, resolves from user_profiles.
 
         Returns:
             ApolloEnrichmentProvider instance or None if initialization fails.
@@ -186,11 +186,26 @@ class HunterAgent(SkillAwareAgent):
                     ApolloEnrichmentProvider,
                 )
 
+                # Resolve company_id from user_profiles if not provided
+                resolved_company_id = company_id
+                if not resolved_company_id and self.user_id:
+                    try:
+                        from src.db.supabase import get_supabase_client
+                        db = get_supabase_client()
+                        profile = db.table("user_profiles").select("company_id").eq("id", self.user_id).limit(1).execute()
+                        if profile.data:
+                            resolved_company_id = profile.data[0].get("company_id")
+                    except Exception:
+                        logger.debug("HunterAgent: Could not resolve company_id from user_profiles")
+
                 self._apollo_provider = ApolloEnrichmentProvider(
-                    company_id=company_id,
+                    company_id=resolved_company_id,
                     user_id=self.user_id,
                 )
-                logger.info("HunterAgent: ApolloEnrichmentProvider initialized")
+                logger.info(
+                    "HunterAgent: ApolloEnrichmentProvider initialized (company_id=%s)",
+                    resolved_company_id,
+                )
             except Exception as e:
                 logger.warning("HunterAgent: Failed to initialize ApolloEnrichmentProvider: %s", e)
         return self._apollo_provider
@@ -503,8 +518,15 @@ class HunterAgent(SkillAwareAgent):
                     enriched_company, source="exa_company_search"
                 )
 
-                # Find contacts
-                contacts = await self._find_contacts(company_name=enriched_company["name"])
+                # Find contacts — pass domain from enrichment for Apollo accuracy
+                company_domain = (
+                    enriched_company.get("domain", "")
+                    or enriched_company.get("website", "").replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
+                )
+                contacts = await self._find_contacts(
+                    company_name=enriched_company["name"],
+                    company_domain=company_domain or None,
+                )
 
                 # Score using dynamic 4-dimension model (Section 3.2)
                 discovery_score = await self._score_discovery(

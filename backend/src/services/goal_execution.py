@@ -1153,6 +1153,10 @@ class GoalExecutionService:
         task: dict[str, Any] | None = None
 
         if agent_type == "hunter":
+            # Parse target_count from goal title if not in config
+            explicit_count = config.get("target_count")
+            if explicit_count is None:
+                explicit_count = self._parse_requested_lead_count(goal.get("title", ""))
             task = {
                 "goal_id": goal.get("id", ""),
                 "icp": {
@@ -1160,7 +1164,7 @@ class GoalExecutionService:
                     "size": config.get("company_size", ""),
                     "geography": config.get("geography", ""),
                 },
-                "target_count": config.get("target_count", 5),
+                "target_count": explicit_count,
                 "exclusions": config.get("exclusions", []),
             }
         elif agent_type == "analyst":
