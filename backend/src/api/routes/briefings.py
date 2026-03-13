@@ -1533,6 +1533,77 @@ async def start_briefing_conversation(
         )
 
 
+# ── POST /briefings/end-conversation ───────────────────────────────────────
+@router.post("/end-conversation")
+async def end_briefing_conversation(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Terminate the active Tavus CVI conversation to stop billing.
+
+    Clears the stored conversation_id/url from daily_briefings so a fresh
+    session can be created on the next play.
+    """
+    from src.db.supabase import SupabaseClient
+    from src.services.tavus_client import TavusClient
+
+    today_str = date.today().isoformat()
+    db = SupabaseClient.get_client()
+
+    result = (
+        db.table("daily_briefings")
+        .select("id, tavus_conversation_id")
+        .eq("user_id", current_user.id)
+        .eq("briefing_date", today_str)
+        .limit(1)
+        .execute()
+    )
+
+    if not result.data:
+        return {"status": "no_active_conversation"}
+
+    row = result.data[0]
+    conversation_id = row.get("tavus_conversation_id")
+
+    if not conversation_id:
+        return {"status": "no_active_conversation"}
+
+    # Terminate on Tavus side
+    terminated = False
+    try:
+        client = TavusClient()
+        terminated = await client.end_conversation(conversation_id)
+    except Exception:
+        logger.exception(
+            "Failed to terminate Tavus conversation %s", conversation_id
+        )
+
+    # Clear DB state regardless — stale IDs should never persist
+    try:
+        db.table("daily_briefings").update(
+            {
+                "tavus_conversation_id": None,
+                "tavus_conversation_url": None,
+                "tavus_status": "script_ready",
+            }
+        ).eq("id", row["id"]).execute()
+    except Exception:
+        logger.exception(
+            "Failed to clear conversation state in daily_briefings"
+        )
+
+    logger.info(
+        "Conversation %s ended for user %s, terminated=%s",
+        conversation_id,
+        current_user.id,
+        terminated,
+    )
+
+    return {
+        "status": "terminated" if terminated else "cleared",
+        "conversation_id": conversation_id,
+    }
+
+
 # ── GET /briefings/video-status/{video_id} ────────────────────────────────
 @router.get("/video-status/{video_id}")
 async def get_briefing_video_status(

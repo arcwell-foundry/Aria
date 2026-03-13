@@ -260,6 +260,26 @@ class TavusClient:
 
             return response_data
 
+    async def end_conversation(self, conversation_id: str) -> bool:
+        """Terminate an active Tavus CVI conversation to stop billing.
+
+        Args:
+            conversation_id: The Tavus conversation ID to terminate.
+
+        Returns:
+            True if the conversation was terminated or already gone.
+        """
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.delete(
+                f"{self.BASE_URL}/v2/conversations/{conversation_id}",
+                headers={"x-api-key": self.api_key},
+            )
+        logger.info(
+            "Tavus end_conversation %s: status=%s", conversation_id, resp.status_code
+        )
+        # 404 = already ended, still ok
+        return resp.status_code in (200, 204, 404)
+
     async def get_video_status(self, video_id: str) -> dict:
         """Check status of a generated video.
 

@@ -424,23 +424,49 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     }
   }, [conversationUrl, isConnecting, setTavusSession]);
 
+  const endCVISession = useCallback(async () => {
+    try {
+      await apiClient.post('/briefings/end-conversation');
+    } catch (err) {
+      console.error('Failed to end Tavus session:', err);
+    }
+    setConversationUrl(null);
+    setIsConnecting(false);
+    setIsBriefingPlaying(false);
+    setTavusSession({ status: 'idle', id: null, roomUrl: null });
+  }, [setTavusSession]);
+
+  // Cleanup: terminate Tavus session when component unmounts (e.g. navigating away)
+  useEffect(() => {
+    return () => {
+      if (conversationUrl) {
+        apiClient.post('/briefings/end-conversation').catch(console.error);
+      }
+    };
+  }, [conversationUrl]);
+
   const handlePlayPause = useCallback(() => {
     if (!isBriefingPlaying && !conversationUrl) {
       // First play: start CVI conversation instead of just toggling state
       startCVISession();
       return;
     }
-    setIsBriefingPlaying((prev) => {
-      if (prev) {
-        // Pausing: stop progress tracking
-        if (briefingProgressRef.current) {
-          clearInterval(briefingProgressRef.current);
-          briefingProgressRef.current = null;
-        }
+    if (isBriefingPlaying && conversationUrl) {
+      // Pausing an active CVI session — terminate to stop billing
+      if (briefingProgressRef.current) {
+        clearInterval(briefingProgressRef.current);
+        briefingProgressRef.current = null;
       }
-      return !prev;
-    });
-  }, [isBriefingPlaying, conversationUrl, startCVISession]);
+      endCVISession();
+      return;
+    }
+    if (!isBriefingPlaying && !conversationUrl) {
+      // Resume after pause — start a fresh CVI session
+      startCVISession();
+      return;
+    }
+    setIsBriefingPlaying((prev) => !prev);
+  }, [isBriefingPlaying, conversationUrl, startCVISession, endCVISession]);
 
   const handleRewind = useCallback(() => {
     // Cannot truly seek in a live Tavus stream; ask ARIA to repeat last point

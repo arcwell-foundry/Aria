@@ -67,6 +67,7 @@ class ModalityControllerImpl {
   async endSession(): Promise<void> {
     const store = useModalityStore.getState();
     const sessionId = store.tavusSession.id;
+    const isBriefing = store.tavusSession.sessionType === 'briefing';
 
     if (sessionId) {
       store.setTavusSession({ status: 'ending' });
@@ -75,6 +76,15 @@ class ModalityControllerImpl {
         await apiClient.post(`/video/sessions/${sessionId}/end`);
       } catch (err) {
         console.warn('[ModalityController] Failed to end Tavus session:', err);
+      }
+    }
+
+    // Also terminate the briefing CVI conversation to stop billing
+    if (isBriefing) {
+      try {
+        await apiClient.post('/briefings/end-conversation');
+      } catch (err) {
+        console.warn('[ModalityController] Failed to end briefing conversation:', err);
       }
     }
 
@@ -94,6 +104,7 @@ class ModalityControllerImpl {
   async switchToChat(): Promise<void> {
     const store = useModalityStore.getState();
     const sessionId = store.tavusSession.id;
+    const isBriefing = store.tavusSession.sessionType === 'briefing';
 
     if (sessionId) {
       store.setTavusSession({ status: 'ending' });
@@ -110,6 +121,15 @@ class ModalityControllerImpl {
         await apiClient.post(`/video/sessions/${sessionId}/end`);
       } catch (err) {
         console.warn('[ModalityController] Failed to end Tavus session:', err);
+      }
+    }
+
+    // Also terminate the briefing CVI conversation to stop billing
+    if (isBriefing) {
+      try {
+        await apiClient.post('/briefings/end-conversation');
+      } catch (err) {
+        console.warn('[ModalityController] Failed to end briefing conversation:', err);
       }
     }
 
