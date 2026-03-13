@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     # Gamma API (AI-powered presentations — optional)
     GAMMA_API_KEY: SecretStr | None = None
 
+    # Apollo API (people/company data enrichment — optional)
+    APOLLO_API_KEY: SecretStr | None = None
+
+    # Apollo BYOK encryption key (for encrypting customer-provided API keys)
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    APOLLO_ENCRYPTION_KEY: SecretStr | None = None
+
     # Application Settings
     APP_SECRET_KEY: SecretStr = SecretStr("")
     APP_ENV: Literal["development", "staging", "production"] = "development"
@@ -193,6 +200,16 @@ class Settings(BaseSettings):
     def gamma_configured(self) -> bool:
         """Check if Gamma API is configured for AI-powered presentations."""
         return bool(self.GAMMA_API_KEY and self.GAMMA_API_KEY.get_secret_value())
+
+    @property
+    def apollo_configured(self) -> bool:
+        """Check if Apollo API is configured for people/company data enrichment."""
+        return bool(self.APOLLO_API_KEY and self.APOLLO_API_KEY.get_secret_value())
+
+    @property
+    def apollo_encryption_configured(self) -> bool:
+        """Check if Apollo BYOK encryption is configured for securing customer API keys."""
+        return bool(self.APOLLO_ENCRYPTION_KEY and self.APOLLO_ENCRYPTION_KEY.get_secret_value())
 
     @property
     def thesys_configured(self) -> bool:

@@ -135,6 +135,7 @@ class HunterAgent(SkillAwareAgent):
         """
         self._company_cache: dict[str, Any] = {}
         self._exa_provider: Any = None
+        self._apollo_provider: Any = None
         self._resource_status: list[dict[str, Any]] = []  # Tool connectivity status
         self._instruction_detector = InstructionDetector(llm_client=None)
         # Skill knowledge loaded per-execution
@@ -164,6 +165,35 @@ class HunterAgent(SkillAwareAgent):
             except Exception as e:
                 logger.warning("HunterAgent: Failed to initialize ExaEnrichmentProvider: %s", e)
         return self._exa_provider
+
+    def _get_apollo_provider(self, company_id: str | None = None) -> Any:
+        """Lazily initialize and return the ApolloEnrichmentProvider.
+
+        Apollo provides superior B2B contact data compared to Exa for
+        people search. This method creates a provider instance with
+        credit metering context.
+
+        Args:
+            company_id: Optional company UUID for credit metering.
+                       If not provided, uses user_id for basic tracking.
+
+        Returns:
+            ApolloEnrichmentProvider instance or None if initialization fails.
+        """
+        if self._apollo_provider is None:
+            try:
+                from src.agents.capabilities.enrichment_providers.apollo_provider import (
+                    ApolloEnrichmentProvider,
+                )
+
+                self._apollo_provider = ApolloEnrichmentProvider(
+                    company_id=company_id,
+                    user_id=self.user_id,
+                )
+                logger.info("HunterAgent: ApolloEnrichmentProvider initialized")
+            except Exception as e:
+                logger.warning("HunterAgent: Failed to initialize ApolloEnrichmentProvider: %s", e)
+        return self._apollo_provider
 
     async def _load_skill_knowledge(self) -> None:
         """Load lead gen skill knowledge at the start of discovery.
@@ -1150,15 +1180,17 @@ class HunterAgent(SkillAwareAgent):
         self,
         company_name: str,
         roles: list[str] | None = None,
+        company_domain: str | None = None,
     ) -> list[dict[str, Any]]:
         """Find contacts at a target company.
 
-        Tries Exa search_person for real contact data first,
-        then falls back to LLM-based suggestions.
+        Tries Apollo people_search first (FREE, superior B2B data),
+        then Exa search_person, then falls back to LLM-based suggestions.
 
         Args:
             company_name: Name of the company to find contacts for.
             roles: Optional list of role keywords to filter by (case-insensitive).
+            company_domain: Optional company domain for Apollo search.
 
         Returns:
             List of contacts at the company.
@@ -1167,7 +1199,57 @@ class HunterAgent(SkillAwareAgent):
             f"Finding contacts for '{company_name}'" + (f" with roles: {roles}" if roles else ""),
         )
 
-        # Strategy 1: Try Exa search_person for real contacts
+        # Strategy 1: Try Apollo people_search (FREE, best for B2B)
+        apollo = self._get_apollo_provider()
+        if apollo and settings.apollo_configured:
+            try:
+                # Use domain if available, otherwise skip Apollo (needs domain)
+                domain = company_domain or ""
+                if not domain:
+                    # Try to infer domain from company name
+                    domain = f"{company_name.lower().replace(' ', '')}.com"
+
+                target_titles = roles or [
+                    "VP Sales", "VP Business Development",
+                    "Director Business Development", "Director Sales",
+                    "Chief Commercial Officer", "Chief Operating Officer",
+                ]
+
+                apollo_contacts = await apollo.search_people(
+                    company_domain=domain,
+                    person_titles=target_titles[:5],
+                    person_seniorities=["vp", "director", "c_suite", "manager"],
+                    per_page=10,
+                )
+
+                if apollo_contacts:
+                    contacts: list[dict[str, Any]] = []
+                    for p in apollo_contacts:
+                        contacts.append({
+                            "name": p.get("name", ""),
+                            "first_name": p.get("first_name", ""),
+                            "last_name": p.get("last_name", ""),
+                            "title": p.get("title", ""),
+                            "email": p.get("email", ""),
+                            "linkedin_url": p.get("linkedin_url", ""),
+                            "seniority": p.get("seniority", ""),
+                            "department": self._infer_department(p.get("title", "")),
+                            "city": p.get("city", ""),
+                            "state": p.get("state", ""),
+                            "country": p.get("country", ""),
+                            "apollo_id": p.get("apollo_id", ""),
+                            "source": "apollo_search",
+                        })
+
+                    logger.info(
+                        f"Apollo search_people found {len(contacts)} contacts for '{company_name}'"
+                    )
+                    return contacts
+
+            except Exception as exc:
+                logger.warning(f"Apollo contact search failed for '{company_name}': {exc}")
+
+        # Strategy 2: Try Exa search_person for real contacts
         exa = self._get_exa_provider()
         if exa:
             try:
