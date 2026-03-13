@@ -291,6 +291,9 @@ class ApolloClient:
         """
         Get credit usage summary for a company.
 
+        Credits used is derived from apollo_credit_log (source of truth),
+        NOT from the credits_used_this_cycle cache on apollo_config.
+
         Args:
             company_id: The company's UUID.
 
@@ -309,18 +312,74 @@ class ApolloClient:
             }
 
         limit = config.get("monthly_credit_limit", 0)
-        used = config.get("credits_used_this_cycle", 0)
         reset_date = config.get("cycle_reset_date")
+        mode = config.get("mode", "luminone_provided")
+
+        # Derive credits_used from apollo_credit_log (source of truth)
+        actual_used = await self._sum_credits_from_log(company_id, reset_date)
 
         return {
             "configured": True,
             "limit": limit,
-            "used": used,
-            "remaining": max(0, limit - used),
+            "used": actual_used,
+            "remaining": max(0, limit - actual_used),
             "reset_date": reset_date,
-            "mode": config.get("mode", "luminone_provided"),
+            "mode": mode,
             "is_active": config.get("is_active", True),
         }
+
+    async def _sum_credits_from_log(
+        self, company_id: str, cycle_reset_date: str | None
+    ) -> int:
+        """
+        Sum credits consumed from apollo_credit_log for the current billing cycle.
+
+        This is the source of truth for credit usage. The credits_used_this_cycle
+        column on apollo_config is just a cache.
+
+        Args:
+            company_id: The company's UUID.
+            cycle_reset_date: The end/reset date of the current cycle.
+
+        Returns:
+            Total credits consumed in the current billing cycle.
+        """
+        try:
+            from dateutil.relativedelta import relativedelta
+
+            # Calculate cycle start from reset date
+            if cycle_reset_date:
+                if isinstance(cycle_reset_date, str):
+                    reset_dt = datetime.fromisoformat(cycle_reset_date.replace("Z", "+00:00"))
+                else:
+                    reset_dt = cycle_reset_date
+                # cycle_reset_date is the NEXT reset (1st of next month)
+                # so cycle_start is 1st of current month
+                cycle_start = (reset_dt - relativedelta(months=1)).date()
+            else:
+                # Default: 1st of current month
+                cycle_start = date.today().replace(day=1)
+
+            result = (
+                self._db.table("apollo_credit_log")
+                .select("credits_consumed")
+                .eq("company_id", company_id)
+                .gte("created_at", cycle_start.isoformat())
+                .execute()
+            )
+
+            if result.data:
+                return sum(row.get("credits_consumed", 0) for row in result.data)
+            return 0
+
+        except Exception as e:
+            logger.warning(
+                "Failed to sum credits from log for company %s, falling back to cache: %s",
+                company_id, e,
+            )
+            # Fallback to cache if log query fails
+            config = await self.get_config(company_id)
+            return config.get("credits_used_this_cycle", 0) if config else 0
 
     async def update_config(
         self,

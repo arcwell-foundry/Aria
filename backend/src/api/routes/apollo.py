@@ -32,16 +32,22 @@ class ApolloConfigResponse(BaseModel):
     billing_cycle_start: str | None = None
     billing_cycle_end: str | None = None
     has_byok_key: bool  # Whether a BYOK key is set (masked)
+    auto_enrich_on_approval: bool = False
+    default_reveal_emails: bool = True
+    default_reveal_phones: bool = False
 
 
 class ApolloConfigUpdateRequest(BaseModel):
     """Request model for updating Apollo configuration."""
 
-    mode: str = Field(..., pattern="^(byok|luminone_provided)$")
+    mode: str | None = Field(None, pattern="^(byok|luminone_provided)$")
     api_key: str | None = Field(None, max_length=200, description="Apollo API key for BYOK mode")
     monthly_credit_limit: int | None = Field(
         None, ge=0, le=100000, description="Credit limit for luminone_provided mode"
     )
+    auto_enrich_on_approval: bool | None = None
+    default_reveal_emails: bool | None = None
+    default_reveal_phones: bool | None = None
 
 
 class ApolloUsageResponse(BaseModel):
@@ -120,6 +126,9 @@ async def get_apollo_config(
                 "billing_cycle_start": None,
                 "billing_cycle_end": None,
                 "has_byok_key": False,
+                "auto_enrich_on_approval": False,
+                "default_reveal_emails": True,
+                "default_reveal_phones": False,
             }
 
         # Get config from database if company exists
@@ -140,6 +149,9 @@ async def get_apollo_config(
                 "billing_cycle_start": config.get("cycle_reset_date") if config else None,
                 "billing_cycle_end": None,  # Calculated from cycle_reset_date + 1 month
                 "has_byok_key": bool(config.get("encrypted_api_key")) if config else False,
+                "auto_enrich_on_approval": config.get("auto_enrich_on_approval", False) if config else False,
+                "default_reveal_emails": config.get("default_reveal_emails", True) if config else True,
+                "default_reveal_phones": config.get("default_reveal_phones", False) if config else False,
             }
 
         # Default: LuminOne-provided mode with master key
@@ -152,6 +164,9 @@ async def get_apollo_config(
             "billing_cycle_start": None,
             "billing_cycle_end": None,
             "has_byok_key": False,
+            "auto_enrich_on_approval": False,
+            "default_reveal_emails": True,
+            "default_reveal_phones": False,
         }
 
     except Exception as e:
@@ -192,12 +207,15 @@ async def update_apollo_config(
 
         client = ApolloClient()
 
-        # Validate BYOK mode requires API key
+        # Validate BYOK mode requires API key only when switching modes
         if request.mode == "byok" and not request.api_key:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="API key required for BYOK mode",
-            )
+            # Check if they already have a BYOK key
+            existing = await client.get_config(company_id)
+            if not existing or not existing.get("encrypted_api_key"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="API key required for BYOK mode",
+                )
 
         # Update configuration
         await client.update_config(
@@ -205,16 +223,20 @@ async def update_apollo_config(
             mode=request.mode,
             api_key=request.api_key,
             monthly_credit_limit=request.monthly_credit_limit,
+            auto_enrich_on_approval=request.auto_enrich_on_approval,
+            default_reveal_emails=request.default_reveal_emails,
+            default_reveal_phones=request.default_reveal_phones,
         )
 
+        mode_msg = request.mode or "current"
         logger.info(
             "Apollo config updated for company %s: mode=%s",
             company_id,
-            request.mode,
+            mode_msg,
         )
 
         return {
-            "message": f"Apollo configuration updated to {request.mode} mode"
+            "message": f"Apollo configuration updated ({mode_msg} mode)"
         }
 
     except HTTPException:
