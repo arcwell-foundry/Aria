@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
-import Daily, { DailyCall } from '@daily-co/daily-js';
+import type { DailyCall } from '@daily-co/daily-js';
 import { useModalityStore } from '@/stores/modalityStore';
 
 export interface TavusAvatarHandle {
@@ -56,6 +56,7 @@ const TavusAvatar = forwardRef<TavusAvatarHandle, TavusAvatarProps>(
 
       const start = async () => {
         try {
+          const Daily = (await import('@daily-co/daily-js')).default;
           call = Daily.createCallObject({
             audioSource: true,
             videoSource: false,

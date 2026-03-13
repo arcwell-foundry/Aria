@@ -27,6 +27,9 @@ export default defineConfig(async () => {
     server: {
       port: 3000,
     },
+    optimizeDeps: {
+      include: ['@daily-co/daily-js'],
+    },
     build: {
       rollupOptions: {
         output: {
