@@ -156,12 +156,12 @@ async def create_deck_from_context(
     deck_record = {
         "id": deck_id,
         "user_id": user_id,
-        "meeting_id": meeting_id,
+        "calendar_event_id": meeting_id,  # DB column is calendar_event_id, not meeting_id
         "title": f"Presentation for {meeting_title}",
         "status": "completed",
         "source": "meeting_context",
         "gamma_id": result.gamma_id,
-        "gamma_url": result.gamma_url,
+        "deck_url": result.gamma_url,  # DB column is deck_url, not gamma_url
         "created_at": datetime.now(UTC).isoformat(),
         "completed_at": datetime.now(UTC).isoformat(),
     }
@@ -272,7 +272,7 @@ async def create_adhoc_deck(
         "status": "completed",
         "source": "adhoc",
         "gamma_id": result.gamma_id,
-        "gamma_url": result.gamma_url,
+        "deck_url": result.gamma_url,  # DB column is deck_url, not gamma_url
         "created_at": datetime.now(UTC).isoformat(),
         "completed_at": datetime.now(UTC).isoformat(),
     }
@@ -340,7 +340,7 @@ async def list_user_decks(
     )
 
     if calendar_event_id:
-        query = query.eq("meeting_id", calendar_event_id)
+        query = query.eq("calendar_event_id", calendar_event_id)  # DB column is calendar_event_id
 
     result = query.execute()
     return result.data or []

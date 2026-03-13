@@ -264,7 +264,7 @@ async def list_decks(
             calendar_event_id=deck.get("calendar_event_id"),
             title=deck["title"],
             status=deck["status"],
-            gamma_url=deck.get("gamma_url"),
+            gamma_url=deck.get("deck_url"),  # DB column is deck_url, but API exposes gamma_url
             gamma_id=deck.get("gamma_id"),
             pptx_url=deck.get("pptx_url"),
             created_at=deck["created_at"],
