@@ -1718,10 +1718,10 @@ class HunterAgent(SkillAwareAgent):
             if company_name:
                 signal_result = (
                     db.table("market_signals")
-                    .select("signal_type, relevance_score, created_at")
+                    .select("signal_type, relevance_score, detected_at")
                     .eq("user_id", self.user_id)
                     .ilike("company_name", f"%{company_name}%")
-                    .order("created_at", desc=True)
+                    .order("detected_at", desc=True)
                     .limit(10)
                     .execute()
                 )
@@ -1897,7 +1897,7 @@ class HunterAgent(SkillAwareAgent):
                 "company_name": company_name,
                 "lifecycle_stage": "lead",
                 "status": "active",
-                "health_score": total_score,
+                "health_score": int(total_score),
                 "metadata": {
                     "source": "hunter_discovery",
                     "discovery_score": discovery_score,

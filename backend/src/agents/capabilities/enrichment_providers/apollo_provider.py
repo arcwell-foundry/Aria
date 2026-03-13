@@ -128,7 +128,7 @@ class ApolloEnrichmentProvider(BaseEnrichmentProvider):
                 response = await http.post(
                     f"{APOLLO_BASE_URL}/mixed_people/search",
                     headers={
-                        "Api-Key": api_key,
+                        "x-api-key": api_key,
                         "Content-Type": "application/json",
                     },
                     json={
@@ -268,7 +268,7 @@ class ApolloEnrichmentProvider(BaseEnrichmentProvider):
                 response = await http.post(
                     f"{APOLLO_BASE_URL}/people/match",
                     headers={
-                        "Api-Key": api_key,
+                        "x-api-key": api_key,
                         "Content-Type": "application/json",
                     },
                     json=payload,
@@ -456,7 +456,7 @@ class ApolloEnrichmentProvider(BaseEnrichmentProvider):
                 response = await http.post(
                     f"{APOLLO_BASE_URL}/organizations/enrich",
                     headers={
-                        "Api-Key": api_key,
+                        "x-api-key": api_key,
                         "Content-Type": "application/json",
                     },
                     json={"name": company_name},
@@ -565,7 +565,7 @@ class ApolloEnrichmentProvider(BaseEnrichmentProvider):
             async with httpx.AsyncClient() as http:
                 response = await http.get(
                     f"{APOLLO_BASE_URL}/organizations/{organization_id}/job_postings",
-                    headers={"Api-Key": api_key},
+                    headers={"x-api-key": api_key},
                     params=params,
                     timeout=20.0,
                 )
@@ -618,7 +618,7 @@ class ApolloEnrichmentProvider(BaseEnrichmentProvider):
             async with httpx.AsyncClient() as http:
                 response = await http.get(
                     f"{APOLLO_BASE_URL}/users/api_usage",
-                    headers={"Api-Key": api_key},
+                    headers={"x-api-key": api_key},
                     timeout=10.0,
                 )
                 return response.status_code == 200
