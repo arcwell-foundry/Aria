@@ -231,9 +231,9 @@ function groupContent(richContent: RichContent[]): GroupedContent {
               type: 'signal_card',
               data: {
                 id: s.id,
-                company_name: '',
-                signal_type: 'engagement',
-                headline: cleanText(`${s.title}: ${s.summary}`),
+                company_name: s.company_name || '',
+                signal_type: s.type || 'engagement',
+                headline: cleanText(s.title || `${s.company_name || 'Unknown'} — new signal detected`),
               },
             });
           }

@@ -93,11 +93,8 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
         const endpoint = isReplay ? '/briefings/replay' : '/briefings/deliver';
         const response = await apiClient.post<{
           mode?: 'text_only' | 'video';
-          content?: {
-            summary?: string;
-            rich_content?: Array<{ type: string; data: Record<string, unknown> }>;
-            suggestions?: string[];
-          };
+          content?: Record<string, unknown>;
+          briefing?: Record<string, unknown>;
           message?: string;
           status: string;
           error?: string;
@@ -105,26 +102,32 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
 
         if (cancelled) return;
 
-        // Handle text-only mode - render directly to conversation store
-        if (response.data.mode === 'text_only' && response.data.content) {
-          setTextOnlyMode(true);
-          const { content } = response.data;
+        // Read briefing data from either key — backend returns "content" in
+        // text_only mode and "briefing" in video mode
+        const briefingData = response.data.content ?? response.data.briefing;
+
+        if (briefingData && typeof briefingData === 'object') {
+          if (response.data.mode === 'text_only') {
+            setTextOnlyMode(true);
+          }
+
+          const summary = (briefingData.summary as string) || 'Your daily briefing is ready.';
+          const suggestions = (briefingData.suggestions as string[]) || ['Show me details', 'Dismiss'];
 
           // Add briefing as ARIA message with a single 'briefing' wrapper
           // so BriefingTranscriptView activates (collapsible sections).
           addMessage({
             role: 'aria',
-            content: content.summary || 'Your daily briefing is ready.',
-            rich_content: [{ type: 'briefing', data: content as Record<string, unknown> }],
+            content: summary,
+            rich_content: [{ type: 'briefing', data: briefingData }],
             ui_commands: [],
-            suggestions: content.suggestions || ['Show me details', 'Dismiss'],
+            suggestions,
           });
 
-          if (content.suggestions?.length) {
-            setCurrentSuggestions(content.suggestions);
+          if (suggestions.length) {
+            setCurrentSuggestions(suggestions);
           }
         }
-        // Video mode: briefing arrives via WebSocket, no action needed here
       } catch (err) {
         if (cancelled) return;
         // Axios interceptor already retried — this is the final failure.
