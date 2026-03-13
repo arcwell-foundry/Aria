@@ -276,6 +276,22 @@ class PreMeetingContextService:
                 ):
                     best_email_context = email_ctx
 
+        # Fallback: match by domain if no direct email match found
+        if best_email_context is None:
+            for email in external_emails:
+                domain = email.split("@")[1] if "@" in email else ""
+                if not domain:
+                    continue
+                email_ctx = await self._get_email_context_by_domain(user_id, domain, email)
+                if email_ctx is not None:
+                    name = email_ctx.pop("contact_name", None) or email.split("@")[0]
+                    attendees_with_context.append({"name": name, "email": email})
+                    if best_email_context is None or (
+                        email_ctx.get("total_emails", 0)
+                        > best_email_context.get("total_emails", 0)
+                    ):
+                        best_email_context = email_ctx
+
         meeting_title = event.get("title") or "Meeting"
         best_contact = best_email_context.get("contact_email") if best_email_context else None
         best_count = best_email_context.get("total_emails", 0) if best_email_context else 0
@@ -430,3 +446,58 @@ class PreMeetingContextService:
             "draft_id": pending_draft_id,
             "pipeline_context": pipeline_context,
         }
+
+    async def _get_email_context_by_domain(
+        self,
+        user_id: str,
+        domain: str,
+        attendee_email: str,
+    ) -> dict[str, Any] | None:
+        """Fallback: find email context by matching the attendee's email domain.
+
+        Used when no exact sender_email match exists in email_scan_log.
+        Searches for any emails from the same domain.
+
+        Args:
+            user_id: The user's UUID.
+            domain: The email domain to match (e.g. "acme.com").
+            attendee_email: The original attendee email (used as contact_email in result).
+
+        Returns:
+            Dict with email context or None if no domain match found.
+        """
+        try:
+            scan_result = (
+                self._db.table("email_scan_log")
+                .select("subject, scanned_at, sender_email, sender_name")
+                .eq("user_id", user_id)
+                .ilike("sender_email", f"%@{domain}")
+                .order("scanned_at", desc=True)
+                .limit(10)
+                .execute()
+            )
+            if not scan_result.data:
+                return None
+
+            total_emails = len(scan_result.data)
+            latest = scan_result.data[0]
+            contact_name = latest.get("sender_name")
+            latest_date = latest.get("scanned_at")
+
+            return {
+                "contact_name": contact_name,
+                "contact_email": attendee_email.lower().strip(),
+                "total_emails": total_emails,
+                "latest_subject": latest.get("subject"),
+                "latest_date": latest_date,
+                "latest_date_relative": _format_relative_date(latest_date) if latest_date else None,
+                "has_pending_draft": False,
+                "draft_id": None,
+                "pipeline_context": None,
+            }
+        except Exception:
+            logger.debug(
+                "Domain fallback query failed for %s", domain,
+                exc_info=True,
+            )
+            return None
