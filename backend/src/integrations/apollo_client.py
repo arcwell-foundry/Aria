@@ -69,7 +69,7 @@ class ApolloClient:
         """
         try:
             result = (
-                await self._db.table("apollo_config")
+                self._db.table("apollo_config")
                 .select("*")
                 .eq("company_id", company_id)
                 .maybe_single()
@@ -147,7 +147,7 @@ class ApolloClient:
         """
         try:
             result = (
-                await self._db.table("vendor_api_pricing")
+                self._db.table("vendor_api_pricing")
                 .select("credits_per_call, cost_cents_per_credit")
                 .eq("vendor", "apollo")
                 .eq("action", action)
@@ -226,7 +226,7 @@ class ApolloClient:
 
             # Get full pricing snapshot for audit
             pricing_result = (
-                await self._db.table("vendor_api_pricing")
+                self._db.table("vendor_api_pricing")
                 .select("*")
                 .eq("vendor", "apollo")
                 .eq("action", action_type)
@@ -236,7 +236,7 @@ class ApolloClient:
             pricing_snapshot = pricing_result.data if pricing_result else {}
 
             # 1. Write to apollo_credit_log (customer-facing credits)
-            await (
+            (
                 self._db.table("apollo_credit_log")
                 .insert(
                     {
@@ -256,7 +256,7 @@ class ApolloClient:
             )
 
             # 2. Write to api_usage_tracking (internal COGS tracking)
-            await self._db.rpc(
+            self._db.rpc(
                 "increment_api_usage",
                 {
                     "p_user_id": user_id,
@@ -270,7 +270,7 @@ class ApolloClient:
 
             # 3. Update credit counter (only for luminone_provided mode)
             if mode == "luminone_provided" and credits > 0:
-                await self._db.rpc(
+                self._db.rpc(
                     "increment_apollo_credits",
                     {"p_company_id": company_id, "p_credits": credits},
                 ).execute()
@@ -380,7 +380,7 @@ class ApolloClient:
                 updates["default_reveal_phones"] = default_reveal_phones
 
             result = (
-                await self._db.table("apollo_config")
+                self._db.table("apollo_config")
                 .update(updates)
                 .eq("company_id", company_id)
                 .execute()
@@ -409,7 +409,7 @@ class ApolloClient:
                 next_reset = date(today.year, today.month + 1, 1)
 
             result = (
-                await self._db.table("apollo_config")
+                self._db.table("apollo_config")
                 .update(
                     {
                         "credits_used_this_cycle": 0,

@@ -127,16 +127,19 @@ async def get_apollo_config(
             config = await client.get_config(company_id)
             usage = await client.get_usage_summary(company_id)
 
+            # Map usage keys to expected response format
+            credits_used = usage.get("used", 0)
+            monthly_limit = config.get("monthly_credit_limit", 1000) if config else 1000
+
             return {
                 "is_configured": True,
-                "mode": config.get("mode", "luminone_provided"),
-                "monthly_credit_limit": config.get("monthly_credit_limit", 1000),
-                "credits_used": usage.get("credits_used", 0),
-                "credits_remaining": config.get("monthly_credit_limit", 1000)
-                - usage.get("credits_used", 0),
-                "billing_cycle_start": config.get("billing_cycle_start"),
-                "billing_cycle_end": config.get("billing_cycle_end"),
-                "has_byok_key": bool(config.get("encrypted_api_key")),
+                "mode": config.get("mode", "luminone_provided") if config else "luminone_provided",
+                "monthly_credit_limit": monthly_limit,
+                "credits_used": credits_used,
+                "credits_remaining": monthly_limit - credits_used,
+                "billing_cycle_start": config.get("cycle_reset_date") if config else None,
+                "billing_cycle_end": None,  # Calculated from cycle_reset_date + 1 month
+                "has_byok_key": bool(config.get("encrypted_api_key")) if config else False,
             }
 
         # Default: LuminOne-provided mode with master key
