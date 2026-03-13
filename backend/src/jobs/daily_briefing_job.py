@@ -208,7 +208,9 @@ async def run_daily_briefing_job() -> dict[str, Any]:
     1. Check if their local time has passed their configured briefing_time
     2. Check if today's briefing already exists (skip if so)
     3. Call BriefingService.generate_briefing (includes Scout signal data + notification)
-    4. Optionally send a briefing-ready email
+    4. Write to memory_briefing_queue for delivery tracking
+    5. Create video briefing session if enabled, wire URL back to queue and daily_briefings
+    6. Optionally send a briefing-ready email
 
     Returns:
         Summary dict with users_checked, generated, skipped, and errors.
@@ -266,6 +268,30 @@ async def run_daily_briefing_job() -> dict[str, Any]:
                 },
             )
 
+            # Write to memory_briefing_queue for delivery tracking
+            script_text = content.get("summary", "")
+            queue_row_id = None
+            if script_text:
+                try:
+                    db = SupabaseClient.get_client()
+                    queue_result = db.table("memory_briefing_queue").insert({
+                        "user_id": user_id,
+                        "briefing_type": "morning",
+                        "items": {"script": script_text, "briefing_date": str(user_today)},
+                        "is_delivered": False,
+                    }).execute()
+                    queue_row_id = queue_result.data[0].get("id") if queue_result.data else None
+                    logger.info(
+                        "Written to memory_briefing_queue",
+                        extra={"user_id": user_id, "briefing_date": str(user_today), "queue_id": queue_row_id},
+                    )
+                except Exception as queue_err:
+                    logger.warning(
+                        "Failed to write to memory_briefing_queue: %s",
+                        queue_err,
+                        extra={"user_id": user_id},
+                    )
+
             # Deliver the briefing via user's preferred channel (chat/voice/avatar)
             # This updates delivery_method and delivered_at in daily_briefings
             delivery_result = await briefing_service.deliver_briefing(
@@ -282,8 +308,48 @@ async def run_daily_briefing_job() -> dict[str, Any]:
                     },
                 )
 
-            # Create video briefing session if enabled
-            await _maybe_create_video_briefing(user_id, user_today)
+            # Create video briefing session if enabled, wire URL back to queue and daily_briefings
+            tavus_url = await _maybe_create_video_briefing(user_id, user_today)
+
+            if tavus_url:
+                try:
+                    db = SupabaseClient.get_client()
+                    # Update memory_briefing_queue with the conversation URL
+                    if queue_row_id:
+                        db.table("memory_briefing_queue").update({
+                            "conversation_url": tavus_url,
+                            "is_delivered": True,
+                        }).eq("id", queue_row_id).execute()
+                        logger.info(
+                            "Updated memory_briefing_queue with Tavus URL",
+                            extra={"user_id": user_id, "queue_id": queue_row_id},
+                        )
+
+                    # Update daily_briefings content with tavus_conversation_url
+                    # Fetch current content, merge, and update
+                    brief_result = db.table("daily_briefings").select("content").eq(
+                        "user_id", user_id
+                    ).eq("briefing_date", str(user_today)).limit(1).execute()
+
+                    if brief_result.data:
+                        current_content = brief_result.data[0].get("content", {})
+                        if isinstance(current_content, str):
+                            import json
+                            current_content = json.loads(current_content)
+                        current_content["tavus_conversation_url"] = tavus_url
+                        db.table("daily_briefings").update({
+                            "content": current_content,
+                        }).eq("user_id", user_id).eq("briefing_date", str(user_today)).execute()
+                        logger.info(
+                            "Updated daily_briefings with Tavus URL",
+                            extra={"user_id": user_id, "briefing_date": str(user_today)},
+                        )
+                except Exception as update_err:
+                    logger.warning(
+                        "Failed to update Tavus URL in tables: %s",
+                        update_err,
+                        extra={"user_id": user_id, "tavus_url": tavus_url},
+                    )
 
             # Send email notification if enabled
             if user.get("notification_email", True):
@@ -362,12 +428,17 @@ async def _consume_briefing_queue(user_id: str) -> list[dict[str, Any]]:
         return []
 
 
-async def _maybe_create_video_briefing(user_id: str, briefing_date: date) -> None:
+async def _maybe_create_video_briefing(
+    user_id: str, briefing_date: date
+) -> str | None:
     """Create a Tavus video briefing session if the user has it enabled.
 
     Args:
         user_id: The user's UUID.
         briefing_date: Date of the briefing.
+
+    Returns:
+        The Tavus conversation URL if a session was created, None otherwise.
     """
     try:
         db = SupabaseClient.get_client()
@@ -382,10 +453,10 @@ async def _maybe_create_video_briefing(user_id: str, briefing_date: date) -> Non
         prefs = prefs_result.data[0] if prefs_result and prefs_result.data else None
 
         if not prefs:
-            return
+            return None
 
         if not prefs.get("video_briefing_enabled", False):
-            return
+            return None
 
         from src.services.briefing import BriefingService
 
@@ -393,12 +464,14 @@ async def _maybe_create_video_briefing(user_id: str, briefing_date: date) -> Non
         result = await briefing_service.create_video_briefing_session(user_id)
 
         if result.get("session_id"):
+            conversation_url = result.get("room_url")
             logger.info(
                 "Video briefing session created for daily briefing",
                 extra={
                     "user_id": user_id,
                     "session_id": result["session_id"],
                     "briefing_date": briefing_date.isoformat(),
+                    "conversation_url": conversation_url,
                 },
             )
 
@@ -418,12 +491,16 @@ async def _maybe_create_video_briefing(user_id: str, briefing_date: date) -> Non
                 },
             )
 
+            return conversation_url
+
     except Exception:
         logger.warning(
             "Video briefing creation failed for user %s",
             user_id,
             exc_info=True,
         )
+
+    return None
 
 
 async def run_startup_briefing_check() -> dict[str, Any]:
