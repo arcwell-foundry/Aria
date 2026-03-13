@@ -6,9 +6,10 @@ for one-way video generation and briefing-specific CVI sessions.
 """
 
 import logging
-import os
 
 import httpx
+
+from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +21,9 @@ class TavusClient:
     REPLICA_ID = "r5dc7c7d0bcb"
 
     def __init__(self) -> None:
-        self.api_key = os.getenv("TAVUS_API_KEY")
-        if not self.api_key:
+        if not settings.TAVUS_API_KEY:
             raise ValueError("TAVUS_API_KEY not set in environment")
+        self.api_key = settings.TAVUS_API_KEY.get_secret_value()
 
     async def create_video_briefing(self, script: str, briefing_date: str) -> dict:
         """Call Tavus /v2/videos to generate a one-way video from script.
@@ -123,7 +124,6 @@ class TavusClient:
                 "max_call_duration": 600,
                 "participant_left_timeout": 60,
                 "enable_recording": False,
-                "apply_conversation_rules": True,
             },
         }
 
