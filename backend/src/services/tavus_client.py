@@ -233,6 +233,12 @@ class TavusClient:
         if persona_id:
             payload["persona_id"] = persona_id
 
+        logger.info(
+            "Creating Tavus CVI conversation with persona_id=%s, replica_id=%s",
+            persona_id,
+            self.REPLICA_ID,
+        )
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 f"{self.BASE_URL}/v2/conversations",
