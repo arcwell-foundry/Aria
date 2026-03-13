@@ -14,6 +14,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from src.core.cache import cached
 from src.db.supabase import SupabaseClient
 
 logger = logging.getLogger(__name__)
@@ -150,6 +151,7 @@ class AutonomyCalibrationService:
 
         return auto_execute
 
+    @cached(ttl=60, key_func=lambda *args, **kwargs: f"autonomy_calc:{args[1] if len(args) > 1 else kwargs.get('user_id', '')}")
     async def calculate_autonomy_level(
         self,
         user_id: str,

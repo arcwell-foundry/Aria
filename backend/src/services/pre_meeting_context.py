@@ -87,12 +87,12 @@ class PreMeetingContextService:
 
         For each upcoming meeting:
         1. Get calendar events from calendar_events table
-        2. Extract attendee emails
+        2. Extract attendee emails (excluding the user's own email)
         3. Match against email_scan_log and email_drafts
         4. Enrich with pipeline context
 
         Only returns meetings where ARIA can add value (i.e., there is email
-        context for at least one attendee).
+        context for at least one external attendee).
 
         Args:
             user_id: The user's UUID.
@@ -107,14 +107,59 @@ class PreMeetingContextService:
         if not events:
             return []
 
+        # Get user's email to exclude from attendee matching
+        user_emails = await self._get_user_emails(user_id)
+
         # Step 2-4: Enrich each event with email context
         enriched: list[dict[str, Any]] = []
         for event in events:
-            meeting_result = await self._enrich_event(user_id, event)
+            meeting_result = await self._enrich_event(user_id, event, user_emails)
             if meeting_result is not None:
                 enriched.append(meeting_result)
 
         return enriched
+
+    async def _get_user_emails(self, user_id: str) -> set[str]:
+        """Get the authenticated user's email addresses to exclude from attendee matching.
+
+        Args:
+            user_id: The user's UUID.
+
+        Returns:
+            Set of lowercase email addresses belonging to the user.
+        """
+        emails: set[str] = set()
+        try:
+            result = (
+                self._db.table("user_profiles")
+                .select("email")
+                .eq("id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if result.data and result.data[0].get("email"):
+                emails.add(result.data[0]["email"].lower().strip())
+        except Exception:
+            logger.debug("Failed to get user email for attendee filtering", exc_info=True)
+
+        # Also check user_integrations for connected email accounts
+        try:
+            integrations = (
+                self._db.table("user_integrations")
+                .select("metadata")
+                .eq("user_id", user_id)
+                .in_("integration_type", ["gmail", "outlook"])
+                .eq("status", "active")
+                .execute()
+            )
+            for row in integrations.data or []:
+                meta = row.get("metadata") or {}
+                if isinstance(meta, dict) and meta.get("email"):
+                    emails.add(str(meta["email"]).lower().strip())
+        except Exception:
+            logger.debug("Failed to get integration emails for attendee filtering", exc_info=True)
+
+        return emails
 
     async def _get_upcoming_events(
         self,
@@ -156,15 +201,18 @@ class PreMeetingContextService:
         self,
         user_id: str,
         event: dict[str, Any],
+        user_emails: set[str] | None = None,
     ) -> dict[str, Any] | None:
         """Enrich a single calendar event with email context.
 
-        Returns None if no email context is available for any attendee
+        Returns None if no email context is available for any external attendee
         (i.e., ARIA can't add value for this meeting).
 
         Args:
             user_id: The user's UUID.
             event: Raw calendar event row.
+            user_emails: Set of the user's own email addresses to exclude
+                from attendee matching. If None, no filtering is applied.
 
         Returns:
             Enriched meeting dict or None.
@@ -184,6 +232,14 @@ class PreMeetingContextService:
         if not attendee_emails:
             return None
 
+        # Exclude the user's own email(s) from attendee matching.
+        # This prevents the user's email from dominating the email context
+        # (since it matches ALL meetings and has the most email history).
+        external_emails = [
+            e for e in attendee_emails
+            if not user_emails or e not in user_emails
+        ]
+
         # Parse meeting time
         start_time_str = event.get("start_time", "")
         try:
@@ -193,11 +249,11 @@ class PreMeetingContextService:
         except (ValueError, TypeError):
             return None
 
-        # Build attendee context — find email history for each attendee
+        # Build attendee context — find email history for each EXTERNAL attendee
         attendees_with_context: list[dict[str, Any]] = []
         best_email_context: dict[str, Any] | None = None
 
-        for email in attendee_emails:
+        for email in external_emails:
             email_ctx = await self._get_email_context_for_contact(user_id, email)
             if email_ctx is not None:
                 name = email_ctx.pop("contact_name", None) or email.split("@")[0]
@@ -211,18 +267,22 @@ class PreMeetingContextService:
                 ):
                     best_email_context = email_ctx
 
-        # Only return meetings where we have email context
+        # Only return meetings where we have email context for external attendees
         if best_email_context is None:
             return None
+
+        # Include all attendees (including user) for display, but email context
+        # is from external attendees only
+        all_attendees = attendees_with_context or [
+            {"name": e.split("@")[0], "email": e} for e in external_emails
+        ]
 
         return {
             "meeting_id": event.get("id"),
             "meeting_title": event.get("title") or "Meeting",
             "meeting_time": start_time_str,
             "time_until": _format_time_until(meeting_time),
-            "attendees": attendees_with_context or [
-                {"name": e.split("@")[0], "email": e} for e in attendee_emails
-            ],
+            "attendees": all_attendees,
             "email_context": best_email_context,
         }
 

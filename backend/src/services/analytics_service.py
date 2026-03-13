@@ -680,6 +680,7 @@ class AnalyticsService:
                 extra={"user_id": user_id},
             )
 
+    @cached(ttl=300, key_func=lambda *args, **kwargs: f"comms_analytics:{args[1] if len(args) > 1 else kwargs.get('user_id', '')}:{args[2] if len(args) > 2 else kwargs.get('days_back', 7)}")
     async def get_communications_analytics(
         self,
         user_id: str,

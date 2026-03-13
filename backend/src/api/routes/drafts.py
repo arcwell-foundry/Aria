@@ -27,7 +27,6 @@ from src.services.draft_service import get_draft_service
 from src.services.email_client_writer import DraftSaveError, get_email_client_writer
 from src.services.followup_tracker import get_followup_tracker
 from src.utils.company_aliases import normalize_company_name
-from src.utils.email_pipeline_linker import get_pipeline_context_for_email
 
 logger = logging.getLogger(__name__)
 
@@ -199,29 +198,8 @@ async def list_drafts(
     service = get_draft_service()
     drafts = await service.list_drafts(current_user.id, limit, status, include_dismissed)
 
-    # Enrich drafts with pipeline context (concurrent, non-blocking)
-    try:
-        import asyncio
-
-        db = SupabaseClient.get_client()
-        recipient_emails = list({d.get("recipient_email", "").lower() for d in drafts if d.get("recipient_email")})
-
-        async def _safe_pipeline_lookup(email: str) -> tuple[str, dict[str, Any] | None]:
-            try:
-                ctx = await get_pipeline_context_for_email(db, current_user.id, email)
-                return (email, ctx)
-            except Exception:
-                return (email, None)
-
-        pipeline_results = await asyncio.gather(
-            *[_safe_pipeline_lookup(e) for e in recipient_emails]
-        )
-        pipeline_cache = dict(pipeline_results)
-        for draft in drafts:
-            email = draft.get("recipient_email", "").lower()
-            draft["pipeline_context"] = pipeline_cache.get(email)
-    except Exception as e:
-        logger.warning("DRAFTS_API: Pipeline context enrichment failed: %s", e)
+    # Pipeline context and priority scoring removed from list endpoint for performance.
+    # These enrichments are available on GET /drafts/{id} (detail view) instead.
 
     logger.info("Drafts listed", extra={"user_id": current_user.id, "count": len(drafts)})
     return drafts
@@ -233,13 +211,14 @@ async def get_draft(current_user: CurrentUser, draft_id: str) -> dict[str, Any]:
 
     For reply drafts, enriches the response with the original incoming email
     from email_scan_log so users can see what they're replying to.
+    Also enriches with pipeline context (moved here from list endpoint for perf).
 
     Args:
         current_user: The authenticated user.
         draft_id: The ID of the draft to retrieve.
 
     Returns:
-        The email draft, optionally with original_email field for replies.
+        The email draft, optionally with original_email and pipeline_context fields.
 
     Raises:
         HTTPException: If draft not found.
@@ -256,6 +235,19 @@ async def get_draft(current_user: CurrentUser, draft_id: str) -> dict[str, Any]:
         original_email = await _get_original_email_for_draft(draft, current_user.id)
         if original_email:
             draft["original_email"] = original_email
+
+    # Enrich with pipeline context (on detail view only, not list)
+    recipient_email = draft.get("recipient_email")
+    if recipient_email:
+        try:
+            from src.utils.email_pipeline_linker import get_pipeline_context_for_email
+
+            db = SupabaseClient.get_client()
+            draft["pipeline_context"] = await get_pipeline_context_for_email(
+                db, current_user.id, recipient_email.lower()
+            )
+        except Exception:
+            draft["pipeline_context"] = None
 
     return draft
 

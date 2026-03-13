@@ -505,22 +505,29 @@ class DraftService:
 
                 grouped_results.append(draft)
 
-            # Compute priority scores for all grouped results
-            await self._compute_priority_scores(grouped_results, user_id)
+            # Sort by status priority then created_at DESC.
+            # Priority scoring (per-recipient sender context lookups) removed from
+            # list path for performance. Available on detail view instead.
+            _STATUS_PRIORITY = {
+                "pending_review": 3,
+                "draft": 2,
+                "approved": 1,
+                "saved_to_client": 0,
+                "sent": 0,
+                "failed": 0,
+            }
 
-            # Sort by priority_score DESC, then created_at DESC as tiebreaker
-            # Placeholder drafts (pending_review with placeholder emails) stay at bottom
             def _sort_key(d: dict[str, Any]) -> tuple[int, int, str]:
-                # Placeholder detection: pending_review with placeholder-like emails
                 recipient = d.get("recipient_email", "")
                 is_placeholder = (
                     d.get("status") == "pending_review"
                     and "placeholder" in recipient.lower()
                 )
+                status_priority = _STATUS_PRIORITY.get(d.get("status", ""), 0)
                 return (
-                    0 if is_placeholder else 1,  # non-placeholders first
-                    d.get("priority_score", 0),   # higher score first
-                    d.get("created_at", ""),       # newer first (ISO string sort)
+                    0 if is_placeholder else 1,
+                    status_priority,
+                    d.get("created_at", ""),
                 )
 
             grouped_results.sort(key=_sort_key, reverse=True)
