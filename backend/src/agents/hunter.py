@@ -140,6 +140,77 @@ def _is_consulting_or_advisory(name: str) -> bool:
     return has_consulting_keyword and not has_bio_keyword
 
 
+# Generic industry names that are NOT real companies
+_INVALID_COMPANY_NAMES = {
+    "life sciences industry", "biotech sector", "pharmaceutical industry",
+    "healthcare industry", "manufacturing sector", "bioprocessing industry",
+    "medical device industry", "clinical research", "drug development",
+    "biopharma industry", "life sciences", "biotech", "pharma",
+    "healthcare", "manufacturing", "industry", "sector",
+    "the life sciences industry", "the biotech sector",
+    "the pharmaceutical industry", "the healthcare industry",
+}
+
+# Single-word generic names that should be rejected
+_SINGLE_WORD_GENERIC = {
+    "biotech", "pharma", "healthcare", "manufacturing", "industry",
+    "biologics", "biosimilars", "generics", "diagnostics",
+}
+
+# Non-company domains (news sites, job boards, aggregators)
+_INVALID_DOMAINS = {
+    "proclinical.com", "indeed.com", "linkedin.com", "glassdoor.com",
+    "wikipedia.org", "crunchbase.com", "bloomberg.com", "reuters.com",
+    "fiercepharma.com", "biopharmadive.com", "pharmamanufacturing.com",
+    "genengnews.com", "biopharma-reporter.com", "evaluate.com",
+    "google.com", "youtube.com", "twitter.com", "facebook.com",
+    "ziprecruiter.com", "monster.com", "salary.com", "payscale.com",
+}
+
+
+def _validate_company(company_name: str, domain: str = "") -> bool:
+    """Validate that a company name is a real entity, not a category.
+
+    Checks against known generic industry names and non-company domains.
+    This validation is tenant-agnostic — no hardcoded user or company data.
+
+    Args:
+        company_name: The company name to validate.
+        domain: Optional domain to validate.
+
+    Returns:
+        True if the company appears valid, False if it should be rejected.
+    """
+    name_lower = company_name.strip().lower()
+
+    # Reject generic industry names
+    if name_lower in _INVALID_COMPANY_NAMES:
+        logger.warning("Rejected invalid company name: '%s'", company_name)
+        return False
+
+    # Reject single-word generic names
+    if len(name_lower.split()) == 1 and name_lower in _SINGLE_WORD_GENERIC:
+        logger.warning("Rejected single-word generic name: '%s'", company_name)
+        return False
+
+    # Reject if domain is a known non-company site
+    if domain:
+        domain_clean = (
+            domain.lower()
+            .replace("www.", "")
+            .replace("https://", "")
+            .replace("http://", "")
+            .split("/")[0]
+        )
+        if domain_clean in _INVALID_DOMAINS:
+            logger.warning(
+                "Rejected invalid domain: '%s' for '%s'", domain, company_name
+            )
+            return False
+
+    return True
+
+
 class HunterAgent(SkillAwareAgent):
     """Discovers and qualifies new leads based on ICP.
 
@@ -938,6 +1009,15 @@ class HunterAgent(SkillAwareAgent):
             f"- If a company name contains 'Consulting', 'Advisory', 'Partners' (without "
             f"'Life Sciences' or 'Bio'), 'McKinsey', 'Deloitte', 'Accenture', 'BCG', "
             f"'Trinity' (real estate), skip it.\n\n"
+            f"CRITICAL VALIDATION RULES:\n"
+            f"1. Every company name MUST be a specific organization (e.g., 'Catalent', 'AGC Biologics', 'Lonza').\n"
+            f"   NEVER return industry categories like 'Life Sciences Industry' or 'Biotech Sector'.\n"
+            f"2. Every company domain MUST be the company's own website (e.g., 'catalent.com', 'agcbio.com').\n"
+            f"   NEVER return news sites, job boards, or Wikipedia URLs.\n"
+            f"3. If the search results don't contain a real company matching the criteria, return an EMPTY array [].\n"
+            f"   It is better to return 0 leads than 1 fake lead.\n"
+            f"4. Verify the company type matches what was asked for. If the query mentions CDMO, "
+            f"the company must be a contract development and manufacturing organization.\n\n"
             f"For each company, provide:\n"
             f'- "name": the real company name (e.g. "Nautilus Biotechnology", not an article headline)\n'
             f'- "domain": company website domain if visible in the URL/content\n'
@@ -985,11 +1065,16 @@ class HunterAgent(SkillAwareAgent):
             if _is_consulting_or_advisory(name):
                 logger.info("[HUNTER] Filtered out non-manufacturer: %s", name)
                 continue
+            # Validate company name and domain are real entities
+            company_domain = c.get("domain", "")
+            if not _validate_company(name, company_domain):
+                logger.info("[HUNTER] Filtered out invalid company: %s (domain=%s)", name, company_domain)
+                continue
             seen_names.add(name.lower())
             companies.append(
                 {
                     "name": name,
-                    "domain": c.get("domain", ""),
+                    "domain": company_domain,
                     "description": c.get("description", ""),
                     "industry": c.get("industry", query),
                     "size": c.get("size", ""),

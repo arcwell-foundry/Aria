@@ -152,13 +152,24 @@ class ApolloClient:
                 .eq("vendor", "apollo")
                 .eq("action", action)
                 .eq("is_active", True)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            if result and result.data:
+            if result and result.data and len(result.data) > 0:
+                pricing = result.data[0]
+                logger.info(
+                    "Pricing lookup: vendor=apollo, action=%s, result=%s",
+                    action,
+                    pricing,
+                )
                 return (
-                    result.data.get("credits_per_call", 0),
-                    float(result.data.get("cost_cents_per_credit", 0)),
+                    pricing.get("credits_per_call", 0),
+                    float(pricing.get("cost_cents_per_credit", 0)),
+                )
+            else:
+                logger.info(
+                    "Pricing lookup: vendor=apollo, action=%s, no rows found — using defaults",
+                    action,
                 )
         except Exception as e:
             logger.warning(f"Failed to get Apollo pricing for {action}: {e}")
@@ -230,10 +241,10 @@ class ApolloClient:
                 .select("*")
                 .eq("vendor", "apollo")
                 .eq("action", action_type)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            pricing_snapshot = pricing_result.data if pricing_result else {}
+            pricing_snapshot = pricing_result.data[0] if (pricing_result and pricing_result.data) else {}
 
             # 1. Write to apollo_credit_log (customer-facing credits)
             (

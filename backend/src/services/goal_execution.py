@@ -2185,6 +2185,58 @@ class GoalExecutionService:
                 exc_info=True,
             )
 
+    # --- Company validation constants (tenant-agnostic, no hardcoded data) ---
+    _INVALID_COMPANY_NAMES = {
+        "life sciences industry", "biotech sector", "pharmaceutical industry",
+        "healthcare industry", "manufacturing sector", "bioprocessing industry",
+        "medical device industry", "clinical research", "drug development",
+        "biopharma industry", "life sciences", "biotech", "pharma",
+        "healthcare", "manufacturing", "industry", "sector",
+        "the life sciences industry", "the biotech sector",
+        "the pharmaceutical industry", "the healthcare industry",
+    }
+    _SINGLE_WORD_GENERIC = {
+        "biotech", "pharma", "healthcare", "manufacturing", "industry",
+        "biologics", "biosimilars", "generics", "diagnostics",
+    }
+    _INVALID_DOMAINS = {
+        "proclinical.com", "indeed.com", "linkedin.com", "glassdoor.com",
+        "wikipedia.org", "crunchbase.com", "bloomberg.com", "reuters.com",
+        "fiercepharma.com", "biopharmadive.com", "pharmamanufacturing.com",
+        "genengnews.com", "biopharma-reporter.com", "evaluate.com",
+        "google.com", "youtube.com", "twitter.com", "facebook.com",
+        "ziprecruiter.com", "monster.com", "salary.com", "payscale.com",
+    }
+
+    def _validate_company_for_persistence(self, company_name: str, domain: str = "") -> bool:
+        """Validate company name and domain before persisting to discovered_leads.
+
+        Rejects generic industry names and non-company domains.
+        Tenant-agnostic — no hardcoded user or company data.
+        """
+        name_lower = company_name.strip().lower()
+        if name_lower in self._INVALID_COMPANY_NAMES:
+            logger.info("[PERSIST-HUNTER] Filtered out invalid company name: '%s'", company_name)
+            return False
+        if len(name_lower.split()) == 1 and name_lower in self._SINGLE_WORD_GENERIC:
+            logger.info("[PERSIST-HUNTER] Filtered out single-word generic: '%s'", company_name)
+            return False
+        if domain:
+            domain_clean = (
+                domain.lower()
+                .replace("www.", "")
+                .replace("https://", "")
+                .replace("http://", "")
+                .split("/")[0]
+            )
+            if domain_clean in self._INVALID_DOMAINS:
+                logger.info(
+                    "[PERSIST-HUNTER] Filtered out invalid domain: '%s' for '%s'",
+                    domain, company_name,
+                )
+                return False
+        return True
+
     async def _persist_hunter_leads(
         self,
         user_id: str,
@@ -2261,12 +2313,19 @@ class GoalExecutionService:
             logger.debug("[PERSIST-HUNTER] Could not look up ICP profile, continuing with None", exc_info=True)
 
         persisted = 0
+        filtered_invalid = 0
         for lead_data in leads:
             company = lead_data.get("company", {})
             company_name = company.get("name", "Unknown")
             contacts = lead_data.get("contacts", [])
             raw_score = lead_data.get("fit_score", 0)
             fit_score = int(raw_score) if raw_score else 0
+
+            # Validate company name and domain before persisting
+            company_domain = company.get("domain", "") or company.get("website", "")
+            if not self._validate_company_for_persistence(company_name, company_domain):
+                filtered_invalid += 1
+                continue
 
             lead_id = str(uuid4())
 
@@ -2304,6 +2363,20 @@ class GoalExecutionService:
                 except Exception:
                     logger.debug("[PERSIST-HUNTER] Market signal lookup failed for %s", company_name)
                     signal_quality = {"signal_bonus": 0, "signals_found": [], "quality_tier": "icp_only"}
+
+            # Filter out low-quality leads (global default: 50)
+            # Future: read from signal_lead_config.min_signal_score per user
+            MIN_FIT_SCORE = 50
+            if fit_score < MIN_FIT_SCORE:
+                logger.info(
+                    "[PERSIST-HUNTER] Filtered low-quality lead: %s (score=%d, min=%d, goal=%s)",
+                    company_name,
+                    fit_score,
+                    MIN_FIT_SCORE,
+                    goal_id,
+                )
+                filtered_invalid += 1
+                continue
 
             score_breakdown = {
                 "icp_match": int(
@@ -2393,10 +2466,18 @@ class GoalExecutionService:
                     exc_info=True,
                 )
 
+        if filtered_invalid:
+            logger.warning(
+                "[PERSIST-HUNTER] Filtered %d leads with invalid company names/domains (goal=%s)",
+                filtered_invalid,
+                goal_id,
+            )
+
         logger.warning(
-            "[PERSIST-HUNTER] Persisted %d/%d discovered leads (goal=%s)",
+            "[PERSIST-HUNTER] Persisted %d/%d discovered leads, filtered_invalid=%d (goal=%s)",
             persisted,
             len(leads),
+            filtered_invalid,
             goal_id,
         )
 
