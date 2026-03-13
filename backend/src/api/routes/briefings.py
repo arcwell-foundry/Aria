@@ -448,7 +448,16 @@ async def get_today_briefing(
         if isinstance(pre_generated, dict):
             elapsed_ms = (time.time() - start) * 1000
             logger.info("[BRIEFING-TODAY] responded in %.0fms", elapsed_ms)
-            return {"briefing": pre_generated, "status": "ready"}
+            return {
+                "briefing": pre_generated,
+                "status": "ready",
+                "tavus_video_url": existing.get("tavus_video_url"),
+                "tavus_video_id": existing.get("tavus_video_id"),
+                "tavus_conversation_url": existing.get("tavus_conversation_url"),
+                "tavus_status": existing.get("tavus_status", "pending"),
+                "has_video": bool(existing.get("tavus_video_url")),
+                "has_script": bool(existing.get("tavus_script")),
+            }
 
     # No briefing yet — return empty default instead of generating
     elapsed_ms = (time.time() - start) * 1000
@@ -457,7 +466,13 @@ async def get_today_briefing(
         elapsed_ms,
         extra={"user_id": current_user.id},
     )
-    return {"briefing": None, "status": "not_generated"}
+    return {
+        "briefing": None,
+        "status": "not_generated",
+        "has_video": False,
+        "has_script": False,
+        "tavus_status": "pending",
+    }
 
 
 @router.get("/latest")
@@ -1349,6 +1364,176 @@ async def deliver_briefing(
         "message": "Briefing generation failed. Please try refreshing.",
         "status": "delivered",
     }
+
+
+# ── POST /briefings/generate-video ────────────────────────────────────────
+@router.post("/generate-video")
+async def generate_briefing_video(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Trigger Tavus async video generation for today's briefing script."""
+    from src.db.supabase import SupabaseClient
+
+    today_str = date.today().isoformat()
+    db = SupabaseClient.get_client()
+
+    result = (
+        db.table("daily_briefings")
+        .select("*")
+        .eq("user_id", current_user.id)
+        .eq("briefing_date", today_str)
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="No briefing found for today")
+
+    briefing = result.data[0]
+    script = briefing.get("tavus_script") or (briefing.get("content") or {}).get(
+        "tavus_script", ""
+    )
+
+    if not script:
+        raise HTTPException(
+            status_code=400, detail="No script ready — run briefing generation first"
+        )
+
+    if briefing.get("tavus_video_url"):
+        return {
+            "status": "already_generated",
+            "video_url": briefing["tavus_video_url"],
+            "video_id": briefing.get("tavus_video_id"),
+        }
+
+    try:
+        from src.services.tavus_client import TavusClient
+
+        client = TavusClient()
+        data = await client.create_video_briefing(script, today_str)
+
+        video_id = data.get("video_id")
+        hosted_url = data.get("hosted_url")
+
+        db.table("daily_briefings").update(
+            {
+                "tavus_video_id": video_id,
+                "tavus_video_url": hosted_url,
+                "tavus_status": "video_generating",
+            }
+        ).eq("id", briefing["id"]).execute()
+
+        return {
+            "status": "generating",
+            "video_id": video_id,
+            "video_url": hosted_url,
+            "message": "Video generating — check back in 2-3 minutes",
+        }
+    except Exception as e:
+        logger.error("Tavus video generation failed: %s", e)
+        raise HTTPException(
+            status_code=500, detail=f"Video generation failed: {e!s}"
+        )
+
+
+# ── POST /briefings/start-conversation ────────────────────────────────────
+@router.post("/start-conversation")
+async def start_briefing_conversation(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Create or return a live Tavus CVI session for today's briefing."""
+    from src.db.supabase import SupabaseClient
+
+    today_str = date.today().isoformat()
+    db = SupabaseClient.get_client()
+
+    result = (
+        db.table("daily_briefings")
+        .select("*")
+        .eq("user_id", current_user.id)
+        .eq("briefing_date", today_str)
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="No briefing found for today")
+
+    briefing = result.data[0]
+
+    # Reuse existing live session
+    if briefing.get("tavus_conversation_url"):
+        return {
+            "status": "existing",
+            "conversation_url": briefing["tavus_conversation_url"],
+            "conversation_id": briefing.get("tavus_conversation_id"),
+        }
+
+    try:
+        from src.services.tavus_client import TavusClient
+
+        client = TavusClient()
+        data = await client.create_cvi_conversation(
+            briefing_content=briefing.get("content") or {},
+            user_name="Dhruv",
+        )
+
+        conv_url = data.get("conversation_url")
+        conv_id = data.get("conversation_id")
+
+        db.table("daily_briefings").update(
+            {
+                "tavus_conversation_id": conv_id,
+                "tavus_conversation_url": conv_url,
+                "tavus_status": "conversation_active",
+            }
+        ).eq("id", briefing["id"]).execute()
+
+        # Update memory_briefing_queue with conversation URL
+        try:
+            db.table("memory_briefing_queue").update(
+                {"conversation_url": conv_url}
+            ).eq("user_id", current_user.id).eq("briefing_type", "morning").eq(
+                "is_delivered", False
+            ).execute()
+        except Exception as queue_err:
+            logger.warning(
+                "Failed to update memory_briefing_queue with conv URL: %s", queue_err
+            )
+
+        return {
+            "status": "created",
+            "conversation_url": conv_url,
+            "conversation_id": conv_id,
+        }
+    except Exception as e:
+        logger.error("Tavus CVI creation failed: %s", e)
+        raise HTTPException(
+            status_code=500, detail=f"Conversation creation failed: {e!s}"
+        )
+
+
+# ── GET /briefings/video-status/{video_id} ────────────────────────────────
+@router.get("/video-status/{video_id}")
+async def get_briefing_video_status(
+    video_id: str,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    """Poll Tavus for video generation status."""
+    try:
+        from src.services.tavus_client import TavusClient
+
+        client = TavusClient()
+        data = await client.get_video_status(video_id)
+
+        status = data.get("status")
+        hosted_url = data.get("hosted_url") or data.get("download_url")
+
+        return {
+            "status": status,
+            "video_url": hosted_url,
+            "ready": status == "ready",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/replay")

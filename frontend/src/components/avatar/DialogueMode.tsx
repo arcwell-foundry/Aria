@@ -70,6 +70,18 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   const [textOnlyMode, setTextOnlyMode] = useState(false);
   const [briefingFailed, setBriefingFailed] = useState(false);
 
+  // Tavus video/conversation state
+  const [conversationUrl, setConversationUrl] = useState<string | null>(null);
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
+  const setTavusSession = useModalityStore((s) => s.setTavusSession);
+  const [briefingMeta, setBriefingMeta] = useState<{
+    hasVideo: boolean;
+    hasScript: boolean;
+    videoUrl: string | null;
+    videoId: string | null;
+    tavusStatus: string;
+  }>({ hasVideo: false, hasScript: false, videoUrl: null, videoId: null, tavusStatus: 'pending' });
+
   const clearMessages = useConversationStore((s) => s.clearMessages);
 
   // Load briefing transcript on page mount.
@@ -111,10 +123,24 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
           const response = await apiClient.get<{
             briefing: Record<string, unknown> | null;
             status: string;
+            has_video?: boolean;
+            has_script?: boolean;
+            tavus_video_url?: string | null;
+            tavus_video_id?: string | null;
+            tavus_status?: string;
           }>('/briefings/today');
 
           if (cancelled) return;
           briefingData = response.data.briefing;
+
+          // Extract Tavus metadata
+          setBriefingMeta({
+            hasVideo: response.data.has_video || false,
+            hasScript: response.data.has_script || false,
+            videoUrl: response.data.tavus_video_url || null,
+            videoId: response.data.tavus_video_id || null,
+            tavusStatus: response.data.tavus_status || 'pending',
+          });
         }
 
         if (briefingData && typeof briefingData === 'object') {
@@ -391,7 +417,88 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
     return id;
   }, [activeConversationId, setActiveConversation]);
 
+  const handleGenerateVideo = useCallback(async () => {
+    setIsGeneratingVideo(true);
+    try {
+      const res = await apiClient.post<{
+        video_id?: string;
+        video_url?: string;
+        status: string;
+      }>('/briefings/generate-video');
+      const { video_id, video_url } = res.data;
+      setBriefingMeta((prev) => ({
+        ...prev,
+        videoId: video_id || null,
+        videoUrl: video_url || null,
+        tavusStatus: 'video_generating',
+      }));
+      // Poll for ready status every 15s for up to 5 minutes
+      if (video_id) {
+        let attempts = 0;
+        const poll = setInterval(async () => {
+          attempts++;
+          if (attempts > 20) {
+            clearInterval(poll);
+            return;
+          }
+          try {
+            const statusRes = await apiClient.get<{
+              status: string;
+              video_url?: string;
+              ready: boolean;
+            }>(`/briefings/video-status/${video_id}`);
+            if (statusRes.data.ready && statusRes.data.video_url) {
+              setBriefingMeta((prev) => ({
+                ...prev,
+                hasVideo: true,
+                videoUrl: statusRes.data.video_url || null,
+                tavusStatus: 'video_ready',
+              }));
+              clearInterval(poll);
+            }
+          } catch {
+            // Polling error — continue trying
+          }
+        }, 15000);
+      }
+    } catch (err) {
+      console.error('Video generation failed:', err);
+    } finally {
+      setIsGeneratingVideo(false);
+    }
+  }, []);
+
+  const handleStartConversation = useCallback(async () => {
+    try {
+      setIsBriefingPlaying(true);
+      const res = await apiClient.post<{
+        conversation_url?: string;
+        conversation_id?: string;
+        status: string;
+      }>('/briefings/start-conversation');
+      const convUrl = res.data.conversation_url;
+      if (convUrl) {
+        setConversationUrl(convUrl);
+        // Update the modality store so AvatarContainer shows the CVI iframe
+        setTavusSession({
+          id: res.data.conversation_id || null,
+          roomUrl: convUrl,
+          status: 'active',
+          sessionType: 'briefing',
+        });
+      }
+    } catch (err) {
+      console.error('CVI start failed:', err);
+      setIsBriefingPlaying(false);
+    }
+  }, [setTavusSession]);
+
   const handlePlayPause = useCallback(() => {
+    if (!isBriefingPlaying && !conversationUrl) {
+      // First play: start CVI conversation instead of just toggling state
+      handleStartConversation();
+      return;
+    }
     setIsBriefingPlaying((prev) => {
       if (prev) {
         // Pausing: stop progress tracking
@@ -402,7 +509,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
       }
       return !prev;
     });
-  }, []);
+  }, [isBriefingPlaying, conversationUrl, handleStartConversation]);
 
   const handleRewind = useCallback(() => {
     // Cannot truly seek in a live Tavus stream; ask ARIA to repeat last point
@@ -509,6 +616,31 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
                       onForward={handleForward}
                     />
                   </div>
+                )}
+                {/* Generate video button — show when script ready but no video yet */}
+                {isBriefing && briefingMeta.hasScript && !briefingMeta.hasVideo && !conversationUrl && (
+                  <button
+                    onClick={handleGenerateVideo}
+                    disabled={isGeneratingVideo || briefingMeta.tavusStatus === 'video_generating'}
+                    className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2
+                               bg-[#2E66FF] hover:bg-[#2E66FF]/80 disabled:opacity-50
+                               text-white text-xs rounded-full whitespace-nowrap transition-colors"
+                  >
+                    {isGeneratingVideo || briefingMeta.tavusStatus === 'video_generating'
+                      ? 'Generating video...'
+                      : '\u25B6 Generate Video Briefing'}
+                  </button>
+                )}
+                {/* Start conversation button — show when briefing loaded and not yet in CVI */}
+                {isBriefing && !isBriefingPlaying && !conversationUrl && (
+                  <button
+                    onClick={handleStartConversation}
+                    className="absolute bottom-16 left-1/2 -translate-x-1/2 px-5 py-2.5
+                               bg-[#2E66FF] hover:bg-[#2E66FF]/80
+                               text-white text-sm font-medium rounded-full whitespace-nowrap transition-colors"
+                  >
+                    Start Live Briefing
+                  </button>
                 )}
               </div>
 
