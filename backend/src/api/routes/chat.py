@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -32,6 +33,9 @@ class ChatRequest(BaseModel):
     )
     memory_types: list[str] | None = Field(
         None, description="Memory types to query (default: episodic, semantic)"
+    )
+    meeting_id: str | None = Field(
+        None, description="Meeting ID for brainstorm context persistence"
     )
 
 
@@ -175,6 +179,25 @@ async def chat(
             "citation_count": len(result.get("citations", [])),
         },
     )
+
+    # Write meeting brainstorm context to memory_semantic
+    if request.meeting_id and result.get("message"):
+        try:
+            db = get_supabase_client()
+            db.table("memory_semantic").insert({
+                "user_id": str(current_user.id),
+                "fact": f"Meeting prep note [{request.meeting_id}]: {result['message'][:1500]}",
+                "confidence": 0.9,
+                "source": "meeting_brainstorm",
+                "metadata": {
+                    "context_type": "meeting_brainstorm",
+                    "meeting_id": request.meeting_id,
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+            }).execute()
+            logger.info(f"Wrote brainstorm memory for meeting {request.meeting_id}")
+        except Exception as e:
+            logger.warning(f"Failed to write brainstorm memory: {e}")
 
     raw_rich = result.get("rich_content", [])
     raw_ui = result.get("ui_commands", [])
@@ -913,6 +936,25 @@ async def chat_stream(
             assistant_message=full_content,
             conversation_context=conversation_messages[-2:],
         )
+
+        # Write meeting brainstorm context to memory_semantic
+        if request.meeting_id and full_content:
+            try:
+                db = get_supabase_client()
+                db.table("memory_semantic").insert({
+                    "user_id": str(current_user.id),
+                    "fact": f"Meeting prep note [{request.meeting_id}]: {full_content[:1500]}",
+                    "confidence": 0.9,
+                    "source": "meeting_brainstorm",
+                    "metadata": {
+                        "context_type": "meeting_brainstorm",
+                        "meeting_id": request.meeting_id,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    },
+                }).execute()
+                logger.info(f"Wrote brainstorm memory for meeting {request.meeting_id}")
+            except Exception as e:
+                logger.warning(f"Failed to write brainstorm memory: {e}")
 
         # Companion post-response hooks (narrative increment + theory of mind)
         if companion_ctx is not None and service._companion_orchestrator is not None:
