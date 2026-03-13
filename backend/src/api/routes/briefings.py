@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/briefings", tags=["briefings"])
 
 
+@router.get("/ping")
+async def ping():
+    """Lightweight keep-alive to warm the connection pool. No auth, no DB."""
+    return {"ok": True}
+
+
 class BriefingContent(BaseModel):
     """Content of a daily briefing."""
 

@@ -40,6 +40,12 @@ function AppContent() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
 
+  // Warm backend connection pool on first load (no auth needed)
+  useEffect(() => {
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    fetch(`${apiUrl}/api/v1/briefings/ping`).catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!isAuthenticated) return;
     getRecentItems().then(setRecentItems).catch(() => setRecentItems([]));

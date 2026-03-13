@@ -72,13 +72,11 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
 
   const clearMessages = useConversationStore((s) => s.clearMessages);
 
-  // Trigger briefing delivery when entering briefing mode.
-  // Retries are handled by the axios interceptor (client.ts) which already
-  // retries on 500/502/503/504 with exponential backoff. No need for a
-  // second retry layer here.
-  // NOTE: In StrictMode dev, this fires twice (mount/unmount/remount).
-  // That's fine — the backend asyncio.Lock serializes concurrent calls
-  // and both return the same cached briefing data.
+  // Load briefing transcript on page mount.
+  // Normal page load → GET /briefings/today (cached, <200ms).
+  // Replay (user-initiated) → POST /briefings/replay.
+  // POST /briefings/deliver is NOT called here — it's only for explicit
+  // Play/Start actions that trigger video/audio narration.
   useEffect(() => {
     if (sessionType !== 'briefing') return;
     if (briefingFailed || textOnlyMode) return;
@@ -88,29 +86,38 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
 
     let cancelled = false;
 
-    const deliverBriefing = async (): Promise<void> => {
+    const loadBriefing = async (): Promise<void> => {
       try {
-        const endpoint = isReplay ? '/briefings/replay' : '/briefings/deliver';
-        const response = await apiClient.post<{
-          mode?: 'text_only' | 'video';
-          content?: Record<string, unknown>;
-          briefing?: Record<string, unknown>;
-          message?: string;
-          status: string;
-          error?: string;
-        }>(endpoint);
+        let briefingData: Record<string, unknown> | null = null;
 
-        if (cancelled) return;
+        if (isReplay) {
+          // Replay is user-initiated via the replay button
+          const response = await apiClient.post<{
+            mode?: 'text_only' | 'video';
+            content?: Record<string, unknown>;
+            briefing?: Record<string, unknown>;
+            message?: string;
+            status: string;
+          }>('/briefings/replay');
 
-        // Read briefing data from either key — backend returns "content" in
-        // text_only mode and "briefing" in video mode
-        const briefingData = response.data.content ?? response.data.briefing;
+          if (cancelled) return;
+          briefingData = (response.data.content ?? response.data.briefing) as Record<string, unknown> | null;
 
-        if (briefingData && typeof briefingData === 'object') {
           if (response.data.mode === 'text_only') {
             setTextOnlyMode(true);
           }
+        } else {
+          // Normal page load — read cached briefing (fast, no generation)
+          const response = await apiClient.get<{
+            briefing: Record<string, unknown> | null;
+            status: string;
+          }>('/briefings/today');
 
+          if (cancelled) return;
+          briefingData = response.data.briefing;
+        }
+
+        if (briefingData && typeof briefingData === 'object') {
           const summary = (briefingData.summary as string) || 'Your daily briefing is ready.';
           const suggestions = (briefingData.suggestions as string[]) || ['Show me details', 'Dismiss'];
 
@@ -127,11 +134,19 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
           if (suggestions.length) {
             setCurrentSuggestions(suggestions);
           }
+        } else {
+          // No briefing generated yet
+          addMessage({
+            role: 'system',
+            content: 'No briefing available yet. Your daily briefing will be ready soon.',
+            rich_content: [],
+            ui_commands: [],
+            suggestions: [],
+          });
         }
       } catch (err) {
         if (cancelled) return;
-        // Axios interceptor already retried — this is the final failure.
-        console.error('Briefing delivery failed:', err);
+        console.error('Briefing load failed:', err);
         setBriefingFailed(true);
         addMessage({
           role: 'system',
@@ -143,7 +158,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
       }
     };
 
-    deliverBriefing();
+    loadBriefing();
 
     return () => {
       cancelled = true;
