@@ -1,14 +1,18 @@
 /**
  * CompactAvatar — Picture-in-picture floating avatar overlay.
  *
- * Renders a 120x120 circular Tavus iframe in the bottom-right corner
+ * Renders a 120x120 circular video view in the bottom-right corner
  * when the user navigates away from Dialogue Mode while a video session
- * is active. Clicking the circle switches back to full avatar mode.
+ * is active. Uses the shared video track from the Daily.js SDK call
+ * (no separate iframe or call object).
+ *
+ * Clicking the circle switches back to full avatar mode.
  * A close button dismisses the PiP without ending the Tavus session.
  *
  * Portaled to document.body at z-50 so it floats above all page content.
  */
 
+import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useModalityStore } from '@/stores/modalityStore';
@@ -18,6 +22,22 @@ import { WaveformBars } from './WaveformBars';
 export function CompactAvatar() {
   const tavusSession = useModalityStore((s) => s.tavusSession);
   const isPipVisible = useModalityStore((s) => s.isPipVisible);
+  const videoTrack = useModalityStore((s) => s.tavusVideoTrack);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Attach the shared video track to this PiP video element
+  useEffect(() => {
+    if (!videoTrack || !videoRef.current) return;
+    const stream = new MediaStream([videoTrack]);
+    videoRef.current.srcObject = stream;
+    videoRef.current.play().catch(console.error);
+
+    return () => {
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+    };
+  }, [videoTrack]);
 
   if (tavusSession.status !== 'active' || !isPipVisible || !tavusSession.roomUrl) {
     return null;
@@ -48,11 +68,12 @@ export function CompactAvatar() {
           boxShadow: '0 0 20px rgba(46,102,255,0.2), 0 4px 20px rgba(0,0,0,0.5)',
         }}
       >
-        <iframe
-          src={tavusSession.roomUrl}
-          className="w-full h-full border-0"
-          allow="camera; microphone; autoplay"
-          title="ARIA Avatar (compact)"
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={false}
+          className="w-full h-full object-cover"
         />
       </div>
 

@@ -41,6 +41,7 @@ export interface ModalityState {
   captionsEnabled: boolean;
   playbackSpeed: number;
   voiceModeEnabled: boolean; // Continuous voice conversation mode
+  tavusVideoTrack: MediaStreamTrack | null; // Remote video track from Daily.js SDK
 
   // Actions
   setActiveModality: (modality: Modality) => void;
@@ -53,6 +54,7 @@ export interface ModalityState {
   setPlaybackSpeed: (playbackSpeed: number) => void;
   setVoiceModeEnabled: (voiceModeEnabled: boolean) => void;
   toggleVoiceMode: () => void;
+  setTavusVideoTrack: (track: MediaStreamTrack | null) => void;
 }
 
 export const useModalityStore = create<ModalityState>((set) => ({
@@ -65,6 +67,7 @@ export const useModalityStore = create<ModalityState>((set) => ({
   captionsEnabled: true,
   playbackSpeed: 1.0,
   voiceModeEnabled: false,
+  tavusVideoTrack: null,
 
   // Actions
   setActiveModality: (modality) => set({ activeModality: modality }),
@@ -78,6 +81,7 @@ export const useModalityStore = create<ModalityState>((set) => ({
     set({
       tavusSession: { ...INITIAL_TAVUS_SESSION },
       isPipVisible: false,
+      tavusVideoTrack: null,
     }),
 
   setIsSpeaking: (isSpeaking) => set({ isSpeaking }),
@@ -93,4 +97,6 @@ export const useModalityStore = create<ModalityState>((set) => ({
   setVoiceModeEnabled: (voiceModeEnabled) => set({ voiceModeEnabled }),
 
   toggleVoiceMode: () => set((state) => ({ voiceModeEnabled: !state.voiceModeEnabled })),
+
+  setTavusVideoTrack: (track) => set({ tavusVideoTrack: track }),
 }));

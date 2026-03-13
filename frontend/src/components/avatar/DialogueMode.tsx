@@ -11,6 +11,7 @@ import { useUICommands } from '@/hooks/useUICommands';
 import { useEmotionDetection } from '@/hooks/useEmotionDetection';
 import { apiClient } from '@/api/client';
 import { AvatarContainer } from './AvatarContainer';
+import type { TavusAvatarHandle } from './TavusAvatar';
 import { TranscriptPanel } from './TranscriptPanel';
 import { DialogueHeader } from './DialogueHeader';
 import { BriefingControls } from './BriefingControls';
@@ -48,6 +49,7 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   const showTopPadding = serviceHealth.isCritical && !serviceHealth.isLoading;
 
   const streamingIdRef = useRef<string | null>(null);
+  const avatarRef = useRef<TavusAvatarHandle>(null);
 
   // Check if this is a replay
   const isReplay = searchParams.get('replay') === 'true';
@@ -425,11 +427,15 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
   }, [conversationUrl, isConnecting, setTavusSession]);
 
   const endCVISession = useCallback(async () => {
+    // 1. Hang up Daily.js call (stops mic, removes video)
+    await avatarRef.current?.endCall();
+    // 2. Kill Tavus session server-side
     try {
       await apiClient.post('/briefings/end-conversation');
     } catch (err) {
       console.error('Failed to end Tavus session:', err);
     }
+    // 3. Clear state
     setConversationUrl(null);
     setIsConnecting(false);
     setIsBriefingPlaying(false);
@@ -551,7 +557,13 @@ export function DialogueMode({ sessionType = 'chat' }: DialogueModeProps) {
           {viewMode === 'dialogue' && (
             <>
               <div className="flex-1 flex flex-col items-center justify-center relative">
-                <AvatarContainer isConnecting={isConnecting} />
+                <AvatarContainer
+                  ref={avatarRef}
+                  isConnecting={isConnecting}
+                  onAvatarConnected={() => console.log('[DialogueMode] ARIA video connected')}
+                  onAvatarDisconnected={() => setConversationUrl(null)}
+                  onAvatarError={(err) => console.error('[DialogueMode] Avatar error:', err)}
+                />
                 {/* Text-only mode indicator */}
                 {textOnlyMode && isBriefing && (
                   <div className="absolute top-8 px-3 py-1.5 rounded-full bg-[#1A1A2E] border border-[#2E66FF]/30">
