@@ -194,8 +194,8 @@ async def list_leads(
 
         # Sort results
         sort_key_map = {
-            "health": lambda lead: lead.health_score,
-            "last_activity": lambda lead: lead.last_activity_at,
+            "health": lambda lead: lead.health_score if lead.health_score is not None else 0,
+            "last_activity": lambda lead: lead.last_activity_at if lead.last_activity_at is not None else datetime.min.replace(tzinfo=UTC),
             "name": lambda lead: lead.company_name.lower(),
             "value": lambda lead: float(lead.expected_value) if lead.expected_value else 0,
         }
@@ -464,7 +464,7 @@ async def get_conversion_rankings(
             )
 
         # Sort by conversion probability descending
-        rankings.sort(key=lambda x: x.conversion_probability, reverse=True)
+        rankings.sort(key=lambda x: x.conversion_probability if x.conversion_probability is not None else 0, reverse=True)
 
         # Apply limit
         rankings = rankings[:limit]
