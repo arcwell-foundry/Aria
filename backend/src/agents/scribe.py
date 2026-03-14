@@ -571,16 +571,17 @@ class ScribeAgent(SkillAwareAgent):
             try:
                 db.table("lead_memory_events").insert({
                     "id": str(uuid4()),
-                    "lead_memory_id": lead_memory_id,
+                    "user_id": self.user_id,
+                    "lead_id": lead_memory_id,
                     "event_type": "email_drafted",
-                    "subject": f"Draft: {content.get('subject', '')}",
-                    "content": (
+                    "title": f"Draft: {content.get('subject', '')}",
+                    "description": (
                         f"Outreach email drafted for {recipient_name} "
                         f"at {recipient_company}. "
                         f"Status: draft (awaiting user approval). "
                         f"Compliance: {'passed' if compliance_scan.get('passed') else 'flagged'}."
                     ),
-                    "occurred_at": now_iso,
+                    "confidence": 0.9,
                     "source": "scribe_agent",
                     "metadata": {
                         "email_draft_id": draft_id,

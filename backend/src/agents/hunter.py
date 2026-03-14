@@ -2318,18 +2318,19 @@ class HunterAgent(SkillAwareAgent):
             )
             return  # If lead creation fails, skip dependent writes
 
-        # 2. lead_memory_events INSERT
+        # 2. lead_memory_events INSERT (using current schema: user_id, lead_id, title, description)
         try:
             db.table("lead_memory_events").insert({
                 "id": str(uuid4()),
-                "lead_memory_id": lead_id,
+                "user_id": user_id,
+                "lead_id": lead_id,
                 "event_type": "discovery",
-                "subject": f"Lead discovered via hunter_discovery",
-                "content": (
+                "title": f"Lead discovered via hunter_discovery",
+                "description": (
                     f"Hunter discovered {company_name} as a lead. "
                     f"ICP match: {total_score:.0f}%."
                 ),
-                "occurred_at": now_iso,
+                "confidence": 0.8,
                 "source": "aria_discovery",
                 "metadata": {
                     "icp_match_score": total_score,

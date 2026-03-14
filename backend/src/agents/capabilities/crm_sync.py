@@ -278,7 +278,23 @@ class CRMDeepSyncCapability(BaseCapability):
         client = SupabaseClient.get_client()
 
         # Determine CRM provider for this user
-        provider, connection_id = await self._get_crm_provider(user_id)
+        try:
+            provider, connection_id = await self._get_crm_provider(user_id)
+        except Exception as exc:
+            logger.warning(
+                "No CRM integration found for user %s: %s",
+                user_id,
+                exc,
+                extra={"user_id": user_id},
+            )
+            return SyncResult(
+                pulled=0,
+                pushed=0,
+                conflicts_resolved=0,
+                conflicts=[],
+                errors=[{"phase": "setup", "error": "No CRM integration connected"}],
+            )
+
         stage_map = HUBSPOT_STAGE_MAP if provider == "hubspot" else SALESFORCE_STAGE_MAP
 
         pulled = 0
