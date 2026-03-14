@@ -180,6 +180,8 @@ function RichContentItem({ item }: { item: RichContent }) {
     case 'goal_execution_start':
       // Suppressed — the "Working on this now..." text message is already shown
       return null;
+    case 'goal_retrospective':
+      return null;
     case 'friction_decision': {
       const fd = item.data as unknown as Omit<ChallengeCardProps, 'onApprove' | 'onModify' | 'onCancel'>;
       return (
@@ -192,6 +194,10 @@ function RichContentItem({ item }: { item: RichContent }) {
       );
     }
     default:
+      // Suppress all internal goal/aria tags from rendering
+      if (item.type && (item.type.startsWith('goal_') || item.type.startsWith('aria_internal_'))) {
+        return null;
+      }
       return (
         <div
           className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-xs text-[var(--text-secondary)]"

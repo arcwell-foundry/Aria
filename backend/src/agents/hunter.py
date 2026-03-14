@@ -2677,6 +2677,21 @@ class HunterAgent(SkillAwareAgent):
             if missing_techs:
                 gaps.append(f"Missing technologies: {', '.join(missing_techs)}")
 
+        # Minimum floor for confirmed CDMOs/CROs — always worth reviewing
+        CDMO_KEYWORDS = {
+            'cdmo', 'cmo', 'contract development', 'contract manufacturing',
+            'cro', 'contract research', 'biologics manufacturing',
+        }
+        industry_lower = (company.get('industry') or '').lower()
+        company_lower = (company.get('name') or '').lower()
+        is_confirmed_cdmo = any(
+            kw in industry_lower or kw in company_lower
+            for kw in CDMO_KEYWORDS
+        )
+        if is_confirmed_cdmo and score < 45:
+            score = 45.0
+            fit_reasons.append("CDMO/CRO floor applied: confirmed contract service provider")
+
         # Clamp score to 0-100 range
         score = max(0.0, min(100.0, score))
 

@@ -299,7 +299,6 @@ class CRMDeepSyncCapability(BaseCapability):
                 pulled=0,
                 pushed=0,
                 conflicts_resolved=0,
-                conflicts=[],
                 errors=[{"phase": "setup", "error": "No CRM integration connected"}],
             )
 
