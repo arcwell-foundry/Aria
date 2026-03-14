@@ -458,20 +458,35 @@ class SkillAwareAgent(BaseAgent):
 
             # 3. skill_audit_log
             try:
+                import hashlib
+
+                _input_hash = hashlib.sha256(
+                    json.dumps({"agent_id": self.agent_id, "plan_id": plan_id}).encode()
+                ).hexdigest()
+                _entry_hash = hashlib.sha256(
+                    f"{skill_entry.id}{self.user_id}{now}".encode()
+                ).hexdigest()
+
                 db.table("skill_audit_log").insert({
                     "user_id": self.user_id,
                     "skill_id": skill_entry.id,
                     "skill_path": skill_entry.skill_path,
-                    "action": "execute",
+                    "skill_trust_level": "core",
+                    "trigger_reason": "capability_execution",
+                    "agent_id": self.agent_id,
                     "success": result.success,
                     "execution_time_ms": exec_ms,
-                    "error_message": result.error,
-                    "metadata": json.dumps({
-                        "agent_id": self.agent_id,
+                    "error": result.error,
+                    "data_classes_requested": [],
+                    "data_classes_granted": [],
+                    "data_redacted": False,
+                    "input_hash": _input_hash,
+                    "previous_hash": "",
+                    "entry_hash": _entry_hash,
+                    "sandbox_config": json.dumps({
                         "execution_mode": "capability_direct",
                         "plan_id": plan_id,
                     }),
-                    "timestamp": now,
                 }).execute()
             except Exception as e:
                 logger.debug("Failed to write skill_audit_log: %s", e)

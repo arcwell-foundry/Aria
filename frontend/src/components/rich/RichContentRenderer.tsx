@@ -177,6 +177,9 @@ function RichContentItem({ item }: { item: RichContent }) {
         </div>
       );
     }
+    case 'goal_execution_start':
+      // Suppressed — the "Working on this now..." text message is already shown
+      return null;
     case 'friction_decision': {
       const fd = item.data as unknown as Omit<ChallengeCardProps, 'onApprove' | 'onModify' | 'onCancel'>;
       return (
