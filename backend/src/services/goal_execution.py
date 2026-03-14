@@ -2498,10 +2498,21 @@ class GoalExecutionService:
                             "signals_found": [],
                             "quality_tier": "icp_only",
                         }
-                        fit_score = min(fit_score, 65)
+                        fit_score = min(fit_score, 80)
                 except Exception:
                     logger.debug("[PERSIST-HUNTER] Market signal lookup failed for %s", company_name)
                     signal_quality = {"signal_bonus": 0, "signals_found": [], "quality_tier": "icp_only"}
+
+            # Apply CDMO floor before threshold — confirmed CDMOs always worth reviewing
+            CDMO_KEYWORDS = {'cdmo', 'cmo', 'contract development', 'contract manufacturing',
+                             'contract research', 'cro', 'biologics manufacturing', 'biomanufacturing'}
+            company_data = lead_data.get("company", {})
+            industry_lower = (company_data.get('industry', '') or '').lower()
+            name_lower = (company_name or '').lower()
+            is_cdmo = any(kw in industry_lower or kw in name_lower for kw in CDMO_KEYWORDS)
+            if is_cdmo and fit_score < 45:
+                logger.info("[PERSIST] CDMO floor applied: %s raised to 45 (was %d)", company_name, fit_score)
+                fit_score = 45
 
             # Filter out low-quality leads (global default: 40)
             # Lowered from 50 to capture fuzzy ICP matches during transition
