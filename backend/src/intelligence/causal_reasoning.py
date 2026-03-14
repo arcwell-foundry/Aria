@@ -398,7 +398,7 @@ class SalesCausalReasoningEngine:
                         if impl.recommended_actions
                         else "Review this signal for action."
                     ),
-                    timing=impl.time_to_impact or "Unknown",
+                    timing=impl.time_horizon or "Unknown",
                     confidence=impl.confidence,
                     urgency=self._urgency_from_score(impl.urgency),
                     affected_goal_ids=impl.affected_goals,
@@ -494,8 +494,7 @@ class SalesCausalReasoningEngine:
                 "causal_chain": [],
                 "affected_goals": action.affected_goal_ids,
                 "recommended_actions": [action.recommended_action],
-                "time_horizon": action.urgency,
-                "time_to_impact": action.timing,
+                "time_horizon": action.timing,
                 "status": "new",
             }).execute()
         except Exception as e:

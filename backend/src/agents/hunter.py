@@ -71,7 +71,15 @@ _CONSULTING_BLOCKLIST = {
     "mckinsey", "deloitte", "accenture", "bcg", "boston consulting",
     "bain", "kpmg", "pwc", "ey", "ernst & young",
     "herspiegel", "trinity partners", "iqvia consulting",
-    "zs associates", "simon-kucher",
+    "zs associates", "simon-kucher", "oliver wyman", "lek",
+    "indegene", "inizio", "trinzic", "precision aq",
+}
+
+# Pharma manufacturers (not service providers like CDMOs/CROs)
+_PHARMA_MANUFACTURERS = {
+    "bristol myers squibb", "pfizer", "astrazeneca", "novartis",
+    "roche", "eli lilly", "johnson & johnson", "merck", "amgen",
+    "abbvie", "gilead", "biogen", "regeneron", "moderna",
 }
 
 _CONSULTING_KEYWORDS = {"consulting", "advisory", "advisors", "consultants"}
@@ -165,6 +173,8 @@ _INVALID_DOMAINS = {
     "genengnews.com", "biopharma-reporter.com", "evaluate.com",
     "google.com", "youtube.com", "twitter.com", "facebook.com",
     "ziprecruiter.com", "monster.com", "salary.com", "payscale.com",
+    "clinicaltrialsarena.com", "fiercebiotech.com", "biospace.com",
+    "pharmajobs.com",
 }
 
 
@@ -183,14 +193,24 @@ def _validate_company(company_name: str, domain: str = "") -> bool:
     """
     name_lower = company_name.strip().lower()
 
+    # Reject names that are too short or too long
+    if len(company_name) < 3 or len(company_name) > 100:
+        logger.debug("Entity validation rejected '%s': length %d outside 3-100 range", company_name, len(company_name))
+        return False
+
     # Reject generic industry names
     if name_lower in _INVALID_COMPANY_NAMES:
-        logger.warning("Rejected invalid company name: '%s'", company_name)
+        logger.debug("Entity validation rejected '%s': generic industry category", company_name)
         return False
 
     # Reject single-word generic names
     if len(name_lower.split()) == 1 and name_lower in _SINGLE_WORD_GENERIC:
-        logger.warning("Rejected single-word generic name: '%s'", company_name)
+        logger.debug("Entity validation rejected '%s': single-word generic", company_name)
+        return False
+
+    # Reject pharma manufacturers (not CDMOs/CROs)
+    if name_lower in _PHARMA_MANUFACTURERS:
+        logger.debug("Entity validation rejected '%s': pharma manufacturer, not service provider", company_name)
         return False
 
     # Reject if domain is a known non-company site
@@ -203,8 +223,8 @@ def _validate_company(company_name: str, domain: str = "") -> bool:
             .split("/")[0]
         )
         if domain_clean in _INVALID_DOMAINS:
-            logger.warning(
-                "Rejected invalid domain: '%s' for '%s'", domain, company_name
+            logger.debug(
+                "Entity validation rejected '%s': invalid domain %s", company_name, domain
             )
             return False
 
@@ -1592,42 +1612,60 @@ class HunterAgent(SkillAwareAgent):
                     # Try to infer domain from company name
                     domain = f"{company_name.lower().replace(' ', '')}.com"
 
-                target_titles = roles or [
-                    "VP Sales", "VP Business Development",
-                    "Director Business Development", "Director Sales",
-                    "Chief Commercial Officer", "Chief Operating Officer",
-                ]
-
-                apollo_contacts = await apollo.search_people(
-                    company_domain=domain,
-                    person_titles=target_titles[:5],
-                    person_seniorities=["vp", "director", "c_suite", "manager"],
-                    per_page=10,
+                # Validate domain before calling Apollo
+                domain_clean = (
+                    domain.lower()
+                    .replace("www.", "")
+                    .replace("https://", "")
+                    .replace("http://", "")
+                    .split("/")[0]
                 )
-
-                if apollo_contacts:
-                    contacts: list[dict[str, Any]] = []
-                    for p in apollo_contacts:
-                        contacts.append({
-                            "name": p.get("name", ""),
-                            "first_name": p.get("first_name", ""),
-                            "last_name": p.get("last_name", ""),
-                            "title": p.get("title", ""),
-                            "email": p.get("email", ""),
-                            "linkedin_url": p.get("linkedin_url", ""),
-                            "seniority": p.get("seniority", ""),
-                            "department": self._infer_department(p.get("title", "")),
-                            "city": p.get("city", ""),
-                            "state": p.get("state", ""),
-                            "country": p.get("country", ""),
-                            "apollo_id": p.get("apollo_id", ""),
-                            "source": "apollo_search",
-                        })
-
-                    logger.info(
-                        f"Apollo search_people found {len(contacts)} contacts for '{company_name}'"
+                if domain_clean in _INVALID_DOMAINS:
+                    logger.debug(
+                        "Skipping Apollo search for '%s': domain '%s' is on blocklist (likely recruiter/news site)",
+                        company_name, domain
                     )
-                    return contacts
+                    # Skip Apollo, fall through to other strategies
+                else:
+                    target_titles = roles or [
+                        "VP Sales", "VP Business Development",
+                        "Director Business Development", "Director Sales",
+                        "Chief Commercial Officer", "Chief Operating Officer",
+                    ]
+
+                    apollo_contacts = await apollo.search_people(
+                        company_domain=domain,
+                        person_titles=target_titles[:5],
+                        person_seniorities=["vp", "director", "c_suite", "manager"],
+                        per_page=10,
+                    )
+
+                    if apollo_contacts:
+                        contacts: list[dict[str, Any]] = []
+                        for p in apollo_contacts:
+                            contacts.append({
+                                "name": p.get("name", ""),
+                                "first_name": p.get("first_name", ""),
+                                "last_name": p.get("last_name", ""),
+                                "title": p.get("title", ""),
+                                "email": p.get("email", ""),
+                                "linkedin_url": p.get("linkedin_url", ""),
+                                "seniority": p.get("seniority", ""),
+                                "department": self._infer_department(p.get("title", "")),
+                                "city": p.get("city", ""),
+                                "state": p.get("state", ""),
+                                "country": p.get("country", ""),
+                                "apollo_id": p.get("apollo_id", ""),
+                                "source": "apollo_search",
+                            })
+
+                        logger.info(
+                            f"Apollo search_people found {len(contacts)} contacts for '{company_name}'"
+                        )
+                        return contacts
+
+            except Exception as exc:
+                logger.warning(f"Apollo contact search failed for '{company_name}': {exc}")
 
             except Exception as exc:
                 logger.warning(f"Apollo contact search failed for '{company_name}': {exc}")

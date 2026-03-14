@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { Shield, Clock, AlertTriangle, Check, Loader2, ChevronRight, Zap, X, Link } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { wsManager } from '@/core/WebSocketManager';
@@ -393,12 +393,28 @@ function TaskListView({ data }: { data: ExecutionPlanData }) {
 
 export function ExecutionPlanCard({ data }: ExecutionPlanCardProps) {
   const [isApproved, setIsApproved] = useState(() => data.status === 'approved');
+  const [isCompleted, setIsCompleted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const addMessage = useConversationStore((s) => s.addMessage);
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
 
   const isResourceAware = Boolean(data.tasks && data.tasks.length > 0);
+
+  // BUG FIX 7: Listen for goal completion WebSocket events
+  useEffect(() => {
+    const handleGoalStatusUpdate = (event: any) => {
+      if (event.goal_id === data.goal_id && event.status === 'complete') {
+        setIsCompleted(true);
+      }
+    };
+
+    wsManager.on('goal_status_update', handleGoalStatusUpdate);
+
+    return () => {
+      wsManager.off('goal_status_update', handleGoalStatusUpdate);
+    };
+  }, [data.goal_id]);
 
   const handleApprove = useCallback(async () => {
     setIsLoading(true);
@@ -477,6 +493,11 @@ export function ExecutionPlanCard({ data }: ExecutionPlanCardProps) {
       {error && (
         <p className="mt-2 text-xs" style={{ color: 'var(--critical)' }}>{error}</p>
       )}
+    </div>
+  ) : isCompleted ? (
+    <div className="border-t border-[var(--border)] px-4 py-3 flex items-center gap-2 text-emerald-400">
+      <Check className="w-3.5 h-3.5" />
+      <span className="text-xs font-medium">Complete</span>
     </div>
   ) : (
     <div className="border-t border-[var(--border)] px-4 py-3 flex items-center gap-2 text-emerald-400">

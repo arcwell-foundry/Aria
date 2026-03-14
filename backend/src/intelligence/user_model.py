@@ -420,7 +420,7 @@ class UserMentalModelService:
         try:
             result = (
                 self._db.table("digital_twin_profiles")
-                .select("preferred_tone, communication_style, risk_tolerance")
+                .select("preferred_tone, tone, writing_style, formality_level")
                 .eq("user_id", user_id)
                 .limit(1)
                 .execute()

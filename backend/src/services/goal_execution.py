@@ -658,6 +658,17 @@ class GoalExecutionService:
             }
         ).eq("id", goal_id).execute()
 
+        # BUG FIX 7: Broadcast goal completion to update plan cards
+        try:
+            await ws_manager.broadcast_to_user(user_id, {
+                "type": "goal_status_update",
+                "goal_id": str(goal_id),
+                "status": "complete",
+                "completed_at": now,
+            })
+        except Exception:
+            logger.debug("Failed to broadcast goal_status_update", exc_info=True)
+
         success_count = sum(1 for r in results if r.get("success"))
         await self._record_goal_update(
             goal_id,
@@ -723,6 +734,36 @@ class GoalExecutionService:
             )
         except Exception:
             logger.debug("Pulse engine routing failed for goal completion", exc_info=True)
+
+        # BUG FIX 9: Present lead results for lead-gen goals
+        try:
+            # Check if this is a lead-gen goal by looking for hunter agent
+            has_hunter = any(r.get("agent_type", "").lower() == "hunter" for r in results if r.get("success"))
+            if has_hunter:
+                # Query discovered_leads for this goal
+                leads_result = (
+                    self._db.table("discovered_leads")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .eq("source", "goal_execution")
+                    .order("created_at", desc=True)
+                    .limit(10)
+                    .execute()
+                )
+                goal_leads = leads_result.data or []
+
+                # Get conversation_id from goal if available
+                conversation_id = goal.get("conversation_id")
+
+                # Present results
+                await self._present_goal_results(
+                    goal=goal,
+                    leads=goal_leads,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                )
+        except Exception as e:
+            logger.warning("Failed to present lead-gen results: %s", e, exc_info=True)
 
         # Notify frontend that goal is complete — conversational presentation
         try:
@@ -2237,6 +2278,56 @@ class GoalExecutionService:
                 return False
         return True
 
+    async def _present_goal_results(
+        self,
+        goal: dict[str, Any],
+        leads: list[dict[str, Any]],
+        user_id: str,
+        conversation_id: str | None,
+    ) -> None:
+        """Build and send a natural-language result message after goal completion.
+
+        Args:
+            goal: The completed goal record.
+            leads: List of discovered leads for this goal.
+            user_id: User UUID.
+            conversation_id: Conversation UUID.
+        """
+        goal_title = goal.get("title", "this goal")
+
+        if not leads:
+            message = f"I completed '{goal_title}' but wasn't able to find leads that met your criteria. I'll refine my approach and try again."
+        elif len(leads) == 1:
+            lead = leads[0]
+            company = lead.get("company_name", "Unknown")
+            company_data = lead.get("company_data") or {}
+            domain = company_data.get("domain", "")
+            contacts = lead.get("contacts") or []
+            top_contact = contacts[0] if contacts else None
+            contact_line = ""
+            if top_contact:
+                name = top_contact.get("name", "Unknown")
+                title = top_contact.get("title", "")
+                contact_line = f" Top contact: {name} ({title})." if title else f" Top contact: {name}."
+            fit = lead.get("fit_score", 0)
+            message = f"Done. I found **{company}**{f' ({domain})' if domain else ''} — fit score {fit}/100.{contact_line} Want me to draft outreach or dig deeper?"
+        else:
+            company_list = ", ".join([f"**{l.get('company_name', 'Unknown')}**" for l in leads[:3]])
+            if len(leads) > 3:
+                company_list += f" and {len(leads) - 3} more"
+            message = f"Done. I found {len(leads)} leads: {company_list}. Want me to draft outreach for any of them?"
+
+        # Send to chat via WebSocket
+        try:
+            await ws_manager.send_aria_message(
+                user_id=user_id,
+                message=message,
+                rich_content=[],
+                suggestions=[],
+            )
+        except Exception as e:
+            logger.warning("Failed to send goal results message: %s", e)
+
     async def _persist_hunter_leads(
         self,
         user_id: str,
@@ -2395,7 +2486,57 @@ class GoalExecutionService:
             # are internal scoring notes, not market events.
             signals = signal_quality.get("signals_found", [])
 
+            # BUG FIX 1: Enforce fit_score threshold (must be >= 50)
+            if fit_score < 50:
+                logger.debug(
+                    "[PERSIST-HUNTER] Skipping lead %s: fit_score %d below threshold",
+                    company_name,
+                    fit_score,
+                )
+                continue
+
             try:
+                # BUG FIX 4: Check for existing lead (deduplication)
+                existing = (
+                    self._db.table("discovered_leads")
+                    .select("id, fit_score")
+                    .eq("user_id", user_id)
+                    .ilike("company_name", company_name)
+                    .limit(1)
+                    .execute()
+                )
+
+                if existing.data:
+                    existing_lead = existing.data[0]
+                    existing_score = existing_lead.get("fit_score", 0)
+                    if fit_score > existing_score:
+                        # Update with better data
+                        self._db.table("discovered_leads").update(
+                            {
+                                "company_data": company,
+                                "contacts": contacts,
+                                "fit_score": fit_score,
+                                "score_breakdown": score_breakdown,
+                                "signals": signals,
+                                "updated_at": now,
+                            }
+                        ).eq("id", existing_lead["id"]).execute()
+                        logger.info(
+                            "[PERSIST-HUNTER] Updated existing lead %s: new score %d (was %d)",
+                            company_name,
+                            fit_score,
+                            existing_score,
+                        )
+                    else:
+                        logger.debug(
+                            "[PERSIST-HUNTER] Dedup: %s already exists for user with score %d, skipping (new score: %d)",
+                            company_name,
+                            existing_score,
+                            fit_score,
+                        )
+                    continue
+
+                # Insert new lead
                 self._db.table("discovered_leads").insert(
                     {
                         "id": lead_id,
@@ -5971,12 +6112,14 @@ class GoalExecutionService:
 
             for _tag in [
                 "goal_retrospective", "lead_gen_results",
-                "GOAL_EXECUTION_START", "goal_completion",
+                "GOAL_EXECUTION_START", "GOAL_RETROSPECTIVE", "goal_completion",
                 "[PLAN_APPROVED]",
             ]:
                 message = message.replace(_tag, "")
             # Strip any remaining XML-like internal tags
-            message = _re.sub(r"</?(?:goal_retrospective|lead_gen_results|GOAL_EXECUTION_START)[^>]*>", "", message)
+            message = _re.sub(r"</?(?:goal_retrospective|lead_gen_results|GOAL_EXECUTION_START|GOAL_RETROSPECTIVE)[^>]*>", "", message)
+            # Strip all [GOAL_*] tags
+            message = _re.sub(r'\[GOAL_[A-Z_]+[^\]]*\]', '', message)
             message = message.strip()
 
             await ws_manager.send_aria_message(
