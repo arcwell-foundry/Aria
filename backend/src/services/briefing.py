@@ -417,6 +417,29 @@ class BriefingService:
             logger.warning("Failed to gather email data", extra={"user_id": user_id}, exc_info=True)
             email_data = empty_email
 
+        # Gather signal-triggered opportunities (last 24h)
+        signal_triggered_data: list[dict[str, Any]] = []
+        try:
+            signal_cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
+            st_result = (
+                self._db.table("goals")
+                .select("id, title, description, status, config, created_at")
+                .eq("user_id", user_id)
+                .gte("created_at", signal_cutoff)
+                .execute()
+            )
+            signal_triggered_data = [
+                g for g in (st_result.data or [])
+                if isinstance(g, dict)
+                and (g.get("config") or {}).get("source") == "signal_radar"
+            ]
+        except Exception:
+            logger.debug(
+                "Failed to fetch signal-triggered goals for briefing",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+
         # Gather pulse signals queued for morning briefing
         pulse_insights: list[dict[str, Any]] = []
         try:
@@ -553,6 +576,7 @@ class BriefingService:
             tone_guidance=tone_guidance,
             queued_insights=combined_insights if combined_insights else queued_insights,
             causal_actions=causal_actions,
+            signal_triggered=signal_triggered_data,
         )
         summary = _sanitize_text(raw_summary)
 
@@ -583,6 +607,7 @@ class BriefingService:
             "calendar": calendar_data,
             "leads": lead_data,
             "signals": signal_data,
+            "signal_triggered": signal_triggered_data,
             "tasks": task_data,
             "email_summary": email_data,
             "intelligence_insights": jarvis_insights,
@@ -951,6 +976,43 @@ class BriefingService:
                 "meetings_without_debriefs": 0,  # Computed separately
             }
 
+            # --- SIGNAL-TRIGGERED OPPORTUNITIES (last 24h) ---
+            signal_triggered_section: dict[str, Any] = {
+                "opportunities": [],
+                "count": 0,
+            }
+            try:
+                signal_cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
+                signal_goals = (
+                    self._db.table("goals")
+                    .select("id, title, description, status, config, created_at")
+                    .eq("user_id", user_id)
+                    .gte("created_at", signal_cutoff)
+                    .execute()
+                )
+                # Filter for signal_radar source in config (JSONB)
+                signal_opps = [
+                    {
+                        "id": g["id"],
+                        "title": _sanitize_text(g.get("title", "")),
+                        "company": (g.get("config") or {}).get("company_name", ""),
+                        "signal_type": (g.get("config") or {}).get("signal_type", ""),
+                        "signal_headline": (g.get("config") or {}).get("signal_headline", ""),
+                        "score": (g.get("config") or {}).get("lead_relevance_score", 0),
+                        "status": g.get("status", ""),
+                        "created_at": g.get("created_at", ""),
+                    }
+                    for g in (signal_goals.data or [])
+                    if isinstance(g, dict)
+                    and (g.get("config") or {}).get("source") == "signal_radar"
+                ]
+                signal_triggered_section = {
+                    "opportunities": signal_opps,
+                    "count": len(signal_opps),
+                }
+            except Exception:
+                logger.debug("Failed to fetch signal-triggered goals", exc_info=True)
+
             # --- LEADS (LIVE) ---
             leads_section: dict[str, Any] = {
                 "hot_leads": [],
@@ -978,6 +1040,7 @@ class BriefingService:
                 "calendar": calendar,
                 "email_summary": email_summary,
                 "signals": signals_section,
+                "signal_triggered": signal_triggered_section,
                 "tasks": tasks_section,
                 "leads": leads_section,
                 "battle_card_count": len(battle_cards.data or []),
@@ -2425,6 +2488,7 @@ class BriefingService:
         tone_guidance: str = "",
         queued_insights: list[dict[str, Any]] | None = None,
         causal_actions: list[dict[str, Any]] | None = None,
+        signal_triggered: list[dict[str, Any]] | None = None,
     ) -> str:
         """Generate executive summary using LLM with PersonaBuilder.
 
@@ -2438,6 +2502,7 @@ class BriefingService:
             tone_guidance: Personality-calibrated tone guidance.
             queued_insights: Optional queued insights from briefing_queue.
             causal_actions: Optional causal reasoning actions from market signals.
+            signal_triggered: Optional signal-triggered goals from last 24h.
 
         Returns:
             Generated summary string.
@@ -2581,6 +2646,22 @@ class BriefingService:
                 else ""
             )
 
+            # Signal-triggered opportunities (overnight goals from signal_radar)
+            signal_triggered_section = ""
+            if signal_triggered:
+                st_lines = []
+                for st in signal_triggered[:5]:
+                    config = st.get("config") or {}
+                    st_lines.append(
+                        f"  - {config.get('company_name', 'Unknown')}: "
+                        f"{config.get('signal_headline', st.get('title', ''))}"
+                    )
+                signal_triggered_section = (
+                    f"SIGNAL-TRIGGERED OPPORTUNITIES ({len(signal_triggered)} found overnight):\n"
+                    + "\n".join(st_lines)
+                    + "\nReview and approve outreach."
+                )
+
             email_details = ""
             if email_data.get("needs_attention"):
                 email_lines = []
@@ -2603,6 +2684,7 @@ class BriefingService:
                     overdue_section,
                     lead_section,
                     signal_section,
+                    signal_triggered_section,
                     email_section,
                 ]
                 if s

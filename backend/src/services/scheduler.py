@@ -897,6 +897,68 @@ async def _run_signal_radar_scan() -> None:
         logger.exception("SignalRadar scan scheduler run failed")
 
 
+async def _run_signal_lead_trigger() -> None:
+    """Convert high-relevance market signals into lead_gen goals.
+
+    Runs every 30 minutes. For each user with monitored entities,
+    scores recent signals for bioprocessing equipment relevance and
+    creates auto-approved lead_gen goals for signals scoring >= 70.
+    """
+    logger.info("SignalLeadTrigger starting")
+    try:
+        import asyncio
+
+        from src.db.supabase import SupabaseClient
+        from src.services.signal_lead_trigger import SignalLeadTrigger
+
+        client = SupabaseClient.get_client()
+
+        # Get users with active monitoring (same user set as signal_radar)
+        resp = (
+            client.table("monitored_entities")
+            .select("user_id")
+            .eq("is_active", True)
+            .execute()
+        )
+        user_ids = list({row["user_id"] for row in (resp.data or [])})
+
+        if not user_ids:
+            logger.debug("SignalLeadTrigger: no users with active monitoring")
+            return
+
+        trigger = SignalLeadTrigger()
+        semaphore = asyncio.Semaphore(5)
+
+        async def _process_user(uid: str) -> dict:
+            async with semaphore:
+                try:
+                    return await trigger.run(uid)
+                except Exception as exc:
+                    logger.error(
+                        "SignalLeadTrigger failed for user %s: %s", uid, exc
+                    )
+                    return {"signals_checked": 0, "goals_created": 0}
+
+        results = await asyncio.gather(
+            *[_process_user(uid) for uid in user_ids],
+            return_exceptions=True,
+        )
+
+        total_goals = sum(
+            r.get("goals_created", 0)
+            for r in results
+            if isinstance(r, dict)
+        )
+        if total_goals > 0:
+            logger.info(
+                "SignalLeadTrigger complete: %d goals created across %d users",
+                total_goals,
+                len(user_ids),
+            )
+    except Exception:
+        logger.exception("SignalLeadTrigger scheduler run failed")
+
+
 async def _run_daily_briefing_check() -> None:
     """Run daily briefing generation check for all users."""
     try:
@@ -2647,6 +2709,13 @@ async def start_scheduler() -> None:
             trigger=CronTrigger(minute="30"),  # Run at :30 offset from scout scan (:00, :15)
             id="signal_radar_scan",
             name="SignalRadar multi-source intelligence scan (FDA, patents, clinical trials)",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_signal_lead_trigger,
+            trigger=CronTrigger(minute="*/30"),  # Every 30 minutes
+            id="signal_lead_trigger",
+            name="Convert high-relevance signals to lead_gen goals",
             replace_existing=True,
         )
         _scheduler.add_job(
