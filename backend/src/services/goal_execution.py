@@ -2503,9 +2503,10 @@ class GoalExecutionService:
                     logger.debug("[PERSIST-HUNTER] Market signal lookup failed for %s", company_name)
                     signal_quality = {"signal_bonus": 0, "signals_found": [], "quality_tier": "icp_only"}
 
-            # Filter out low-quality leads (global default: 50)
+            # Filter out low-quality leads (global default: 40)
+            # Lowered from 50 to capture fuzzy ICP matches during transition
             # Future: read from signal_lead_config.min_signal_score per user
-            MIN_FIT_SCORE = 50
+            MIN_FIT_SCORE = 40
             if fit_score < MIN_FIT_SCORE:
                 logger.info(
                     "[PERSIST-HUNTER] Filtered low-quality lead: %s (score=%d, min=%d, goal=%s)",
@@ -2534,8 +2535,8 @@ class GoalExecutionService:
             # are internal scoring notes, not market events.
             signals = signal_quality.get("signals_found", [])
 
-            # BUG FIX 1: Enforce fit_score threshold (must be >= 50)
-            if fit_score < 50:
+            # BUG FIX 1: Enforce fit_score threshold (must be >= 40)
+            if fit_score < 40:
                 logger.debug(
                     "[PERSIST-HUNTER] Skipping lead %s: fit_score %d below threshold",
                     company_name,

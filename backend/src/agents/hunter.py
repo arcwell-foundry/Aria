@@ -898,6 +898,7 @@ class HunterAgent(SkillAwareAgent):
                     company=enriched_company,
                     contacts=contacts,
                     icp=icp,
+                    goal_title=goal_title,
                 )
 
                 fit_score = discovery_score["total"]
@@ -2054,6 +2055,7 @@ class HunterAgent(SkillAwareAgent):
         company: dict[str, Any],
         contacts: list[dict[str, Any]],
         icp: dict[str, Any],
+        goal_title: str = "",
     ) -> dict[str, Any]:
         """Score a discovered lead using the dynamic 4-dimension model.
 
@@ -2067,6 +2069,7 @@ class HunterAgent(SkillAwareAgent):
             company: Enriched company data.
             contacts: Discovered contacts at the company.
             icp: Active ICP criteria.
+            goal_title: Goal title for geography override in ICP scoring.
 
         Returns:
             Discovery score breakdown dict for lead_memories.metadata.
@@ -2104,7 +2107,7 @@ class HunterAgent(SkillAwareAgent):
                 weights["relationship"] = 0.15
 
         # --- Dimension 1: ICP Fit ---
-        icp_score, icp_reasons, icp_gaps = await self._score_fit(company, effective_icp)
+        icp_score, icp_reasons, icp_gaps = await self._score_fit(company, effective_icp, goal_title)
 
         # --- Dimension 2: Trigger Signal Relevance ---
         trigger_score = 0.0
@@ -2188,6 +2191,17 @@ class HunterAgent(SkillAwareAgent):
             buying_score += 10.0
             buying_signals.append("known_funding_stage")
         buying_score = min(100.0, buying_score)
+
+        # --- ICP Signal Matching ---
+        # Match ICP-defined signals against company's recent news/signals
+        icp_signals = effective_icp.get("signals", [])
+        company_news = company.get("recent_news", [])
+        icp_matched_signals = self._match_signals(company_news, icp_signals)
+        if icp_matched_signals:
+            # Matched ICP signals boost trigger score
+            trigger_score = max(trigger_score, len(icp_matched_signals) * 30.0)
+            trigger_score = min(100.0, trigger_score)
+            trigger_signals.extend(icp_matched_signals)
 
         # --- Compute weighted total ---
         total = (
@@ -2502,16 +2516,86 @@ class HunterAgent(SkillAwareAgent):
             return 4
         return 3
 
+    @staticmethod
+    def _extract_goal_geography(goal_title: str) -> str | None:
+        """Extract location from goal title like 'Find me 1 CDMO in Germany'."""
+        if not goal_title:
+            return None
+        match = re.search(
+            r'\bin\s+(?:the\s+)?([A-Z][a-zA-Z\s]+?)(?:\s+that|\s+with|\s+who|$)',
+            goal_title,
+            re.IGNORECASE,
+        )
+        return match.group(1).strip() if match else None
+
+    @staticmethod
+    def _score_industry_match(lead_industry: str, icp_industries: list[str]) -> float:
+        """Score how well a lead's industry matches ICP industries.
+
+        Uses keyword overlap — not exact string match.
+        Returns 0.0 to 1.0.
+        """
+        if not lead_industry or not icp_industries:
+            return 0.0
+
+        lead_lower = lead_industry.lower()
+
+        # CDMO/CRO recognition — always relevant for bioprocessing equipment sellers
+        cdmo_keywords = {
+            "cdmo", "cmo", "contract development", "contract manufacturing",
+            "cro", "contract research",
+        }
+        if any(kw in lead_lower for kw in cdmo_keywords):
+            return 0.8  # Strong match — CDMOs always buy bioprocessing equipment
+
+        # Keyword overlap with ICP industries
+        icp_keywords: set[str] = set()
+        for industry in icp_industries:
+            icp_keywords.update(industry.lower().split())
+
+        lead_words = set(lead_lower.split())
+        overlap = len(lead_words & icp_keywords)
+
+        if overlap >= 2:
+            return 0.9
+        elif overlap == 1:
+            return 0.5
+
+        # Broad life sciences catch-all
+        life_sci_keywords = {
+            "biotech", "biopharma", "pharmaceutical", "biologics",
+            "biomanufacturing", "bioprocessing", "life sciences",
+        }
+        if any(kw in lead_lower for kw in life_sci_keywords):
+            return 0.4
+
+        return 0.0
+
+    @staticmethod
+    def _match_signals(lead_signals: list, icp_signals: list[str]) -> list[str]:
+        """Find ICP signals that appear in lead signal texts."""
+        matched: list[str] = []
+        for icp_signal in icp_signals:
+            icp_keywords = icp_signal.lower().split()
+            for lead_signal in lead_signals:
+                lead_text = str(lead_signal).lower()
+                if any(kw in lead_text for kw in icp_keywords if len(kw) > 3):
+                    matched.append(icp_signal)
+                    break
+        return matched
+
     async def _score_fit(
         self,
         company: dict[str, Any],
         icp: dict[str, Any],
+        goal_title: str = "",
     ) -> tuple[float, list[str], list[str]]:
         """Score company fit against ICP using weighted algorithm.
 
         Args:
             company: Company data to score.
             icp: Ideal Customer Profile criteria.
+            goal_title: Goal title for geography override.
 
         Returns:
             Tuple of (score 0-100, fit_reasons list, gaps list).
@@ -2520,16 +2604,16 @@ class HunterAgent(SkillAwareAgent):
         fit_reasons: list[str] = []
         gaps: list[str] = []
 
-        # Industry match: 40% weight
+        # Industry match: 40% weight (fuzzy keyword matching)
         industry_weight = 0.40
         company_industry = company.get("industry", "")
         icp_industry = icp.get("industry", "")
         if company_industry and icp_industry:
-            # Handle string or list of strings
             icp_industries = [icp_industry] if isinstance(icp_industry, str) else icp_industry
-            if company_industry in icp_industries:
-                score += industry_weight * 100
-                fit_reasons.append(f"Industry match: {company_industry}")
+            industry_score = self._score_industry_match(company_industry, icp_industries)
+            if industry_score > 0:
+                score += industry_weight * 100 * industry_score
+                fit_reasons.append(f"Industry match ({industry_score:.0%}): {company_industry}")
             else:
                 gaps.append(f"Industry mismatch: {company_industry} vs {icp_industries}")
 
@@ -2544,18 +2628,32 @@ class HunterAgent(SkillAwareAgent):
             else:
                 gaps.append(f"Size mismatch: {company_size} vs {icp_size}")
 
-        # Geography match: 20% weight
+        # Geography match: 20% weight (goal-context override)
         geo_weight = 0.20
         company_geo = company.get("geography", "")
         icp_geo = icp.get("geography", "")
-        if company_geo and icp_geo:
-            # Handle string or list of strings
-            icp_geos = [icp_geo] if isinstance(icp_geo, str) else icp_geo
-            if company_geo in icp_geos:
+
+        # If goal title contains a location, use it instead of ICP geography
+        goal_geography = self._extract_goal_geography(goal_title)
+        if goal_geography:
+            effective_geos = [goal_geography]
+        elif icp_geo:
+            effective_geos = [icp_geo] if isinstance(icp_geo, str) else icp_geo
+        else:
+            effective_geos = []
+
+        if company_geo and effective_geos:
+            # Fuzzy geo matching: check if company geo contains or is contained by any target geo
+            company_geo_lower = company_geo.lower()
+            geo_matched = any(
+                g.lower() in company_geo_lower or company_geo_lower in g.lower()
+                for g in effective_geos
+            )
+            if geo_matched:
                 score += geo_weight * 100
-                fit_reasons.append(f"Geography match: {company_geo}")
+                fit_reasons.append(f"Geography match: {company_geo} (target: {effective_geos})")
             else:
-                gaps.append(f"Geography mismatch: {company_geo} vs {icp_geos}")
+                gaps.append(f"Geography mismatch: {company_geo} vs {effective_geos}")
 
         # Technology overlap: 15% weight (proportional to overlap)
         tech_weight = 0.15
