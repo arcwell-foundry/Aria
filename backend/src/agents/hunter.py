@@ -852,7 +852,7 @@ class HunterAgent(SkillAwareAgent):
         # Search with each query and merge results
         for query in search_queries:
             try:
-                results = await self._search_companies(query=query, limit=search_limit)
+                results = await self._search_companies(query=query, limit=search_limit, goal_title=goal_title)
                 for company in results:
                     name_lower = company.get("name", "").lower()
                     if name_lower and name_lower not in seen_names:
@@ -955,6 +955,7 @@ class HunterAgent(SkillAwareAgent):
         self,
         query: str,
         limit: int,
+        goal_title: str = "",
     ) -> list[dict[str, Any]]:
         """Search for companies using the ExaEnrichmentProvider.
 
@@ -964,6 +965,7 @@ class HunterAgent(SkillAwareAgent):
         Args:
             query: Search query string.
             limit: Maximum number of results.
+            goal_title: Goal title for geography fallback extraction.
 
         Returns:
             List of company dicts extracted from Exa results.
@@ -1092,17 +1094,21 @@ class HunterAgent(SkillAwareAgent):
                 logger.info("[HUNTER] Filtered out invalid company: %s (domain=%s)", name, company_domain)
                 continue
             seen_names.add(name.lower())
-            companies.append(
-                {
-                    "name": name,
-                    "domain": company_domain,
-                    "description": c.get("description", ""),
-                    "industry": c.get("industry", query),
-                    "size": c.get("size", ""),
-                    "geography": c.get("geography", ""),
-                    "website": c.get("website", ""),
-                }
-            )
+            company_dict = {
+                "name": name,
+                "domain": company_domain,
+                "description": c.get("description", ""),
+                "industry": c.get("industry", query),
+                "size": c.get("size", ""),
+                "geography": c.get("geography", ""),
+                "website": c.get("website", ""),
+            }
+            # Fix 8: Backfill geography from goal title when Exa doesn't return it
+            if not company_dict.get("geography") and goal_title:
+                extracted_geo = self._extract_goal_geography(goal_title)
+                if extracted_geo:
+                    company_dict["geography"] = extracted_geo if isinstance(extracted_geo, str) else extracted_geo[0]
+            companies.append(company_dict)
 
         return companies[:limit]
 
@@ -1186,6 +1192,7 @@ class HunterAgent(SkillAwareAgent):
         self,
         query: str,
         limit: int,
+        goal_title: str = "",
     ) -> list[dict[str, Any]]:
         """Search for companies matching ICP criteria.
 
@@ -1195,6 +1202,7 @@ class HunterAgent(SkillAwareAgent):
         Args:
             query: Search query string.
             limit: Maximum number of results to return.
+            goal_title: Goal title for geography fallback extraction.
 
         Returns:
             List of matching companies.
@@ -1218,7 +1226,7 @@ class HunterAgent(SkillAwareAgent):
         if settings.EXA_API_KEY:
             logger.warning("[HUNTER] Attempting Exa API search for query='%s'", query)
             try:
-                companies = await self._search_companies_via_exa(query, limit)
+                companies = await self._search_companies_via_exa(query, limit, goal_title=goal_title)
                 if companies:
                     logger.warning(
                         "[HUNTER] Exa search SUCCESS: %d companies for query='%s'",
@@ -1241,40 +1249,12 @@ class HunterAgent(SkillAwareAgent):
         except Exception as exc:
             logger.warning(f"LLM company search also failed: {exc}")
 
-        # Strategy 3: Return seed data when both real data sources are
-        # unavailable (e.g. no API keys, network failure, test environment).
-        # This ensures the agent pipeline always has something to work with.
-        logger.warning(f"All search strategies failed for query='{query}'; returning seed data")
-        seed_companies = [
-            {
-                "name": "GenTech Bio",
-                "domain": "gentechbio.com",
-                "description": "Leading biotechnology company specializing in gene therapy research and development.",
-                "industry": "Biotechnology",
-                "size": "Mid-market (100-500)",
-                "geography": "North America",
-                "website": "https://www.gentechbio.com",
-            },
-            {
-                "name": "PharmaCorp Solutions",
-                "domain": "pharmacorpsolutions.com",
-                "description": "Pharmaceutical solutions provider focusing on drug discovery and clinical trials.",
-                "industry": "Pharmaceuticals",
-                "size": "Enterprise (500+)",
-                "geography": "North America",
-                "website": "https://www.pharmacorpsolutions.com",
-            },
-            {
-                "name": "BioInnovate Labs",
-                "domain": "bioinnovatelabs.com",
-                "description": "Innovative biotech laboratory developing cutting-edge diagnostic tools.",
-                "industry": "Biotechnology",
-                "size": "Startup (1-50)",
-                "geography": "Europe",
-                "website": "https://www.bioinnovatelabs.com",
-            },
-        ]
-        return seed_companies[:limit]
+        logger.warning(
+            "LEAD_GEN: Both Exa and LLM search failed for goal '%s'. "
+            "Returning empty — zero honest results > three fake ones.",
+            goal_title,
+        )
+        return []
 
     async def _enrich_company_via_exa(
         self,
@@ -1567,7 +1547,7 @@ class HunterAgent(SkillAwareAgent):
                 {
                     "name": c.get("name", f"{c.get('title', 'Contact')} at {company_name}"),
                     "title": c.get("title", "Executive"),
-                    "email": c.get("email", f"contact@{company_name.lower().replace(' ', '')}.com"),
+                    "email": c.get("email", ""),
                     "linkedin_url": c.get(
                         "linkedin_url",
                         f"https://www.linkedin.com/company/{company_name.lower().replace(' ', '-')}",
@@ -1668,9 +1648,6 @@ class HunterAgent(SkillAwareAgent):
             except Exception as exc:
                 logger.warning(f"Apollo contact search failed for '{company_name}': {exc}")
 
-            except Exception as exc:
-                logger.warning(f"Apollo contact search failed for '{company_name}': {exc}")
-
         # Strategy 2: Try Exa search_person for real contacts
         exa = self._get_exa_provider()
         if exa:
@@ -1724,58 +1701,10 @@ class HunterAgent(SkillAwareAgent):
         except Exception as exc:
             logger.warning(f"LLM contact search failed for '{company_name}': {exc}")
 
-        # Strategy 3: Fallback - Return standard role-based placeholders
-        all_contacts = [
-            {
-                "name": f"CEO at {company_name}",
-                "title": "CEO",
-                "email": f"ceo@{company_name.lower().replace(' ', '')}.com",
-                "linkedin_url": f"https://www.linkedin.com/company/{company_name.lower().replace(' ', '-')}",
-                "seniority": "C-Level",
-                "department": "Executive",
-            },
-            {
-                "name": f"VP Sales at {company_name}",
-                "title": "VP Sales",
-                "email": f"vp.sales@{company_name.lower().replace(' ', '')}.com",
-                "linkedin_url": f"https://www.linkedin.com/company/{company_name.lower().replace(' ', '-')}",
-                "seniority": "VP-Level",
-                "department": "Sales",
-            },
-            {
-                "name": f"Director of Marketing at {company_name}",
-                "title": "Director of Marketing",
-                "email": f"marketing@{company_name.lower().replace(' ', '')}.com",
-                "linkedin_url": f"https://www.linkedin.com/company/{company_name.lower().replace(' ', '-')}",
-                "seniority": "Director-Level",
-                "department": "Marketing",
-            },
-            {
-                "name": f"CTO at {company_name}",
-                "title": "CTO",
-                "email": f"cto@{company_name.lower().replace(' ', '')}.com",
-                "linkedin_url": f"https://www.linkedin.com/company/{company_name.lower().replace(' ', '-')}",
-                "seniority": "C-Level",
-                "department": "Engineering",
-            },
-        ]
-
-        # Filter by roles if provided
-        if roles:
-            filtered_contacts = []
-            for contact in all_contacts:
-                title_lower = contact["title"].lower()
-                # Check if any role keyword matches the title (case-insensitive)
-                # Use word boundaries to avoid substring matches like "CTO" in "Director"
-                if any(
-                    role.lower() in title_lower.split()
-                    or role.lower() in title_lower.replace(".", " ").split()
-                    for role in roles
-                ):
-                    filtered_contacts.append(contact)
-            return filtered_contacts
-
-        return all_contacts
+        logger.debug(
+            "LEAD_GEN: No real contacts found for %s. Returning empty.", company_name
+        )
+        return []
 
     def _infer_department(self, title: str) -> str:
         """Infer department from job title.
@@ -2336,7 +2265,7 @@ class HunterAgent(SkillAwareAgent):
         try:
             db.table("lead_memory_events").insert({
                 "id": str(uuid4()),
-                "user_id": user_id,
+                "user_id": self.user_id,
                 "lead_id": lead_id,
                 "event_type": "discovery",
                 "title": f"Lead discovered via hunter_discovery",
@@ -2584,6 +2513,42 @@ class HunterAgent(SkillAwareAgent):
                     break
         return matched
 
+    def _score_size_match(self, company_size_str: str, icp_size: dict) -> float:
+        """Parse and compare company size numerically. Returns 0.0-1.0."""
+        if not company_size_str or not icp_size:
+            return 0.5  # No data = neutral, not penalised
+
+        import re
+        size_lower = str(company_size_str).lower()
+        employee_count = None
+
+        # Format: "51-200", "201-500"
+        m = re.search(r'(\d+)\s*[-–]\s*(\d+)', size_lower)
+        if m:
+            employee_count = (int(m.group(1)) + int(m.group(2))) // 2
+        else:
+            # Format: "1,200 employees", "~500 people"
+            m = re.search(r'(\d[\d,]+)\s*(?:employ|people|staff)', size_lower)
+            if m:
+                employee_count = int(m.group(1).replace(',', ''))
+
+        if employee_count is None:
+            return 0.5  # Cannot parse = neutral
+
+        icp_min = icp_size.get("min", 0)
+        icp_max = icp_size.get("max", 999999)
+
+        if icp_min <= employee_count <= icp_max:
+            return 1.0
+
+        # Partial credit: within 2x the range boundary
+        if employee_count < icp_min:
+            ratio = employee_count / icp_min if icp_min > 0 else 0
+            return max(0.0, ratio * 0.5)
+        else:
+            ratio = icp_max / employee_count if employee_count > 0 else 0
+            return max(0.0, ratio * 0.5)
+
     async def _score_fit(
         self,
         company: dict[str, Any],
@@ -2617,14 +2582,18 @@ class HunterAgent(SkillAwareAgent):
             else:
                 gaps.append(f"Industry mismatch: {company_industry} vs {icp_industries}")
 
-        # Size match: 25% weight (exact match)
+        # Size match: 25% weight (numeric range comparator)
         size_weight = 0.25
         company_size = company.get("size", "")
         icp_size = icp.get("size", "")
         if company_size and icp_size:
-            if company_size == icp_size:
-                score += size_weight * 100
-                fit_reasons.append(f"Size match: {company_size}")
+            icp_size_dict = icp_size if isinstance(icp_size, dict) else {}
+            size_match = self._score_size_match(str(company_size), icp_size_dict)
+            score += size_weight * 100 * size_match
+            if size_match >= 0.8:
+                fit_reasons.append(f"Size match ({size_match:.0%}): {company_size}")
+            elif size_match > 0:
+                fit_reasons.append(f"Partial size match ({size_match:.0%}): {company_size}")
             else:
                 gaps.append(f"Size mismatch: {company_size} vs {icp_size}")
 
