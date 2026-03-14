@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -48,6 +49,12 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 _NOT_SET = object()  # Sentinel for lazy initialization
+
+# Hard timeout for goal execution — prevents runaway goals from hanging forever.
+GOAL_TIMEOUT_MINUTES = 15
+
+# Maximum quality-checker retries before accepting output as-is.
+MAX_QUALITY_RETRIES = 2
 
 
 def strip_internal_tags(message: str) -> str:
@@ -4675,6 +4682,17 @@ class GoalExecutionService:
             user_id: The user who owns this goal.
         """
         event_bus = EventBus.get_instance()
+        _goal_start_mono = time.monotonic()
+        _goal_timeout_sec = GOAL_TIMEOUT_MINUTES * 60
+
+        def _check_goal_timeout() -> None:
+            """Raise TimeoutError if goal has exceeded GOAL_TIMEOUT_MINUTES."""
+            elapsed = time.monotonic() - _goal_start_mono
+            if elapsed > _goal_timeout_sec:
+                raise TimeoutError(
+                    f"Goal {goal_id} exceeded {GOAL_TIMEOUT_MINUTES}-minute timeout "
+                    f"(elapsed: {elapsed / 60:.1f} min)"
+                )
 
         try:
             # Guard: don't execute if goal is still awaiting user approval
@@ -4947,6 +4965,7 @@ class GoalExecutionService:
                             raise
 
                 for layer_idx, layer in enumerate(layers):
+                    _check_goal_timeout()
                     logger.warning(
                         "[GOAL-EXEC] Executing layer %d/%d with %d tasks: %s",
                         layer_idx + 1,
@@ -5018,6 +5037,7 @@ class GoalExecutionService:
                 )
                 prev_task_result: dict[str, Any] | None = None
                 for task_idx, task in enumerate(tasks):
+                    _check_goal_timeout()
                     logger.warning(
                         "[GOAL-EXEC] Sequential task %d/%d: agent=%s title=%s",
                         task_idx + 1,
@@ -5204,6 +5224,47 @@ class GoalExecutionService:
         except asyncio.CancelledError:
             logger.info("Goal background execution cancelled", extra={"goal_id": goal_id})
             raise
+        except TimeoutError as e:
+            elapsed_min = (time.monotonic() - _goal_start_mono) / 60
+            logger.error(
+                "[GOAL-EXEC] Goal TIMED OUT after %.1f min (limit: %d min)",
+                elapsed_min,
+                GOAL_TIMEOUT_MINUTES,
+                extra={"goal_id": goal_id},
+            )
+            # Mark goal as failed (not paused) — timeout is terminal
+            try:
+                self._db.table("goal_agents").update(
+                    {"status": "failed", "updated_at": datetime.now(UTC).isoformat()}
+                ).eq("goal_id", goal_id).in_(
+                    "status", ["pending", "running"]
+                ).execute()
+            except Exception:
+                logger.debug("Failed to mark goal agents as failed", exc_info=True)
+            try:
+                await self._activity.record(
+                    user_id=user_id,
+                    activity_type="goal_failed",
+                    title="Goal timed out",
+                    description=f"Goal {goal_id} exceeded {GOAL_TIMEOUT_MINUTES}-minute limit.",
+                    confidence=1.0,
+                    related_entity_type="goal",
+                    related_entity_id=goal_id,
+                    metadata={"error": str(e)[:500], "elapsed_min": round(elapsed_min, 1)},
+                )
+            except Exception:
+                logger.debug("Failed to record goal_failed activity", exc_info=True)
+            self._db.table("goals").update(
+                {"status": "failed", "updated_at": datetime.now(UTC).isoformat()}
+            ).eq("id", goal_id).execute()
+            await event_bus.publish(
+                GoalEvent(
+                    goal_id=goal_id,
+                    user_id=user_id,
+                    event_type="goal.error",
+                    data={"error": str(e), "reason": "timeout"},
+                )
+            )
         except Exception as e:
             logger.error(
                 "Goal background execution failed",

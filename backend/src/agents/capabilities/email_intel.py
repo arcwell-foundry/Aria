@@ -247,6 +247,14 @@ class EmailIntelligenceCapability(BaseCapability):
                 error=str(exc),
                 execution_time_ms=elapsed_ms,
             )
+        except Exception as exc:
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            logger.exception("Email intelligence capability unexpected error")
+            return CapabilityResult(
+                success=False,
+                error=f"{type(exc).__name__}: {exc}",
+                execution_time_ms=elapsed_ms,
+            )
 
     def get_data_classes_accessed(self) -> list[str]:
         """Declare data classification levels."""
