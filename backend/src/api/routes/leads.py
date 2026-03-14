@@ -213,6 +213,12 @@ async def list_leads(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=sanitize_error(e),
         ) from e
+    except Exception as e:
+        logger.exception("Unexpected error in list_leads")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list leads: {str(e)}",
+        ) from e
 
 
 # --- Lead Generation Workflow (US-939) ---
