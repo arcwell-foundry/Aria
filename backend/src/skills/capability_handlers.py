@@ -13,6 +13,7 @@ Usage::
 
 import logging
 import time
+import traceback
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -75,6 +76,12 @@ async def _execute_capability(
     """
     start_ms = time.perf_counter()
     try:
+        logger.debug(
+            "Instantiating capability %s for user %s with task: %s",
+            skill_entry.skill_path,
+            user_id,
+            task,
+        )
         db = SupabaseClient.get_client()
         user_ctx = UserContext(user_id=user_id)
 
@@ -85,6 +92,7 @@ async def _execute_capability(
             user_context=user_ctx,
         )
 
+        logger.debug("Executing capability %s", skill_entry.skill_path)
         result: CapabilityResult = await cap.execute(task, context={})
 
         elapsed_ms = int((time.perf_counter() - start_ms) * 1000)
@@ -101,15 +109,23 @@ async def _execute_capability(
 
     except Exception as e:
         elapsed_ms = int((time.perf_counter() - start_ms) * 1000)
-        logger.exception(
-            "Capability %s execution failed: %s",
+        tb_str = traceback.format_exc()
+        logger.error(
+            "Capability %s execution failed after %dms\n"
+            "Exception: %s: %s\n"
+            "Task: %s\n"
+            "Full traceback:\n%s",
             skill_entry.skill_path,
-            e,
+            elapsed_ms,
+            type(e).__name__,
+            str(e),
+            task,
+            tb_str,
         )
         return AgentResult(
             success=False,
             data={"skill_path": skill_entry.skill_path},
-            error=f"Capability execution failed: {e}",
+            error=f"{type(e).__name__}: {e}",
             execution_time_ms=elapsed_ms,
         )
 
