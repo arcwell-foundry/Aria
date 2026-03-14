@@ -24,6 +24,20 @@ from src.skills.index import SkillIndexEntry
 
 logger = logging.getLogger(__name__)
 
+# Default task type for each capability, used when the caller doesn't set
+# task["type"].  This is the primary / most-common operation for each one.
+_CAPABILITY_DEFAULT_TYPES: dict[str, str] = {
+    "aria:capability/contact-enricher": "enrich_contact",
+    "aria:capability/web-intelligence": "deep_scrape",
+    "aria:capability/signal-radar": "scan_all_sources",
+    "aria:capability/linkedin-intelligence": "linkedin_enrich",
+    "aria:capability/email-intelligence": "send_email",
+    "aria:capability/calendar-intelligence": "get_upcoming",
+    "aria:capability/crm-deep-sync": "crm_sync",
+    "aria:capability/meeting-intelligence": "process_transcript",
+    "aria:capability/team-messenger": "send_briefing",
+}
+
 # Type alias for capability handler functions
 CapabilityHandler = Callable[
     [str, dict[str, Any], SkillIndexEntry],
@@ -91,6 +105,19 @@ async def _execute_capability(
             knowledge_graph=None,
             user_context=user_ctx,
         )
+
+        # Ensure the task dict has a "type" field.  Agent-originated tasks
+        # (from _build_agent_task in goal_execution) don't set one, so every
+        # capability falls into "Unknown task type: " without this.
+        if not task.get("type"):
+            default_type = _CAPABILITY_DEFAULT_TYPES.get(skill_entry.skill_path)
+            if default_type:
+                task = {**task, "type": default_type}
+                logger.info(
+                    "Derived task type '%s' from skill_path '%s'",
+                    default_type,
+                    skill_entry.skill_path,
+                )
 
         logger.debug("Executing capability %s", skill_entry.skill_path)
         result: CapabilityResult = await cap.execute(task, context={})
