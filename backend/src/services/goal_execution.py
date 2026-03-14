@@ -2498,7 +2498,7 @@ class GoalExecutionService:
                             "signals_found": [],
                             "quality_tier": "icp_only",
                         }
-                        fit_score = min(fit_score, 50)
+                        fit_score = min(fit_score, 65)
                 except Exception:
                     logger.debug("[PERSIST-HUNTER] Market signal lookup failed for %s", company_name)
                     signal_quality = {"signal_bonus": 0, "signals_found": [], "quality_tier": "icp_only"}
@@ -3363,6 +3363,10 @@ class GoalExecutionService:
     ) -> int:
         """Create persona-specific email drafts for each contact.
 
+        Routes through ScribeAgent.draft_lead_outreach() for signal-first,
+        persona-mapped emails with Exa research and compliance scanning.
+        Falls back to inline Haiku drafting if Scribe fails.
+
         Args:
             user_id: The user's ID.
             lead_id: The discovered_lead ID to link drafts to.
@@ -3379,6 +3383,20 @@ class GoalExecutionService:
 
         created = 0
 
+        # Try to instantiate ScribeAgent once for all contacts
+        scribe = None
+        try:
+            from src.agents.scribe import ScribeAgent
+
+            scribe = ScribeAgent(
+                llm_client=self._llm,
+                user_id=user_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "[LEAD-ASSEMBLY] Failed to init ScribeAgent, will use Haiku fallback: %s", e,
+            )
+
         for contact in contacts[:3]:
             if not isinstance(contact, dict):
                 continue
@@ -3390,8 +3408,37 @@ class GoalExecutionService:
             if contact_name.endswith(f"at {company_name}") and not contact.get("source") == "exa_search_person":
                 continue
 
+            # --- Primary path: ScribeAgent (signal-first, persona-mapped) ---
+            if scribe is not None:
+                try:
+                    draft_result = await scribe.draft_lead_outreach(
+                        recipient_name=contact_name,
+                        recipient_title=title,
+                        recipient_email=contact.get("email", ""),
+                        company_name=company_name,
+                        company_domain=contact.get("company_domain", ""),
+                        signal_hook=signal_summary or "",
+                        fit_analysis=fit_analysis or "",
+                        lead_id=lead_id,
+                        recipient_linkedin=contact.get("linkedin_url", ""),
+                    )
+                    # Scribe's _track_outreach_in_memory already inserted email_drafts
+                    created += 1
+                    logger.info(
+                        "[LEAD-ASSEMBLY] Scribe drafted email for %s at %s (compliance: %s)",
+                        contact_name,
+                        company_name,
+                        "passed" if draft_result.get("compliance_scan", {}).get("passed") else "flagged",
+                    )
+                    continue  # Success — skip Haiku fallback
+                except Exception as e:
+                    logger.warning(
+                        "[LEAD-ASSEMBLY] Scribe failed for %s at %s, falling back to Haiku: %s",
+                        contact_name, company_name, e,
+                    )
+
+            # --- Fallback: inline Haiku draft ---
             try:
-                # Determine tone from role
                 title_lower = title.lower()
                 if any(kw in title_lower for kw in ("ceo", "president", "chief", "svp", "vp")):
                     tone = "executive"
@@ -3403,7 +3450,6 @@ class GoalExecutionService:
                     tone = "professional"
                     purpose = "intro"
 
-                # Generate email via LLM (Haiku)
                 prompt = (
                     f"Draft a brief outreach email to {contact_name} ({title}) at {company_name}.\n\n"
                     f"Context:\n"
@@ -3431,7 +3477,6 @@ class GoalExecutionService:
 
                 subject = f"Quick question for {company_name}"
                 if signal_summary:
-                    # Extract a keyword from the signal for the subject
                     words = signal_summary.split()[:6]
                     subject = f"Re: {' '.join(words)}..." if len(words) > 3 else f"Regarding {company_name}"
 
@@ -3448,7 +3493,7 @@ class GoalExecutionService:
                         "signal": signal_summary[:200] if signal_summary else "",
                         "fit_analysis": fit_analysis[:200] if fit_analysis else "",
                         "company": company_name,
-                        "source": "lead_assembly",
+                        "source": "lead_assembly_haiku_fallback",
                     },
                     "lead_memory_id": None,
                     "status": "pending_review",

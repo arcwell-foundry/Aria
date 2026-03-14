@@ -728,6 +728,129 @@ class ScribeAgent(SkillAwareAgent):
 
         return True
 
+    async def draft_lead_outreach(
+        self,
+        recipient_name: str,
+        recipient_title: str,
+        recipient_email: str,
+        company_name: str,
+        signal_hook: str,
+        fit_analysis: str,
+        lead_id: str,
+        recipient_linkedin: str = "",
+        company_domain: str = "",
+    ) -> dict[str, Any]:
+        """Draft a signal-first outreach email for a lead-gen contact.
+
+        Uses the full Scribe pipeline: persona mapping, Exa research,
+        cold memory, ELITE_EMAIL_FRAMEWORK, compliance scan, and memory
+        tracking. The signal_hook becomes the literal first-sentence opener.
+
+        Args:
+            recipient_name: Contact's full name.
+            recipient_title: Contact's job title.
+            recipient_email: Contact's email address.
+            company_name: Target company name.
+            signal_hook: The trigger event — used as email opener.
+            fit_analysis: ICP fit analysis text.
+            lead_id: discovered_lead ID to link drafts to.
+            recipient_linkedin: Optional LinkedIn URL for Exa research.
+            company_domain: Optional company domain.
+
+        Returns:
+            Dict with subject, body, compliance_scan, metadata.
+
+        Raises:
+            Exception: Propagated if the entire pipeline fails.
+        """
+        recipient = {
+            "name": recipient_name,
+            "title": recipient_title,
+            "email": recipient_email,
+            "company": company_name,
+            "linkedin_url": recipient_linkedin,
+        }
+
+        # 1. Load outreach intelligence (persona, trigger events, company facts)
+        outreach_intel = await self._load_outreach_intelligence(
+            recipient=recipient,
+            lead_memory_id=lead_id,
+        )
+        persona_approach = outreach_intel.get("persona_approach", "")
+        company_facts = outreach_intel.get("company_facts", [])
+
+        # 2. Build context with signal-first framing
+        context_parts = []
+        if signal_hook:
+            context_parts.append(
+                f"CRITICAL — Use this signal as the email opener (first sentence): {signal_hook}"
+            )
+        if fit_analysis:
+            context_parts.append(f"ICP fit analysis: {fit_analysis}")
+        if company_facts:
+            context_parts.append(
+                f"Known facts about {company_name}: {'; '.join(company_facts[:3])}"
+            )
+        if company_domain:
+            context_parts.append(f"Company domain: {company_domain}")
+
+        context = "\n".join(context_parts)
+
+        # 3. Determine tone from title
+        title_lower = recipient_title.lower()
+        if any(kw in title_lower for kw in ("ceo", "president", "chief", "svp", "vp")):
+            tone = "formal"
+        elif any(kw in title_lower for kw in ("procurement", "purchasing", "supply")):
+            tone = "formal"
+        else:
+            tone = "formal"
+
+        # 4. Build goal with signal-first instruction and brevity constraint
+        goal = (
+            f"Write a cold outreach email to {recipient_name} ({recipient_title}) "
+            f"at {company_name}. "
+            f"The FIRST SENTENCE must reference this signal event: '{signal_hook}'. "
+            f"Do NOT start with 'I hope this email finds you well', 'My name is', "
+            f"or 'I wanted to reach out'. "
+            f"Keep the entire email between 150-200 words. "
+            f"End with a single, specific call to action."
+        )
+
+        # 5. Draft via the full Scribe pipeline
+        draft_result = await self._draft_email(
+            recipient=recipient,
+            context=context,
+            goal=goal,
+            tone=tone,
+            persona_approach=persona_approach,
+        )
+
+        subject = draft_result.get("subject", f"Regarding {company_name}")
+        body = draft_result.get("body", "")
+
+        # 6. Run compliance scan
+        compliance_scan = self._run_compliance_scan(
+            subject=subject,
+            body=body,
+            recipient=recipient,
+        )
+
+        # 7. Track in memory (email_drafts, lead_memory_events, aria_activity)
+        await self._track_outreach_in_memory(
+            content=draft_result,
+            recipient=recipient,
+            compliance_scan=compliance_scan,
+            lead_memory_id=lead_id,
+        )
+
+        return {
+            "subject": subject,
+            "body": body,
+            "compliance_scan": compliance_scan,
+            "metadata": draft_result.get("metadata", {}),
+            "source": "lead_gen_scribe",
+        }
+
     async def execute(self, task: dict[str, Any]) -> AgentResult:
         """Execute the draft task.
 
