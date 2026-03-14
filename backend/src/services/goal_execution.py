@@ -18,6 +18,7 @@ Agent types and their analyses:
 import asyncio
 import json
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -47,6 +48,46 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 _NOT_SET = object()  # Sentinel for lazy initialization
+
+
+def strip_internal_tags(message: str) -> str:
+    """Strip internal routing tags that should never appear in user-facing text.
+
+    Tags stripped:
+    - GOAL_EXECUTION_START, GOAL_RETROSPECTIVE
+    - <goal_retrospective>, <lead_gen_results>
+    - [PLAN_APPROVED], [GOAL_*]
+
+    Args:
+        message: Raw message that may contain internal tags.
+
+    Returns:
+        Cleaned message with all internal tags removed.
+    """
+    if not message:
+        return message
+
+    # Strip raw tag strings
+    for tag in [
+        "goal_retrospective",
+        "lead_gen_results",
+        "GOAL_EXECUTION_START",
+        "GOAL_RETROSPECTIVE",
+        "goal_completion",
+        "[PLAN_APPROVED]",
+    ]:
+        message = message.replace(tag, "")
+
+    # Strip XML-like internal tags
+    message = re.sub(
+        r"</?(?:goal_retrospective|lead_gen_results|GOAL_EXECUTION_START|GOAL_RETROSPECTIVE)[^>]*>",
+        "",
+        message,
+    )
+    # Strip all [GOAL_*] tags
+    message = re.sub(r'\[GOAL_[A-Z_]+[^\]]*\]', '', message)
+
+    return message.strip()
 
 _AGENT_TO_CATEGORY: dict[str, str] = {
     "hunter": "lead_discovery",
@@ -539,7 +580,7 @@ class GoalExecutionService:
                     try:
                         await ws_manager.send_aria_message(
                             user_id=user_id,
-                            message=gap_message,
+                            message=strip_internal_tags(gap_message),
                             rich_content=[
                                 {
                                     "type": "provisioning_options",
@@ -778,7 +819,7 @@ class GoalExecutionService:
             )
             await ws_manager.send_aria_message(
                 user_id=user_id,
-                message=msg,
+                message=strip_internal_tags(msg),
                 rich_content=rich,
                 suggestions=sugg,
             )
@@ -2321,7 +2362,7 @@ class GoalExecutionService:
         try:
             await ws_manager.send_aria_message(
                 user_id=user_id,
-                message=message,
+                message=strip_internal_tags(message),
                 rich_content=[],
                 suggestions=[],
             )
@@ -4432,7 +4473,7 @@ class GoalExecutionService:
 
             await ws_manager.send_aria_message(
                 user_id=user_id,
-                message=plan_message,
+                message=strip_internal_tags(plan_message),
                 rich_content=[
                     {
                         "type": "execution_plan",
@@ -6115,19 +6156,7 @@ class GoalExecutionService:
 
             # Sanitize message: strip raw internal tags that should never
             # appear in user-facing text
-            import re as _re
-
-            for _tag in [
-                "goal_retrospective", "lead_gen_results",
-                "GOAL_EXECUTION_START", "GOAL_RETROSPECTIVE", "goal_completion",
-                "[PLAN_APPROVED]",
-            ]:
-                message = message.replace(_tag, "")
-            # Strip any remaining XML-like internal tags
-            message = _re.sub(r"</?(?:goal_retrospective|lead_gen_results|GOAL_EXECUTION_START|GOAL_RETROSPECTIVE)[^>]*>", "", message)
-            # Strip all [GOAL_*] tags
-            message = _re.sub(r'\[GOAL_[A-Z_]+[^\]]*\]', '', message)
-            message = message.strip()
+            message = strip_internal_tags(message)
 
             await ws_manager.send_aria_message(
                 user_id=user_id,

@@ -416,6 +416,28 @@ export function ExecutionPlanCard({ data }: ExecutionPlanCardProps) {
     };
   }, [data.goal_id]);
 
+  // Polling fallback: Check goal status every 10s while executing
+  // (in case WebSocket drops during long-running goals)
+  useEffect(() => {
+    if (!isApproved || isCompleted) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const response = await apiClient.get(`/goals/${data.goal_id}`);
+        const goal = response.data;
+        if (goal.status === 'complete' || goal.status === 'failed') {
+          setIsCompleted(true);
+          clearInterval(interval);
+        }
+      } catch (err) {
+        // Silently fail - WebSocket is primary, this is fallback
+        console.debug('Goal status poll failed:', err);
+      }
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [isApproved, isCompleted, data.goal_id]);
+
   const handleApprove = useCallback(async () => {
     setIsLoading(true);
     setError(null);

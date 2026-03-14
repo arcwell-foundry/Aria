@@ -321,6 +321,7 @@ class SkillExecutor:
             task_id=task_id,
             agent_id=agent_id,
             security_flags=security_flags,
+            sandbox_config=sandbox_config.model_dump() if hasattr(sandbox_config, 'model_dump') else sandbox_config,
             previous_hash=previous_hash,
             entry_hash=entry_hash,
         )
