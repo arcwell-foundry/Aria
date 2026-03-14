@@ -1436,6 +1436,9 @@ class HunterAgent(SkillAwareAgent):
                     enriched.setdefault("linkedin_url", default_linkedin)
                     enriched.setdefault("funding_stage", default_funding)
 
+                    # Supplement with Apollo company enrichment for structured data
+                    enriched = await self._apollo_enrich_company(enriched)
+
                     self._company_cache[cache_key] = enriched
                     return enriched
             except Exception as exc:
@@ -1457,6 +1460,9 @@ class HunterAgent(SkillAwareAgent):
                 enriched.setdefault("linkedin_url", default_linkedin)
                 enriched.setdefault("funding_stage", default_funding)
 
+                # Supplement with Apollo company enrichment for structured data
+                enriched = await self._apollo_enrich_company(enriched)
+
                 self._company_cache[cache_key] = enriched
                 return enriched
         except Exception as exc:
@@ -1469,10 +1475,125 @@ class HunterAgent(SkillAwareAgent):
         enriched["founded_year"] = None
         enriched["revenue"] = "Unknown"
 
+        # Supplement with Apollo company enrichment for structured data
+        enriched = await self._apollo_enrich_company(enriched)
+
         # Store in cache
         self._company_cache[cache_key] = enriched
 
         return enriched
+
+    async def _apollo_enrich_company(
+        self,
+        company: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Supplement company data with Apollo org enrichment and job postings.
+
+        Only calls paid Apollo search_company() if domain exists and
+        employee_count is missing. Also fetches job postings (FREE) to
+        detect hiring signals relevant to bioprocessing.
+
+        Args:
+            company: Company data dict to supplement.
+
+        Returns:
+            Company dict with Apollo-sourced fields merged in.
+        """
+        domain = company.get("domain", "")
+        if not domain or company.get("employee_count"):
+            return company
+
+        apollo = self._get_apollo_provider()
+        if not apollo or not settings.apollo_configured:
+            return company
+
+        # Check credit budget before paid org_enrich call
+        credits_remaining = await apollo.get_credits_remaining()
+        if credits_remaining < 10:
+            logger.debug("Skipping Apollo company enrich — credits low (%d)", credits_remaining)
+            return company
+
+        company_name = company.get("name", "Unknown")
+        try:
+            enrichment = await apollo.search_company(company_name)
+            if enrichment and enrichment.confidence > 0:
+                company.setdefault("employee_count", enrichment.employee_count)
+                company.setdefault("industry", enrichment.industry)
+                company.setdefault("revenue_range", enrichment.revenue_range)
+                company.setdefault("headquarters", enrichment.headquarters)
+                if enrichment.founded_year:
+                    company.setdefault("founded_year", enrichment.founded_year)
+                if enrichment.latest_funding_round:
+                    company.setdefault("funding_stage", enrichment.latest_funding_round)
+
+                # Extract technologies from raw Apollo data
+                raw = enrichment.raw_data or {}
+                apollo_techs = raw.get("technology_names", [])
+                if apollo_techs and not company.get("technologies"):
+                    company["technologies"] = apollo_techs
+
+                # Fetch job postings (FREE) if we got an organization ID
+                org_id = raw.get("id", "")
+                if org_id:
+                    await self._apollo_scan_job_postings(company, apollo, org_id, domain)
+
+                logger.info(
+                    "Apollo enriched '%s': employee_count=%s, industry=%s",
+                    company_name,
+                    company.get("employee_count"),
+                    company.get("industry"),
+                )
+        except Exception as e:
+            logger.debug("Apollo enrich failed for %s: %s", domain, e)
+
+        return company
+
+    async def _apollo_scan_job_postings(
+        self,
+        company: dict[str, Any],
+        apollo: Any,
+        organization_id: str,
+        domain: str,
+    ) -> None:
+        """Scan Apollo job postings for bioprocess hiring signals.
+
+        Companies hiring bioprocess engineers are likely scaling
+        manufacturing — a strong buying signal for life sciences
+        commercial teams.
+
+        Args:
+            company: Company dict to append signals to.
+            apollo: ApolloEnrichmentProvider instance.
+            organization_id: Apollo organization ID.
+            domain: Company domain for the API call.
+        """
+        BIOPROCESS_ROLES = [
+            "upstream", "downstream", "tff", "chromatography",
+            "bioreactor", "bioprocess", "filtration", "cell culture",
+            "purification", "fermentation",
+        ]
+        try:
+            postings = await apollo.get_job_postings(
+                organization_id=organization_id,
+                domain=domain,
+            )
+            if postings:
+                company["job_postings_count"] = len(postings)
+                relevant = [
+                    p for p in postings
+                    if any(r in p.get("title", "").lower() for r in BIOPROCESS_ROLES)
+                ]
+                if relevant:
+                    company.setdefault("signals", []).append(
+                        f"Actively hiring {relevant[0]['title']} — manufacturing scale-up signal"
+                    )
+                    company["bioprocess_hiring"] = True
+                    logger.info(
+                        "Hiring signal for '%s': %d bioprocess roles found",
+                        company.get("name"), len(relevant),
+                    )
+        except Exception as e:
+            logger.debug("Apollo job postings scan failed for %s: %s", domain, e)
 
     async def _find_contacts_via_llm(
         self,
@@ -1643,6 +1764,10 @@ class HunterAgent(SkillAwareAgent):
                         logger.info(
                             f"Apollo search_people found {len(contacts)} contacts for '{company_name}'"
                         )
+
+                        # Reveal verified emails for contacts with LinkedIn but no email
+                        contacts = await self._reveal_contact_emails(apollo, contacts)
+
                         return contacts
 
             except Exception as exc:
@@ -1705,6 +1830,64 @@ class HunterAgent(SkillAwareAgent):
             "LEAD_GEN: No real contacts found for %s. Returning empty.", company_name
         )
         return []
+
+    async def _reveal_contact_emails(
+        self,
+        apollo: Any,
+        contacts: list[dict[str, Any]],
+        max_reveals: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Reveal verified emails for contacts via Apollo enrich_person.
+
+        Spends 1 credit per contact. Only enriches contacts that have a
+        LinkedIn URL but no email. Checks credit budget first and skips
+        if credits are too low.
+
+        Args:
+            apollo: ApolloEnrichmentProvider instance.
+            contacts: Contact list from search_people.
+            max_reveals: Maximum contacts to reveal (default 3).
+
+        Returns:
+            Updated contacts list with verified emails where available.
+        """
+        needing_email = [
+            c for c in contacts
+            if c.get("linkedin_url") and not c.get("email")
+        ][:max_reveals]
+
+        if not needing_email:
+            return contacts
+
+        credits_remaining = await apollo.get_credits_remaining()
+        if credits_remaining < len(needing_email):
+            logger.debug(
+                "Skipping email reveal — need %d credits but only %d remaining",
+                len(needing_email), credits_remaining,
+            )
+            return contacts
+
+        for contact in needing_email:
+            try:
+                revealed = await apollo.enrich_person(
+                    linkedin_url=contact["linkedin_url"],
+                    first_name=contact.get("first_name", ""),
+                    last_name=contact.get("last_name", ""),
+                    reveal_emails=True,
+                    reveal_phone=False,
+                )
+                if revealed and not revealed.get("error") and revealed.get("email"):
+                    contact["email"] = revealed["email"]
+                    contact["email_verified"] = True
+                    contact["source"] = "apollo_enrich"
+                    logger.info(
+                        "Revealed email for %s via Apollo enrich",
+                        contact.get("name", "unknown"),
+                    )
+            except Exception as e:
+                logger.debug("Email reveal failed for %s: %s", contact.get("name"), e)
+
+        return contacts
 
     def _infer_department(self, title: str) -> str:
         """Infer department from job title.

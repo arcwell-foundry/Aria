@@ -604,6 +604,38 @@ class ApolloEnrichmentProvider(BaseEnrichmentProvider):
             logger.error(f"Apollo job postings error: {e}")
             return []
 
+    async def get_credits_remaining(self) -> int:
+        """Return remaining Apollo credits for the configured company.
+
+        Uses ApolloClient.get_usage_summary() (source of truth from
+        apollo_credit_log) and enforces a 90% ceiling so we never
+        exhaust the full monthly allocation.
+
+        Returns:
+            Remaining credits (capped at 90% of limit), or 0 if
+            unconfigured / exhausted.
+        """
+        if not self._company_id:
+            return 0
+        try:
+            summary = await self._client.get_usage_summary(self._company_id)
+            if not summary.get("configured"):
+                return 0
+            limit = summary.get("limit", 0)
+            used = summary.get("used", 0)
+            # Never spend more than 90% of monthly allocation
+            safe_limit = int(limit * 0.9)
+            remaining = max(0, safe_limit - used)
+            if remaining < 10:
+                logger.warning(
+                    "Apollo credits low for company %s: %d remaining (used %d / %d limit)",
+                    self._company_id, remaining, used, limit,
+                )
+            return remaining
+        except Exception as e:
+            logger.error("Failed to check Apollo credits: %s", e)
+            return 0
+
     async def health_check(self) -> bool:
         """Verify Apollo API is reachable and authenticated.
 
