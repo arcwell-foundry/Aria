@@ -54,6 +54,33 @@ _SIGNAL_KEYWORDS: dict[str, int] = {
 # Minimum score to trigger a lead_gen goal
 _MIN_TRIGGER_SCORE = 70
 
+# How many days before a signal type becomes public news (first mover window).
+# ARIA alerts the user to act before competitors learn about the signal.
+SIGNAL_TO_NEWS_LAG: dict[str, int] = {
+    "fda_510k": 2,
+    "sec_filing": 1,
+    "clinical_trial": 3,
+    "patent": 7,
+    "facility_expansion": 5,
+    "hiring": 14,
+    "fda_approval": 1,
+    "funding": 1,
+    "fda_warning_letter": 2,
+    "leadership": 3,
+    "partnership": 1,
+}
+
+# Signal types that indicate active buying intent
+BUYING_SIGNAL_TYPES: set[str] = {
+    "facility_expansion",
+    "fda_approval",
+    "clinical_trial",
+    "fda_510k",
+    "fda_warning_letter",
+    "hiring",
+    "funding",
+}
+
 
 class SignalLeadTrigger:
     """Converts high-relevance market signals into lead generation goals.
@@ -177,6 +204,52 @@ class SignalLeadTrigger:
                         score,
                         user_id,
                     )
+
+                    # Surface a proposal in the action queue with first-mover context
+                    first_mover_days = SIGNAL_TO_NEWS_LAG.get(signal_type, 7)
+                    try:
+                        self._db.table("aria_action_queue").insert(
+                            {
+                                "user_id": user_id,
+                                "agent": "signal_lead_trigger",
+                                "action_type": "lead_discovered",
+                                "title": f"{company} — {signal_type.replace('_', ' ')} detected",
+                                "description": (
+                                    f"{headline[:150]}. This is a "
+                                    f"{signal_type.replace('_', ' ')} signal — "
+                                    f"want me to find the right contact and "
+                                    f"draft outreach?"
+                                ),
+                                "aria_reasoning": (
+                                    f"I detected a buying signal for {company}: "
+                                    f"{headline[:100]}. Signal type "
+                                    f"'{signal_type}' typically becomes public "
+                                    f"knowledge in {first_mover_days} days. "
+                                    f"You have a {first_mover_days}-day window "
+                                    f"to be the first call they get from a "
+                                    f"bioprocessing equipment vendor."
+                                ),
+                                "status": "pending",
+                                "risk_level": "low",
+                                "payload": {
+                                    "company_name": company,
+                                    "signal_id": signal_id,
+                                    "signal_type": signal_type,
+                                    "headline": headline[:200],
+                                    "relevance_score": score,
+                                    "trigger": "signal_detected",
+                                    "auto_action": "lead_discovery_goal",
+                                    "goal_id": goal_id,
+                                    "first_mover_window_days": first_mover_days,
+                                },
+                            }
+                        ).execute()
+                    except Exception as aq_exc:
+                        logger.warning(
+                            "SignalLeadTrigger: action queue insert failed: %s",
+                            aq_exc,
+                        )
+
                 except Exception as exc:
                     logger.exception(
                         "SignalLeadTrigger: failed to create goal for signal %s: %s",

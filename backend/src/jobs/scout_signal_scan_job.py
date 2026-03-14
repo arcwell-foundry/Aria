@@ -183,6 +183,28 @@ async def run_scout_signal_scan_job() -> dict[str, Any]:
 
                 stats["signals_detected"] += 1
 
+                # Cascade signal to downstream systems (lead health, memory, battle cards, pulse)
+                try:
+                    from src.services.signal_cascade_service import SignalCascadeService
+
+                    cascade_svc = SignalCascadeService()
+                    await cascade_svc.cascade(
+                        {
+                            "id": signal_id,
+                            "company_name": canonical_company_name,
+                            "signal_type": signal.get("signal_type", "news"),
+                            "headline": headline,
+                            "summary": cleaned_summary,
+                            "source_name": signal.get("source", "scout_agent"),
+                            "relevance_score": relevance,
+                            "detected_at": datetime.now(UTC).isoformat(),
+                            "metadata": signal.get("metadata", {}),
+                        },
+                        user_id,
+                    )
+                except Exception:
+                    logger.debug("Signal cascade failed for: %s", headline[:80])
+
                 # Check watch topics for this signal
                 try:
                     from src.intelligence.watch_topics_service import WatchTopicsService

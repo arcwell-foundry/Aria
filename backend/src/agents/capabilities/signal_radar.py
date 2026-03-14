@@ -88,6 +88,70 @@ SIGNAL_TYPES = {
     "market_trend",
 }
 
+# Life sciences buying signal boost matrix — scores a signal's predictive
+# value for bioprocessing equipment purchases.
+BUYING_SIGNAL_BOOSTS: dict[str, float] = {
+    # Direct equipment purchase signals
+    "facility_expansion": 0.95,
+    "new_manufacturing_site": 0.90,
+    "clinical_trial_phase3_start": 0.90,
+    "fda_approval": 0.85,
+    "hiring_bioprocess": 0.85,
+    "hiring_upstream": 0.85,
+    "hiring_downstream": 0.85,
+    "fda_510k": 0.80,
+    "capacity_expansion": 0.80,
+    # Likely need equipment soon
+    "funding_series_b_plus": 0.75,
+    "partnership_cdmo": 0.75,
+    "fda_warning_letter": 0.70,
+    "patent_bioprocess": 0.65,
+    # Competitive intelligence
+    "competitor_price_change": 0.60,
+    "competitor_partnership": 0.55,
+    "leadership_change": 0.50,
+    # Map existing signal_types to buying signal scores
+    "clinical_trial": 0.70,
+    "sec_filing": 0.50,
+    "patent": 0.55,
+    "funding": 0.75,
+    "leadership": 0.50,
+    "partnership": 0.55,
+    "hiring": 0.70,
+}
+
+REGULATORY_DEAL_IMPLICATIONS: dict[str, str] = {
+    "fda_approval": (
+        "Commercial manufacturing launch — equipment purchasing cycle starting now."
+    ),
+    "clinical_trial_phase3_start": (
+        "Scale-up manufacturing needed in 12-18 months. "
+        "Decision makers setting budgets."
+    ),
+    "clinical_trial": (
+        "Process development scale-up beginning — "
+        "18-24 month equipment horizon."
+    ),
+    "fda_510k": (
+        "New device/process qualification — "
+        "equipment vendor decisions being made."
+    ),
+    "fda_warning_letter": (
+        "Compliance upgrade required — urgent equipment review cycle."
+    ),
+    "ema_approval": (
+        "European commercial launch — facility equipment procurement starting."
+    ),
+}
+
+BIOPROCESS_KEYWORDS: set[str] = {
+    "bioreactor", "upstream", "downstream", "tff", "tangential flow",
+    "chromatography", "filtration", "cell culture", "fermentation",
+    "single-use", "biologics manufacturing", "biomanufacturing",
+    "cdmo", "contract manufacturing", "bioprocess", "fill-finish",
+    "purification", "harvest", "clarification",
+}
+
 
 # ── Domain models ──────────────────────────────────────────────────────
 
@@ -350,6 +414,7 @@ class SignalRadarCapability(BaseCapability):
         user_context = await self._build_user_context(user_id)
         for signal in all_signals:
             signal.relevance_score = await self.score_relevance(signal, user_context)
+            self._add_deal_implication(signal)
 
         # Deduplicate
         deduped = self._deduplicate_signals(all_signals)
@@ -357,10 +422,21 @@ class SignalRadarCapability(BaseCapability):
         # Sort by relevance descending
         deduped.sort(key=lambda s: s.relevance_score, reverse=True)
 
-        # Store in market_signals and create alerts for high-relevance
+        # Store in market_signals, cascade to downstream systems
+        from src.services.signal_cascade_service import SignalCascadeService
+
         client = SupabaseClient.get_client()
+        cascade = SignalCascadeService()
         for signal in deduped:
             self._store_market_signal(client, user_id, signal)
+            try:
+                await cascade.cascade(signal.model_dump(), user_id)
+            except Exception as exc:
+                logger.warning(
+                    "Signal cascade failed for %s: %s",
+                    signal.company_name,
+                    exc,
+                )
 
         high_relevance = [s for s in deduped if s.relevance_score >= 0.7]
         if high_relevance:
@@ -449,6 +525,40 @@ class SignalRadarCapability(BaseCapability):
             score += 0.05
 
         return min(1.0, score)
+
+    def _is_cdmo_bioprocess_relevant(self, signal: Signal) -> float:
+        """Score a signal's relevance to a bioprocessing equipment seller's ICP.
+
+        Checks for bioprocess-specific keywords in the headline/summary and
+        the signal type's buying-signal boost value.
+
+        Returns:
+            Float in [0.0, 1.0] representing buying-signal relevance.
+        """
+        text = f"{signal.headline} {signal.summary}".lower()
+
+        keyword_score = sum(0.1 for kw in BIOPROCESS_KEYWORDS if kw in text)
+        keyword_score = min(keyword_score, 0.5)  # Cap keyword boost
+
+        type_boost = BUYING_SIGNAL_BOOSTS.get(signal.signal_type, 0.0)
+
+        return min(keyword_score + type_boost, 1.0)
+
+    def _add_deal_implication(self, signal: Signal) -> None:
+        """Enrich a signal with buying-signal metadata and deal implications.
+
+        Mutates ``signal.metadata`` in place to add:
+        - ``buying_signal_score``: float (0-1) from buying signal analysis
+        - ``deal_implication``: str with human-readable deal context
+        - ``lead_relevance_score``: same as buying_signal_score for cascade use
+        """
+        buying_score = self._is_cdmo_bioprocess_relevant(signal)
+        signal.metadata["buying_signal_score"] = buying_score
+        signal.metadata["lead_relevance_score"] = buying_score
+
+        implication = REGULATORY_DEAL_IMPLICATIONS.get(signal.signal_type, "")
+        if implication:
+            signal.metadata["deal_implication"] = implication
 
     async def detect_implications(
         self, signal: Signal, knowledge_context: dict[str, Any]
@@ -1314,15 +1424,25 @@ class SignalRadarCapability(BaseCapability):
     # ── Helper methods ───────────────────────────────────────────────
 
     async def _get_monitored_entities(self, user_id: str) -> list[dict[str, Any]]:
-        """Fetch active monitored entities for a user.
+        """Fetch monitored entities plus prospect/ICP entities for a user.
+
+        Sources:
+        1. monitored_entities table (explicitly tracked competitors/topics)
+        2. discovered_leads (prospects already in pipeline)
+        3. lead_memories (active leads)
+        4. lead_icp_profiles (ICP sector keywords for broad scanning)
 
         Args:
             user_id: User UUID.
 
         Returns:
-            List of entity dicts from monitored_entities table.
+            Deduplicated list of entity dicts with entity_name, entity_type.
         """
         client = SupabaseClient.get_client()
+        entities: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
+
+        # 1. Monitored entities (explicit)
         try:
             resp = (
                 client.table("monitored_entities")
@@ -1331,10 +1451,88 @@ class SignalRadarCapability(BaseCapability):
                 .eq("is_active", True)
                 .execute()
             )
-            return resp.data or []
+            for e in resp.data or []:
+                name_lower = (e.get("entity_name") or "").lower()
+                if name_lower and name_lower not in seen_names:
+                    seen_names.add(name_lower)
+                    entities.append(e)
         except Exception as exc:
             logger.warning("Failed to fetch monitored entities: %s", exc)
-            return []
+
+        # 2. Discovered leads (prospect companies)
+        try:
+            leads_resp = (
+                client.table("discovered_leads")
+                .select("company_name")
+                .eq("user_id", user_id)
+                .limit(20)
+                .execute()
+            )
+            for lead in leads_resp.data or []:
+                name = lead.get("company_name", "")
+                if name and name.lower() not in seen_names:
+                    seen_names.add(name.lower())
+                    entities.append(
+                        {
+                            "entity_name": name,
+                            "entity_type": "company",
+                            "monitoring_config": {},
+                        }
+                    )
+        except Exception as exc:
+            logger.warning("Failed to fetch discovered_leads for radar: %s", exc)
+
+        # 3. Active leads from lead_memories
+        try:
+            lm_resp = (
+                client.table("lead_memories")
+                .select("company_name")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .limit(20)
+                .execute()
+            )
+            for lm in lm_resp.data or []:
+                name = lm.get("company_name", "")
+                if name and name.lower() not in seen_names:
+                    seen_names.add(name.lower())
+                    entities.append(
+                        {
+                            "entity_name": name,
+                            "entity_type": "company",
+                            "monitoring_config": {},
+                        }
+                    )
+        except Exception as exc:
+            logger.warning("Failed to fetch lead_memories for radar: %s", exc)
+
+        # 4. ICP sector keywords (broad scanning for new leads)
+        try:
+            icp_resp = (
+                client.table("lead_icp_profiles")
+                .select("icp_data")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if icp_resp.data:
+                icp_data = (icp_resp.data[0].get("icp_data") or {})
+                icp_industries = icp_data.get("industry", [])
+                icp_therapeutic = icp_data.get("therapeutic_areas", [])
+                for term in icp_industries + icp_therapeutic:
+                    if term and term.lower() not in seen_names:
+                        seen_names.add(term.lower())
+                        entities.append(
+                            {
+                                "entity_name": term,
+                                "entity_type": "topic",
+                                "monitoring_config": {},
+                            }
+                        )
+        except Exception as exc:
+            logger.warning("Failed to fetch ICP profiles for radar: %s", exc)
+
+        return entities
 
     async def _update_last_checked(self, user_id: str) -> None:
         """Update last_checked_at on all active monitored entities.
