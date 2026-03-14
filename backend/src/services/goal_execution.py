@@ -2497,17 +2497,24 @@ class GoalExecutionService:
 
             try:
                 # BUG FIX 4: Check for existing lead (deduplication)
-                existing = (
+                # Query all user leads and filter in Python for case-insensitive match
+                all_user_leads = (
                     self._db.table("discovered_leads")
-                    .select("id, fit_score")
+                    .select("id, fit_score, company_name")
                     .eq("user_id", user_id)
-                    .ilike("company_name", company_name)
-                    .limit(1)
                     .execute()
                 )
 
-                if existing.data:
-                    existing_lead = existing.data[0]
+                # Find existing lead with case-insensitive company name match
+                existing_lead = None
+                if all_user_leads.data:
+                    company_name_lower = company_name.lower()
+                    for lead in all_user_leads.data:
+                        if lead.get("company_name", "").lower() == company_name_lower:
+                            existing_lead = lead
+                            break
+
+                if existing_lead:
                     existing_score = existing_lead.get("fit_score", 0)
                     if fit_score > existing_score:
                         # Update with better data
